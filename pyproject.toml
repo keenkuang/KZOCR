@@ -1,0 +1,20 @@
+[project]
+name = "kzocr"
+version = "0.1.0"
+description = "KZOCR — 整合 kimi OCR 引擎 + zai 校对台，并将最终文档送入 kHUB"
+requires-python = ">=3.10"
+dependencies = [
+    # 真实引擎依赖（MinerU/PaddleOCR/torch/LLM）在运行环境另行安装。
+    # KZOCR 编排层仅用 Python 标准库（sqlite3 / urllib / argparse / dataclasses），
+    # 无需额外 pip 依赖即可跑通 mock → 适配器 → kHUB 推送 全链路。
+]
+
+[project.scripts]
+kzocr = "kzocr.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["kzocr*"]

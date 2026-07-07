@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# KZOCR 运行时产物
+out/
+exports/
+*.log
+
+# 本地子模块（按需通过 scripts/setup_submodules.sh 拉取）
+engines/
+console/

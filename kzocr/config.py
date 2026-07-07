@@ -1,0 +1,67 @@
+"""KZOCR 配置：路径与环境变量。
+
+本地开发时可直接指向已存在的两个项目目录，无需 clone 子模块：
+    export KIMI_ENGINE_DIR=/home/keen/kimi_agent_ocr/tcm_ocr_system_v1.1
+    export ZAI_DIR=/home/keen/tcm_ocr_zai
+    export KHUB_BASE_URL=http://127.0.0.1:8000
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+
+@dataclass
+class Config:
+    # kimi OCR 引擎包所在目录（含 tcm_ocr/ 包）
+    kimi_engine_dir: str = ""
+    # zai 控制台项目目录（其 SQLite 库在 <zai_dir>/db/custom.db）
+    zai_dir: str = ""
+    # zai 的 Prisma/SQLite 数据库文件路径
+    zai_db: str = ""
+    # kHUB 服务基址（其 API 新增了 POST /documents）
+    khub_base_url: str = "http://127.0.0.1:8000"
+    # kHUB 本地数据库（用于自检，可选）
+    khub_db: str = ""
+    # 是否强制使用 mock 引擎（KZOCR_USE_MOCK=1）
+    use_mock: bool = False
+    # 真实引擎失败时是否抛错而非降级（KZOCR_REQUIRE_REAL=1）
+    require_real: bool = False
+
+    @classmethod
+    def from_env(cls) -> "Config":
+        kimi = os.environ.get("KIMI_ENGINE_DIR", "/home/keen/kimi_agent_ocr/tcm_ocr_system_v1.1")
+        zai = os.environ.get("ZAI_DIR", "/home/keen/tcm_ocr_zai")
+        zai_db = os.environ.get("ZAI_DB", os.path.join(zai, "db", "custom.db"))
+        khub_db = os.environ.get(
+            "KHUB_DB",
+            os.path.expanduser(os.environ.get("KHUB_DB", "~/.khub/khub.db")),
+        )
+        return cls(
+            kimi_engine_dir=kimi,
+            zai_dir=zai,
+            zai_db=zai_db,
+            khub_base_url=os.environ.get("KHUB_BASE_URL", "http://127.0.0.1:8000"),
+            khub_db=khub_db,
+        )
+
+
+# 常用默认值
+KIMI_ENGINE_PKG = "tcm_ocr"  # kimi 引擎 Python 包名
+
+
+def load_config() -> "Config":
+    """读取环境变量并构造 Config 单例。
+
+    除 from_env() 已有字段外，额外识别：
+        KZOCR_USE_MOCK    → use_mock（是否强制 mock 引擎）
+        KZOCR_REQUIRE_REAL → require_real（真实失败是否抛错）
+    """
+    cfg = Config.from_env()
+    cfg.use_mock = os.environ.get("KZOCR_USE_MOCK", "0") in ("1", "true", "True")
+    cfg.require_real = os.environ.get("KZOCR_REQUIRE_REAL", "0") in ("1", "true", "True")
+    return cfg
+
+
+# Module-level singleton used by the engine layer
+config = load_config()

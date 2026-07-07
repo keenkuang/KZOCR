@@ -1,0 +1,9 @@
+[submodule "engines/kimi-tcm-ocr"]
+	path = engines/kimi-tcm-ocr
+	url = git@github.com:keenkuang/kimi_agent_ocr.git
+	branch = master
+
+[submodule "console/tcm-ocr-zai"]
+	path = console/tcm-ocr-zai
+	url = git@github.com:keenkuang/tcm_ocr.git
+	branch = master
