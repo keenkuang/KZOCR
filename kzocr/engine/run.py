@@ -54,6 +54,7 @@ def _build_engine_config() -> dict:
     }
     return {
         "book_library_dir": os.environ.get("KZOCR_ENGINE_LIB_DIR", "/home/keen/kzocr_engine_lib"),
+        "output_dir": os.environ.get("KZOCR_ENGINE_OUTPUT_DIR", "/home/keen/kzocr_engine_lib/results"),
         "pg_dsn": os.environ.get("KZOCR_PG_DSN", ""),
         "engine_configs": {"cloud_llm": cloud_llm},
         "gpu_device_map": os.environ.get("KZOCR_GPU_MAP", "auto"),
