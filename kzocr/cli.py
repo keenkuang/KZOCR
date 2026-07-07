@@ -29,6 +29,9 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     cfg = load_config()
     if args.db:
         cfg.zai_db = args.db
+    else:
+        # 未指定 --db 时落到本地隔离库，避免污染/误读真实 zai 控制台库
+        cfg.zai_db = "kzocr.db"
     log.info("运行引擎：%s", args.pdf)
     book = engine_run.run_engine(args.pdf, book_code=args.book_code, config=cfg)
     result = push_book_to_zai(book, db_path=cfg.zai_db, skip_prisma_marker=True)
