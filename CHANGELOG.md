@@ -131,13 +131,13 @@ TCM_OCR_CLOUD_LLM_API_KEY / TCM_OCR_CLOUD_LLM_BASE_URL / TCM_OCR_CLOUD_LLM_MODEL
 | 纯文本 | `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | 推理强化 |
 | 纯文本 | `PaddlePaddle/PaddleOCR-VL-1.5` | 文字校对 |
 
-### z.ai 智谱（`https://api.z.ai/v1`）
+### z.ai（`https://api.z.ai/api/paas/v4`）
 
 | 类型 | 模型名（全小写） | 用途 | Key 状态 |
 |------|-----------------|------|---------|
-| 视觉 VLM | `glm-4.6v-flash` | 免费图文识别 | ❓ 需独立 key |
-| 纯文本 | `glm-4.7-flash` | 免费文本校对 | ❓ 需独立 key |
-| 纯文本 | `glm-z1-flash` | 免费文本校对 | ❓ 需独立 key |
+| 视觉 VLM | `glm-4.6v-flash` | 免费图文识别 | ✅ `78184ed8…BrliYI3atOniwJzc` 已测通 |
+| 纯文本 | `glm-4.7-flash` | 免费文本校对 | ✅ 同上 |
+| 纯文本 | `glm-z1-flash` | 免费文本校对 | ✅ 同上 |
 
 ### 智谱主站（`https://open.bigmodel.cn/api/paas/v4`）
 
