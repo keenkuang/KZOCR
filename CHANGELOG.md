@@ -64,6 +64,10 @@
 | **PP-OCRv6 速度** | 发现 4 分钟/页是 PaddleOCR v3.7 `predict()` 错误用法所致。改用 **MinerU 的 PytorchPaddleOCR** 后端，`ocr(img, det=False)` 每行 **0.05 秒**，一页 50 行约 **2.5 秒**（非 4 分钟） |
 | **paddleocr_adapter.py** | 重写 `_init_engine`：优先走 MinerU shared model pool（`custom_model_init`），降级走 standalone PaddleOCR；`_init_standalone` 备用；`recognize` 改用 `PytorchPaddleOCR.ocr()` 解析格式 |
 
+### 云端 API 配置（2026-07-08 04:58）
+
+硅基流动 API key 已测试可用。云端 API 配置速查见下文。
+
 ---
 
 ## 配置速查
@@ -94,4 +98,35 @@ KZOCR_LLM_BASE_URL      # 云端 LLM Base URL
 KZOCR_LLM_MODEL         # 云端 LLM 模型名
 GLM_API_KEY / GLM_API_BASE / GLM_MODEL / CLOUD_LLM_PRIMARY  # 引擎内部 LLM 配置
 TCM_OCR_CLOUD_LLM_API_KEY / TCM_OCR_CLOUD_LLM_BASE_URL / TCM_OCR_CLOUD_LLM_MODEL  # 交付物 LLM 配置
+
+## 云端 API 配置
+
+### 硅基流动（`https://api.siliconflow.cn/v1`）
+
+| 类型 | 模型名（严格大小写） | 用途 |
+|------|---------------------|------|
+| 视觉 VLM | `Qwen/Qwen3.5-4B` | 通用图文理解 |
+| 文档 OCR | `deepseek-ai/DeepSeek-OCR` | 文字提取 |
+| 文档 OCR | `PaddlePaddle/PaddleOCR-VL-1.5` | 飞桨文档 VL |
+| 纯文本 | `THUDM/GLM-4-9B-0414` | 文字校对 |
+| 纯文本 | `THUDM/GLM-Z1-9B-0414` | 文字校对 |
+| 纯文本 | `Qwen/Qwen2.5-7B-Instruct` | 文字校对 |
+| 纯文本 | `Qwen/Qwen3-8B` | 文字校对 |
+| 纯文本 | `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | 推理强化 |
+| 纯文本 | `PaddlePaddle/PaddleOCR-VL-1.5` | 文字校对 |
+
+### z.ai 智谱（`https://api.z.ai/v1`）
+
+| 类型 | 模型名（全小写） | 用途 |
+|------|-----------------|------|
+| 视觉 VLM | `glm-4.6v-flash` | 免费图文识别 |
+| 纯文本 | `glm-4.7-flash` | 免费文本校对 |
+| 纯文本 | `glm-z1-flash` | 免费文本校对 |
+
+### 智谱主站（`https://open.bigmodel.cn/api/paas/v4`）
+
+| 类型 | 模型名（大写标准） | 用途 |
+|------|------------------|------|
+| 视觉 VLM | `GLM-4.6V-Flash` | 图文识别 |
+| 纯文本 | `GLM-4.7-Flash` | 文本校对 |
 ```
