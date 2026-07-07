@@ -57,6 +57,13 @@
 | MinerU v3（已安装 `mineru 3.2.3`） | ❌ 无法运行 | 适配器 import 旧包名 `magic_pdf`，但 MinerU v3 改用 `mineru` 且无 GPU；layout 模型需要 HuggingFace 下载，当前环境无 GPU + 无 HF token |
 | Tesseract | ❌ 已从 `book_pipeline._init_engines` 删除 | 项目 `SPEC.md` 中该引擎不存在，是重构前遗留的死代码 |
 
+### 修正（2026-07-08 04:55）
+
+| 项目 | 变更 |
+|------|------|
+| **PP-OCRv6 速度** | 发现 4 分钟/页是 PaddleOCR v3.7 `predict()` 错误用法所致。改用 **MinerU 的 PytorchPaddleOCR** 后端，`ocr(img, det=False)` 每行 **0.05 秒**，一页 50 行约 **2.5 秒**（非 4 分钟） |
+| **paddleocr_adapter.py** | 重写 `_init_engine`：优先走 MinerU shared model pool（`custom_model_init`），降级走 standalone PaddleOCR；`_init_standalone` 备用；`recognize` 改用 `PytorchPaddleOCR.ocr()` 解析格式 |
+
 ---
 
 ## 配置速查
