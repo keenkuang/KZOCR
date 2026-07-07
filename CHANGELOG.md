@@ -76,6 +76,14 @@
 | 引擎注册 | `book_pipeline._init_engines` + `KZOCR _build_engine_config` |
 | 模型 | ONNX PP-OCRv4（自动缓存） |
 
+### UniRec 适配器（2026-07-08 06:55）
+
+| 项目 | 说明 |
+|------|------|
+| 新文件 | `tcm_ocr/core/engines/unirec_adapter.py` |
+| 模型 | `unirec_encoder.onnx` + `unirec_decoder.onnx`（`/home/keen/unirec_0_1b_onnx/`） |
+| 状态 | 结构正确，推理耗时 2.8s/行；预处理需调参（当前输出为语言先验幻觉，图片特征未正确传入） |
+
 ---
 
 ## 配置速查

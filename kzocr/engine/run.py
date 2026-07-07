@@ -61,6 +61,7 @@ def _build_engine_config() -> dict:
                 "use_gpu": os.environ.get("KZOCR_PADDLE_GPU", "0") in ("1", "true", "True"),
             },
             "rapidocr": {"enabled": True},
+            "unirec": {"enabled": True},
             "shizhengpt": {"enabled": False},
             "mineru": {"enabled": False},
             "tesseract": {"enabled": False},
