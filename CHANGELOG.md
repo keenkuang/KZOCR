@@ -68,6 +68,14 @@
 
 硅基流动 API key 已测试可用。云端 API 配置速查见下文。
 
+### RapidOCR 适配器（2026-07-08 06:50）
+
+| 项目 | 说明 |
+|------|------|
+| 新文件 | `tcm_ocr/core/engines/rapidocr_adapter.py` |
+| 引擎注册 | `book_pipeline._init_engines` + `KZOCR _build_engine_config` |
+| 模型 | ONNX PP-OCRv4（自动缓存） |
+
 ---
 
 ## 配置速查
