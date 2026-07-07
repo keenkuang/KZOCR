@@ -1,0 +1,83 @@
+# KZOCR 变更日志
+
+> 文档版本：v2026-07-07T23:30+08
+> 最后更新：2026-07-07 23:30 CST
+
+---
+
+## v2026-07-07 — 全链路打通
+
+### 日期：2026-07-07 18:00 ~ 23:30 CST
+
+#### KZOCR 仓库（`/home/keen/KZOCR`）
+
+| 时间 | 改动 | 文件 | 说明 |
+|------|------|------|------|
+| 18:00 | 修复 cli ↔ engine 调用断点 | `cli.py`, `engine/run.py`, `config.py` | `write_book_to_zai` → `push_book_to_zai`；`Config.from_env()` → `load_config()`；pipeline/smoke 默认使用隔离 DB |
+| 18:10 | 对齐 engine 到真实 BookPipeline 接口 | `engine/run.py` | `run_book` → `run_engine`，加 `book_code`/`config` 参数；`_run_real` 调用 `BookPipeline(config).process_book(pdf, book_id)`；新增 `_build_engine_config()` 从环境变量构造配置字典 |
+| 18:20 | 补齐 engine_configs 结构 | `engine/run.py` | 传入完整的 `engine_configs`（paddleocr / shizhengpt / mineru / tesseract / cloud_llm） |
+| 18:30 | 测试 & git 初始化 | `tests/test_pipeline.py`, `.gitignore` | 新增 4 个回归测试；忽略 `*.db` 运行时产物 |
+| 18:40 | smoke 冒烟通过 ✅ | — | `python -m kzocr.cli smoke --skip-push` 全流程通过 |
+
+#### kimi 引擎仓库（`/home/keen/kimi_agent_ocr/tcm_ocr_system_v1.1`）
+
+| 时间 | 改动 | 文件 | 说明 |
+|------|------|------|------|
+| 19:20 | 修复 PaddleOCR 引擎 import | `tcm_ocr/pipeline/book_pipeline.py` | `_init_engines`: `tcm_ocr.ocr.paddle_engine.PaddleOCREngine` → `tcm_ocr.core.engines.paddleocr_adapter.PaddleOCRAdapter`（构造参数 `device`） |
+| 19:20 | 修复 MinerU 引擎 import | `tcm_ocr/pipeline/book_pipeline.py` | `tcm_ocr.ocr.mineru_engine.MinerUEngine` → `tcm_ocr.core.engines.mineru_adapter.MinerUAdapter` |
+| 19:20 | 修复 云端 LLM 引擎 import | `tcm_ocr/pipeline/book_pipeline.py` | `tcm_ocr.ocr.cloud_llm_engine.CloudLLMEngine` → `tcm_ocr.llm.cloud.cloud_llm.CloudLLMClient`（无参构造） |
+| 19:20 | 补 page_pipeline 缺失 import | `tcm_ocr/pipeline/page_pipeline.py` | 添加 `import json`（`json` 未定义 bug） |
+| 19:25 | 补 page_pipeline 缺失 datetime import | `tcm_ocr/pipeline/page_pipeline.py` | `import datetime` → `from datetime import datetime`（`module 'datetime' has no attribute 'now'` bug） |
+| 19:30 | 修 engine.recognize 返回值解包 | `tcm_ocr/pipeline/page_pipeline.py` | 适配器返回 `str`，原代码要求 `(text, confidence)` tuple，改为兼容两者 |
+| 19:30 | 防止本地 LLM 模型在线下载 | `tcm_ocr/pipeline/deliverables.py` | `_call_local_llm` 增加模型目录存在性检查，不存在则立即报错，不触发 HuggingFace 下载 |
+| 19:45 | 修复 PaddleOCR 初始化参数 | `tcm_ocr/core/engines/paddleocr_adapter.py` | 去掉 `show_log`、`use_gpu`、`gpu_id`、`enable_mkldnn`、`use_angle_cls`（PaddleOCR v3.7 不支持）；改用 `paddle.set_device()` + `PaddleOCR(lang='ch')` |
+| 20:00 | 适配 PaddleOCR v3.7 API | `tcm_ocr/core/engines/paddleocr_adapter.py` | `ocr.ocr(img, det=False, cls=False)` → `ocr.predict(img, use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False, text_det_limit_side_len=0)` |
+| 20:00 | 限制裁剪行宽度防止 OneDNN 崩溃 | `tcm_ocr/core/engines/paddleocr_adapter.py` | 添加 `_max_rec_width = 2048`，对超宽行等比缩放 |
+| 20:10 | CloudLLMClient 兼容 page_pipeline 调用 | `tcm_ocr/llm/cloud/cloud_llm.py` | 添加 `generate(prompt, max_tokens, temperature)` 方法；`_call_glm` 中 `GLM_MODEL` 环境变量覆写模型名 |
+| 20:15 | 交付物内容回退机制 | `tcm_ocr/pipeline/deliverables.py` | `_build_final_doc_from_book_db`: `content_node` 为空时从 `proofread_record` 读行级文本 |
+| 20:15 | 修复 image_path 列名 | `tcm_ocr/pipeline/deliverables.py` | `_load_disputed_lines` SQL 中删除不存在的 `image_path` 列 |
+| 20:15 | 修复 formula_ingredient Row.get | `tcm_ocr/pipeline/deliverables.py` | `ing_cursor.fetchall()` 的 `r.get()` → 先 `dict(r)` 再 `.get()` |
+| 20:20 | 云端 LLM 模型名环境变量 | `tcm_ocr/pipeline/deliverables.py` | `_call_cloud_llm` 中 hardcode `"qwen-max"` → `os.environ.get("TCM_OCR_CLOUD_LLM_MODEL", "qwen-max")` |
+
+#### 运行验证记录
+
+| 时间 | 验证 | 结果 |
+|------|------|------|
+| 18:50 | `kzocr smoke --skip-push`（mock 全链路） | ✅ 通过 |
+| 19:28 | 真实引擎首次调通（样本 PDF） | ✅ 导入正确，PaddleOCR 识别 3 行 |
+| 20:20 | 本地 LLM 快速降级验证 | ✅ body.md 写出（空内容，因无 LLM 争议未解决） |
+| 20:29 | 云端 LLM（agnes-2.0-flash）HTTP 200 | ✅ 云端 LLM 连接成功 |
+| 21:00 | 真实 TCM 书页 `page_0969.webp` 识别 | ✅ body.md 有内容（81 行原始 OCR 文本） |
+| 21:30 | 内容回退 proofread_record → body.md | ✅ 49 行收录，39 行入 final_doc content |
+
+---
+
+## 配置速查
+
+```bash
+# === 最小运行（mock）===
+kzocr smoke --skip-push
+
+# === 真实 PaddleOCR（CPU，~4 分/页）===
+KZOCR_PADDLE_GPU=0 KZOCR_USE_MOCK=0 kzocr pipeline <pdf>
+
+# === 真实 PaddleOCR + 云端 LLM 校对 ===
+KZOCR_PADDLE_GPU=0 KZOCR_USE_MOCK=0 \
+  KZOCR_LLM_ENABLED=1 \
+  GLM_API_KEY=sk-xxx \
+  GLM_API_BASE=https://your-api/v1 \
+  GLM_MODEL=agnes-2.0-flash \
+  kzocr pipeline <pdf>
+
+# === 环境变量参考 ===
+KZOCR_PADDLE_GPU        # 1=GPU，0=CPU（默认 0）
+KZOCR_ENGINE_LIB_DIR    # 引擎工作目录（默认 /home/keen/kzocr_engine_lib）
+KZOCR_ENGINE_OUTPUT_DIR # 交付物输出目录
+KZOCR_PG_DSN            # PostgreSQL DSN（空则禁用）
+KZOCR_LLM_ENABLED       # 1 启用 LLM 校对
+KZOCR_LLM_API_KEY       # 云端 LLM API Key
+KZOCR_LLM_BASE_URL      # 云端 LLM Base URL
+KZOCR_LLM_MODEL         # 云端 LLM 模型名
+GLM_API_KEY / GLM_API_BASE / GLM_MODEL / CLOUD_LLM_PRIMARY  # 引擎内部 LLM 配置
+TCM_OCR_CLOUD_LLM_API_KEY / TCM_OCR_CLOUD_LLM_BASE_URL / TCM_OCR_CLOUD_LLM_MODEL  # 交付物 LLM 配置
+```
