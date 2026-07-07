@@ -50,6 +50,13 @@
 | 21:00 | 真实 TCM 书页 `page_0969.webp` 识别 | ✅ body.md 有内容（81 行原始 OCR 文本） |
 | 21:30 | 内容回退 proofread_record → body.md | ✅ 49 行收录，39 行入 final_doc content |
 
+### 后续验证（2026-07-07 23:35）
+
+| 项目 | 结果 | 原因 |
+|------|------|------|
+| MinerU v3（已安装 `mineru 3.2.3`） | ❌ 无法运行 | 适配器 import 旧包名 `magic_pdf`，但 MinerU v3 改用 `mineru` 且无 GPU；layout 模型需要 HuggingFace 下载，当前环境无 GPU + 无 HF token |
+| Tesseract | ❌ 已从 `book_pipeline._init_engines` 删除 | 项目 `SPEC.md` 中该引擎不存在，是重构前遗留的死代码 |
+
 ---
 
 ## 配置速查
