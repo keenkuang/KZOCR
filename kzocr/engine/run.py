@@ -56,7 +56,15 @@ def _build_engine_config() -> dict:
         "book_library_dir": os.environ.get("KZOCR_ENGINE_LIB_DIR", "/home/keen/kzocr_engine_lib"),
         "output_dir": os.environ.get("KZOCR_ENGINE_OUTPUT_DIR", "/home/keen/kzocr_engine_lib/results"),
         "pg_dsn": os.environ.get("KZOCR_PG_DSN", ""),
-        "engine_configs": {"cloud_llm": cloud_llm},
+        "engine_configs": {
+            "paddleocr": {
+                "use_gpu": os.environ.get("KZOCR_PADDLE_GPU", "0") in ("1", "true", "True"),
+            },
+            "shizhengpt": {"enabled": False},
+            "mineru": {"enabled": False},
+            "tesseract": {"enabled": False},
+            "cloud_llm": cloud_llm,
+        },
         "gpu_device_map": os.environ.get("KZOCR_GPU_MAP", "auto"),
         "term_kb_path": os.environ.get("KZOCR_TERM_KB_PATH", ""),
         "publisher_bonus": float(os.environ.get("KZOCR_PUBLISHER_BONUS", "0.02")),
