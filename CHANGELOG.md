@@ -84,7 +84,14 @@
 | 模型 | `unirec_encoder.onnx` + `unirec_decoder.onnx`（`/home/keen/unirec_0_1b_onnx/`） |
 | 状态 | 结构正确，推理耗时 2.8s/行；预处理需调参（当前输出为语言先验幻觉，图片特征未正确传入） |
 
-### PaddleOCR-VL-1.6 GGUF 适配器（2026-07-08 08:20）
+### MinerU v3 适配器接入（2026-07-08 08:45）
+
+| 项目 | 说明 |
+|------|------|
+| 文件 | `tcm_ocr/core/engines/mineru_adapter.py`（重写） |
+| Layout | 全页 PytorchPaddleOCR 检测，45 blocks，5s/页（CPU） |
+| OCR 识别 | 共享 MinerU 模型池，0.076s/行 |
+| KZOCR 配置 | 默认启用 (`enabled: True`) |
 
 | 项目 | 说明 |
 |------|------|

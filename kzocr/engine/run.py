@@ -64,7 +64,7 @@ def _build_engine_config() -> dict:
             "unirec": {"enabled": True},
             "paddleocr_vl16": {"enabled": False, "auto_start": False},
             "shizhengpt": {"enabled": False},
-            "mineru": {"enabled": False},
+            "mineru": {"enabled": True, "use_gpu": False},
             "tesseract": {"enabled": False},
             "cloud_llm": cloud_llm,
         },
