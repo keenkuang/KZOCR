@@ -82,7 +82,9 @@
 | `deepseek-ai/DeepSeek-V4-Pro` | 推理 | 45次 | ✅ |
 | `deepseek-ai/DeepSeek-V4-Flash` | 推理 | 45次 | ✅ |
 | `moonshotai/Kimi-K2.6:DashScope` | 文本 | 45次 | ✅ |
-| Key: `ms-40d78a2b-f786-433a-92e3-8e5f4049f602` | | | |
+| Key: `ms-40d78a2b-f786-433a-92e3-8e5f4049f602`
+
+**自动故障转移客户端**: `kzocr/modelscope_pool.py` — `ModelScopePool` 类，10 个模型逐个重试，失败自动切换下一个。 | | |
 | 说明 | 注册地址：`modelscope.cn/my/accountsettings`，完成实名后在 `api-inference.modelscope.cn/v1` 使用 |
 
 | 平台 | 端点 | 模型名 | Key 状态 |
