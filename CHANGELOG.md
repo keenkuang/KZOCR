@@ -108,7 +108,16 @@
 | 模型 | `unirec_encoder.onnx` + `unirec_decoder.onnx`（`/home/keen/unirec_0_1b_onnx/`） |
 | 状态 | 结构正确，推理耗时 2.8s/行；预处理需调参（当前输出为语言先验幻觉，图片特征未正确传入） |
 
-### MinerU v3 适配器接入（2026-07-08 08:45）
+### ShizhenGPT-7B-VL 适配器（2026-07-08 09:05）
+
+| 项目 | 说明 |
+|------|------|
+| 新文件 | `tcm_ocr/core/engines/shizhengpt_adapter.py` |
+| 模型 | `ShizhenGPT-7B-VL.i1-Q4_K_M.gguf` (4.4GB) + `mmproj` (817MB) |
+| 默认 | 禁用（`enabled: False`） |
+| 端口 | 18083 |
+
+### MinerU v3 适配器接入
 
 | 项目 | 说明 |
 |------|------|
