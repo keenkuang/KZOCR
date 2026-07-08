@@ -72,7 +72,7 @@
 
 | 平台 | 端点 | 模型示例 | Key 状态 |
 |------|------|----------|---------|
-| **ModelScope** | `https://api-inference.modelscope.cn/v1` | `ZhipuAI/GLM-5.2` | ⚠ 需要 Aliyun 实名认证（返回 403），key 格式正确但未生效 |
+| **ModelScope** | `https://api-inference.modelscope.cn/v1` | `ZhipuAI/GLM-5.2` | ✅ 已测通（HTTP 200） |
 | 说明 | 注册地址：`modelscope.cn/my/accountsettings`，完成实名后在 `api-inference.modelscope.cn/v1` 使用 |
 
 | 平台 | 端点 | 模型名 | Key 状态 |
