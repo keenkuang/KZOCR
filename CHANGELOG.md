@@ -70,19 +70,19 @@
 
 ### ModelScope（`https://api-inference.modelscope.cn/v1`）
 
-| 模型 ID | 状态 |
-|---------|------|
-| `ZhipuAI/GLM-5.2` | ✅ | 
-| `ZhipuAI/GLM-4.7-Flash` | ✅ |
-| `ZhipuAI/GLM-4.7:DashScope` | ✅ |
-| `Qwen/Qwen3.5-35B-A3B` | ✅ |
-| `Qwen/Qwen3.5-27B` | ✅ |
-| `Qwen/Qwen3.5-122B-A10B` | ✅ |
-| `Qwen/Qwen3.5-397B-A17B` | ✅ |
-| `deepseek-ai/DeepSeek-V4-Pro` | ✅ |
-| `deepseek-ai/DeepSeek-V4-Flash` | ✅ |
-| `moonshotai/Kimi-K2.6:DashScope` | ✅ |
-| Key: `ms-40d78a2b-f786-433a-92e3-8e5f4049f602` |
+| 模型 ID | 类型 | 每日限额 | 状态 |
+|---------|------|---------|------|
+| `ZhipuAI/GLM-5.2` | 文本 | 45次 | ✅ | 
+| `ZhipuAI/GLM-4.7-Flash` | 文本 | 45次 | ✅ |
+| `ZhipuAI/GLM-4.7:DashScope` | 文本 | 45次 | ✅ |
+| `Qwen/Qwen3.5-35B-A3B` | 文本 | 45次 | ✅ |
+| `Qwen/Qwen3.5-27B` | 文本 | 45次 | ✅ |
+| `Qwen/Qwen3.5-122B-A10B` | 文本 | 45次 | ✅ |
+| `Qwen/Qwen3.5-397B-A17B` | 文本 | 45次 | ✅ |
+| `deepseek-ai/DeepSeek-V4-Pro` | 推理 | 45次 | ✅ |
+| `deepseek-ai/DeepSeek-V4-Flash` | 推理 | 45次 | ✅ |
+| `moonshotai/Kimi-K2.6:DashScope` | 文本 | 45次 | ✅ |
+| Key: `ms-40d78a2b-f786-433a-92e3-8e5f4049f602` | | | |
 | 说明 | 注册地址：`modelscope.cn/my/accountsettings`，完成实名后在 `api-inference.modelscope.cn/v1` 使用 |
 
 | 平台 | 端点 | 模型名 | Key 状态 |
