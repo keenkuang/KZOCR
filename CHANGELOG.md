@@ -68,7 +68,12 @@
 
 硅基流动 API key 已测试可用。云端 API 配置速查见下文。
 
-### Ofox AI（2026-07-08 08:50）
+### ModelScope（2026-07-08 08:52）
+
+| 平台 | 端点 | 模型示例 | Key 状态 |
+|------|------|----------|---------|
+| **ModelScope** | `https://api-inference.modelscope.cn/v1` | `ZhipuAI/GLM-5.2` | ⚠ 需要 Aliyun 实名认证（返回 403），key 格式正确但未生效 |
+| 说明 | 注册地址：`modelscope.cn/my/accountsettings`，完成实名后在 `api-inference.modelscope.cn/v1` 使用 |
 
 | 平台 | 端点 | 模型名 | Key 状态 |
 |------|------|--------|---------|
