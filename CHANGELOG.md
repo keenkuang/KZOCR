@@ -77,7 +77,7 @@
 
 | 平台 | 端点 | 模型名 | Key 状态 |
 |------|------|--------|---------|
-| **Ofox AI** | `https://api.ofox.ai/v1` | `z-ai/glm-4.7-flash:free` | ⚠ 域名不通（Network unreachable），无法测试 |
+| **Ofox AI** | `https://api.ofox.io/v1` | `z-ai/glm-4.7-flash:free` | ✅ `ofox.ai` 国内受限，换 `ofox.io` 后连通（429 限流，key 有效） |
 | 说明 | 订阅帖子提到为免费第三方聚合，需解决网络访问后再测 |
 
 ### RapidOCR 适配器（2026-07-08 06:50）
