@@ -62,6 +62,7 @@ def _build_engine_config() -> dict:
             },
             "rapidocr": {"enabled": True},
             "unirec": {"enabled": True},
+            "paddleocr_vl16": {"enabled": False, "auto_start": False},
             "shizhengpt": {"enabled": False},
             "mineru": {"enabled": False},
             "tesseract": {"enabled": False},
