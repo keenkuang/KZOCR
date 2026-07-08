@@ -84,6 +84,16 @@
 | 模型 | `unirec_encoder.onnx` + `unirec_decoder.onnx`（`/home/keen/unirec_0_1b_onnx/`） |
 | 状态 | 结构正确，推理耗时 2.8s/行；预处理需调参（当前输出为语言先验幻觉，图片特征未正确传入） |
 
+### PaddleOCR-VL-1.6 GGUF 适配器（2026-07-08 08:20）
+
+| 项目 | 说明 |
+|------|------|
+| 新文件 | `tcm_ocr/core/engines/paddleocr_vl16_adapter.py` |
+| 后端 | llama-server（`/home/keen/llama.cpp/build/bin/llama-server`） |
+| 模型 | `PaddleOCR-VL-1.6-GGUF.gguf` (893MB) + `mmproj` (841MB) |
+| 默认 | 禁用（`enabled: False`），需显式启用 |
+| 启用方式 | 环境变量 `KZOCR_PADDLE_VL16_ENABLED=1` + `engine_configs` |
+
 ---
 
 ## 配置速查
