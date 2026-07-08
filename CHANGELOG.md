@@ -68,11 +68,21 @@
 
 硅基流动 API key 已测试可用。云端 API 配置速查见下文。
 
-### ModelScope（2026-07-08 08:52）
+### ModelScope（`https://api-inference.modelscope.cn/v1`）
 
-| 平台 | 端点 | 模型示例 | Key 状态 |
-|------|------|----------|---------|
-| **ModelScope** | `https://api-inference.modelscope.cn/v1` | `ZhipuAI/GLM-5.2` | ✅ 已测通（HTTP 200） |
+| 模型 ID | 状态 |
+|---------|------|
+| `ZhipuAI/GLM-5.2` | ✅ | 
+| `ZhipuAI/GLM-4.7-Flash` | ✅ |
+| `ZhipuAI/GLM-4.7:DashScope` | ✅ |
+| `Qwen/Qwen3.5-35B-A3B` | ✅ |
+| `Qwen/Qwen3.5-27B` | ✅ |
+| `Qwen/Qwen3.5-122B-A10B` | ✅ |
+| `Qwen/Qwen3.5-397B-A17B` | ✅ |
+| `deepseek-ai/DeepSeek-V4-Pro` | ✅ |
+| `deepseek-ai/DeepSeek-V4-Flash` | ✅ |
+| `moonshotai/Kimi-K2.6:DashScope` | ✅ |
+| Key: `ms-40d78a2b-f786-433a-92e3-8e5f4049f602` |
 | 说明 | 注册地址：`modelscope.cn/my/accountsettings`，完成实名后在 `api-inference.modelscope.cn/v1` 使用 |
 
 | 平台 | 端点 | 模型名 | Key 状态 |
