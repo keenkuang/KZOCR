@@ -35,6 +35,7 @@ def mock_book_result(book_code: str = "TCM-MOCK-001") -> BookResult:
                 EngineResult("engine3", "方用白术三钱，茯苓二钱。", 0.95, 200),
                 EngineResult("engine4", "方用白木三钱，茯芩二钱。", 0.88, 150),
             ],
+            crop_img_path=f"/mnt/source/{book_code}/page_001_line_001.png",
             proofreads=[
                 ProofreadRecord(
                     original_text="方用白木三钱，茯苓二钱。",
@@ -81,6 +82,7 @@ def mock_book_result(book_code: str = "TCM-MOCK-001") -> BookResult:
             glyph_verified="取足三里、合谷以调气和胃。",
             final="取足三里、合谷以调气和胃。",
             confidence=0.93,
+            crop_img_path=f"/mnt/source/{book_code}/page_002_line_001.png",
             engine_results=[
                 EngineResult("mineru", "取足三里、合谷以调气和胃。", 0.95, 130),
                 EngineResult("ppocr", "取足三裹、合谷以调气和胃。", 0.9, 85),
