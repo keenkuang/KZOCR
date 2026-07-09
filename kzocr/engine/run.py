@@ -2,21 +2,29 @@
 
 策略：
 1. 若 KZOCR_USE_MOCK=1 → 直接返回桩数据。
-2. 否则尝试调用 kimi 的 tcm_ocr 真实管线（BookPipeline）；任何失败都降级到桩数据，
+2. 若 KZOCR_USE_VLM=1 → 绕过 BookPipeline，用 PaddleOCR-VL-1.6 逐页 VLM OCR。
+3. 否则尝试调用 kimi 的 tcm_ocr 真实管线（BookPipeline）；任何失败都降级到桩数据，
    除非 KZOCR_REQUIRE_REAL=1（此时真实失败会抛出，便于排查）。
 """
 from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
+import fitz
+import numpy as np
+
 from kzocr import config as app_config
 from .mock import mock_book_result as build_mock_book
-from .types import BookResult
+from .types import BookResult, PageResult, ParagraphResult, LineResult
 
 logger = logging.getLogger(__name__)
+
+# VLM 引擎标签（便于在数据库/日志中识别）
+VLM_ENGINE_LABEL = "PaddleOCR-VL-1.6"
 
 
 def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> BookResult:
@@ -24,6 +32,15 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
     if cfg.use_mock:
         logger.info("[engine] use_mock=True，使用桩数据")
         return build_mock_book(book_code=book_code or "TCM-MOCK-001")
+
+    if cfg.use_vlm:
+        try:
+            return _run_vlm(pdf_path, cfg, book_code)
+        except Exception as exc:  # noqa: BLE001
+            if cfg.require_real:
+                raise
+            logger.warning("[engine] VLM 引擎执行失败，降级到桩数据：%s", exc)
+            return build_mock_book(book_code=book_code or "TCM-MOCK-001")
 
     try:
         return _run_real(pdf_path, cfg, book_code)
@@ -128,3 +145,244 @@ def _read_deliverable(result, lib_dir: str, book_id: str) -> str:
         if mds:
             return mds[0].read_text(encoding="utf-8", errors="ignore")
     return ""
+
+
+# =============================================================================
+# VLM 直接集成（PaddleOCR-VL-1.6 / llama-server）
+# =============================================================================
+
+
+def _init_vlm_adapter(cfg) -> object:
+    """初始化 VLM 适配器，带 SenseNova → PaddleOCR-VL 降级链。
+
+    引擎选择（按优先级）：
+    1. cfg.vlm_engine == "sensenova" → 强制 SenseNova
+    2. cfg.vlm_engine == "auto" 且有 SENSENOVA_API_KEY → 先试 SenseNova
+    3. 否则 → PaddleOCR-VL-1.6（本地 llama-server）
+    """
+    engine_dir = str(cfg.kimi_engine_dir)
+    if engine_dir and engine_dir not in sys.path:
+        sys.path.insert(0, engine_dir)
+
+    # 判断是否优先尝试 SenseNova
+    try_sensenova = (
+        cfg.vlm_engine == "sensenova"
+        or (cfg.vlm_engine == "auto" and bool(cfg.sensenova_api_key))
+    )
+
+    if try_sensenova:
+        try:
+            from tcm_ocr.core.engines.sensenova_adapter import SenseNovaAdapter
+
+            adapter = SenseNovaAdapter(
+                api_key=cfg.sensenova_api_key,
+                model=cfg.sensenova_model,
+                base_url=cfg.sensenova_base_url,
+            )
+            logger.info("[VLM] 使用 SenseNova API（model=%s）", cfg.sensenova_model)
+            return adapter
+        except Exception as exc:
+            logger.warning("[VLM] SenseNova 不可用，降级到 PaddleOCR-VL：%s", exc)
+
+    # 降级到 PaddleOCR-VL-1.6（本地 llama-server）
+    from tcm_ocr.core.engines.paddleocr_vl16_adapter import PaddleOCRVl16Adapter
+
+    logger.info("[VLM] 使用 PaddleOCR-VL-1.6（本地 llama-server）")
+    return PaddleOCRVl16Adapter(
+        host=cfg.vlm_host,
+        port=cfg.vlm_port,
+        auto_start=True,
+    )
+
+
+def _pdf_page_to_numpy(page) -> np.ndarray:
+    """将 PyMuPDF page 渲染为 (H, W, 3) RGB numpy 数组。
+
+    自动处理 RGBA（alpha 通道）和灰度页面的通道转换。
+    """
+    mat = fitz.Matrix(200 / 72, 200 / 72)  # 200 DPI
+    pix = page.get_pixmap(matrix=mat)
+    # RGBA → RGB：fitz.Pixmap(pix, 0) 的 0 表示 RGB 输出
+    if pix.n > 3:
+        pix = fitz.Pixmap(pix, 0)
+    return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+
+
+def _vlm_markdown_to_pages(pages_text: list[str]) -> list[PageResult]:
+    """将 VLM 输出的逐页文本拆行为 PageResult[]，供 zai 逐行展示。"""
+    results = []
+    for page_idx, text in enumerate(pages_text):
+        lines = []
+        for seq, line in enumerate(text.strip().split("\n")):
+            line = line.strip()
+            if not line:
+                continue
+            lines.append(LineResult(
+                sequence_in_paragraph=seq + 1,
+                consensus=line,
+                final=line,
+                engine_texts={VLM_ENGINE_LABEL: line},
+            ))
+        paragraphs = []
+        if lines:
+            paragraphs.append(ParagraphResult(sequence_in_page=1, lines=lines))
+        results.append(PageResult(page_num=page_idx + 1, paragraphs=paragraphs))
+    return results
+
+
+# VLM 常见输出噪声的正则替换
+_VLM_CLEANUP_RULES = [
+    (re.compile(r"\\([()])"), r"\1"),                # \( → (,  \) → )
+    (re.compile(r"[♡♝◇◁]"), "："),                    # 字段分隔符标准化
+    (re.compile(r"秘方求真\s*\\?\(?\s*R\s*\\?\)?.*", re.MULTILINE), ""),  # 页眉页脚 "秘方求真 R"
+    (re.compile(r"秘方求真$", re.MULTILINE), ""),      # 行末的 "秘方求真"
+]
+
+
+def _vlm_postprocess(text: str) -> str:
+    """清理 VLM 输出中的常见格式噪声。"""
+    for pattern, replacement in _VLM_CLEANUP_RULES:
+        text = pattern.sub(replacement, text)
+    # 清理多余空行
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+# =============================================================================
+# 跨页断裂合并
+# =============================================================================
+
+# 方剂/章节标题行的特征（以编号开头或标准科室头）
+_PAGE_BREAK_HEADER = re.compile(
+    r"^(\d+\.\d+\s|治|§|第)", re.MULTILINE
+)
+# 页末不完整行特征：以"、"结尾、以"克"结尾无"。"、以"沙兔"类不完整药名结尾
+_PAGE_END_INCOMPLETE = re.compile(
+    r"、$|，$|、\w{0,5}$|克$|(?<![。！？])$"
+)
+
+
+def _merge_cross_page_breaks(pages_text: list[str]) -> list[str]:
+    """检测方剂在页末断裂，将下页起始续接行合并到本页末尾。
+
+    判断逻辑：若本页末尾是未完成行（以顿号/逗号结尾）、
+    且下页开头没有独立方剂标题，则合并下页首行到本页。
+    """
+    if len(pages_text) < 2:
+        return pages_text
+
+    result = list(pages_text)
+    # 从后往前合并，避免索引失效
+    for i in range(len(result) - 2, -1, -1):
+        cur = result[i].strip()
+        nxt = result[i + 1].strip()
+        if not cur or not nxt:
+            continue
+
+        # 本页最后一行是非完整行（以顿号或"克"结尾）
+        cur_lines = cur.split("\n")
+        last_line = cur_lines[-1].strip()
+        if not last_line:
+            continue
+
+        # 本页末行不完整检测：不以句末标点结尾，且不是独立行
+        _SENTENCE_END = set("。！？；）】」\"\'")
+        cur_lines = cur.split("\n")
+        last_line = cur_lines[-1].strip()
+        if not last_line:
+            continue
+
+        ends_without_period = (
+            last_line[-1] not in _SENTENCE_END
+            and not last_line.endswith("克。")
+        )
+        # 排除：编号章节标题（如"29 治食管瘤秘方"、"26.4 鳖甲消瘤方"）
+        is_chapter_title = bool(re.match(r"^\d+\.?\d*\s+\S", last_line))
+        is_broken = ends_without_period and not is_chapter_title
+        if not is_broken:
+            continue
+
+        # 下页所有有效续接行（跳过装饰/标题行），并入本页末尾
+        nxt_lines = nxt.split("\n")
+        cont_lines = []
+        remaining_lines = []
+        nxt_in_cont = True  # 是否仍在续接段落中
+        for l in nxt_lines:
+            stripped = l.strip()
+            if not stripped:
+                remaining_lines.append(l)
+                continue
+            if nxt_in_cont:
+                # 跳过页装饰行
+                if re.match(r"[【\-]", stripped):
+                    remaining_lines.append(l)
+                    continue
+                # 遇到独立标题标记 → 续接结束
+                if _PAGE_BREAK_HEADER.match(stripped):
+                    nxt_in_cont = False
+                    remaining_lines.append(l)
+                    continue
+                # 遇到字段标识 → 续接结束（除非行首以"翘"类续接字开头）
+                if re.match(r"^来源|^组成|^用法|^功用|^方解|^主治|^加减|^疗效|^附记", stripped):
+                    nxt_in_cont = False
+                    remaining_lines.append(l)
+                    continue
+                cont_lines.append(stripped)
+            else:
+                remaining_lines.append(l)
+
+        if not cont_lines:
+            continue
+        logger.debug("[VLM 跨页合并] P%d ← P%d: %d 行", i + 1, i + 2, len(cont_lines))
+        result[i] = cur + "\n" + "\n".join(cont_lines)
+        result[i + 1] = "\n".join(remaining_lines).strip()
+    return result
+
+
+def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
+    """绕过 BookPipeline，用 PaddleOCR-VL-1.6 直接逐页 VLM OCR。
+
+    流程：PDF 渲染 → VLM 逐页识别 → Markdown 拼接 + 结构化填充 → BookResult。
+    """
+    vlm = _init_vlm_adapter(cfg)
+
+    title = os.path.basename(pdf_path)
+    raw_book_code = book_code or os.path.splitext(title)[0]
+    # book_code 只保留安全字符（ASCII 字母/数字/连字符/下划线）
+    safe_book_code = re.sub(r"[^\w\-]", "_", raw_book_code)
+
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+    if total_pages == 0:
+        doc.close()
+        raise ValueError(f"PDF 文件为空（0 页）：{pdf_path}")
+
+    try:
+        pages_text: list[str] = []
+        for i, page in enumerate(doc):
+            if i > 0 and i % 10 == 0:
+                logger.info("[VLM] 已识别 %d/%d 页", i, total_pages)
+
+            img = _pdf_page_to_numpy(page)
+            text = vlm.recognize_page(img)
+            pages_text.append(text)
+
+        # 跨页合并：检测方剂在页末断裂，将下页续接行合并到本页末尾
+        pages_text = _merge_cross_page_breaks(pages_text)
+
+        # final_markdown 带页标题，_vlm_markdown_to_pages 只取原文
+        pages_text_clean = [_vlm_postprocess(t) for t in pages_text]
+        full_md = "\n\n".join(
+            f"## 第 {i + 1} 页\n\n{t}" for i, t in enumerate(pages_text_clean)
+        )
+        pages = _vlm_markdown_to_pages(pages_text_clean)
+
+        return BookResult(
+            book_code=safe_book_code,
+            title=title,
+            engine_label=VLM_ENGINE_LABEL,
+            final_markdown=full_md,
+            pages=pages,
+        )
+    finally:
+        doc.close()

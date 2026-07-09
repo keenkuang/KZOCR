@@ -27,6 +27,17 @@ class Config:
     use_mock: bool = False
     # 真实引擎失败时是否抛错而非降级（KZOCR_REQUIRE_REAL=1）
     require_real: bool = False
+    # VLM 直接模式（绕过 BookPipeline，用 VLM 逐页 OCR）
+    use_vlm: bool = False
+    # VLM 引擎选择：auto（优先 SenseNova，降级 PaddleOCR-VL）/ sensenova / paddleocr_vl16
+    vlm_engine: str = "auto"
+    # llama-server 地址（PaddleOCR-VL 用）
+    vlm_host: str = "127.0.0.1"
+    vlm_port: int = 18080
+    # SenseNova 云端 API 配置
+    sensenova_api_key: str = ""
+    sensenova_model: str = "sensenova-6.7-flash-lite"
+    sensenova_base_url: str = "https://token.sensenova.cn/v1/chat/completions"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -43,6 +54,11 @@ class Config:
             zai_db=zai_db,
             khub_base_url=os.environ.get("KHUB_BASE_URL", "http://127.0.0.1:8000"),
             khub_db=khub_db,
+            vlm_host=os.environ.get("KZOCR_VLM_HOST", "127.0.0.1"),
+            vlm_port=int(os.environ.get("KZOCR_VLM_PORT", "18080")),
+            sensenova_api_key=os.environ.get("SENSENOVA_API_KEY", ""),
+            sensenova_model=os.environ.get("SENSENOVA_MODEL", "sensenova-6.7-flash-lite"),
+            sensenova_base_url=os.environ.get("SENSENOVA_BASE_URL", "https://token.sensenova.cn/v1/chat/completions"),
         )
 
 
@@ -56,10 +72,14 @@ def load_config() -> "Config":
     除 from_env() 已有字段外，额外识别：
         KZOCR_USE_MOCK    → use_mock（是否强制 mock 引擎）
         KZOCR_REQUIRE_REAL → require_real（真实失败是否抛错）
+        KZOCR_USE_VLM     → use_vlm（是否启用 VLM 直接模式）
+        KZOCR_VLM_ENGINE  → vlm_engine（VLM 引擎选择：auto/sensenova/paddleocr_vl16）
     """
     cfg = Config.from_env()
     cfg.use_mock = os.environ.get("KZOCR_USE_MOCK", "0") in ("1", "true", "True")
     cfg.require_real = os.environ.get("KZOCR_REQUIRE_REAL", "0") in ("1", "true", "True")
+    cfg.use_vlm = os.environ.get("KZOCR_USE_VLM", "0") in ("1", "true", "True")
+    cfg.vlm_engine = os.environ.get("KZOCR_VLM_ENGINE", "auto")
     return cfg
 
 

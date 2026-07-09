@@ -87,6 +87,10 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
         for t in ("Proofread", "Line", "Paragraph", "Page", "Book"):
             cur.execute(f"DELETE FROM {t} WHERE bookCode=?", (book.book_code,))
 
+        # Pattern/Term/Formula/FormulaIngredient 无 bookCode 列，全量清（zai 单书模式）
+        for t in ("FormulaIngredient", "Formula", "Pattern", "Term"):
+            cur.execute(f"DELETE FROM {t}")
+
         total_lines = sum(len(para.lines) for p in book.pages for para in p.paragraphs)
 
         # Book
@@ -110,7 +114,7 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
             )
             counts["pages"] += 1
             for para in p.paragraphs:
-                para_id = f"P{p.page_num}-{para.sequence_in_page}"
+                para_id = f"{book.book_code}-P{p.page_num}-{para.sequence_in_page}"
                 cur.execute(
                     "INSERT INTO Paragraph (id,pageNum,bookCode,seqInPage,isFormulaParagraph,verificationStatus) "
                     "VALUES (?,?,?,?,?,?)",
@@ -118,7 +122,7 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                 )
                 counts["paragraphs"] += 1
                 for ln in para.lines:
-                    line_id = f"L{p.page_num}-{para.sequence_in_page}-{ln.sequence_in_paragraph}"
+                    line_id = f"{book.book_code}-L{p.page_num}-{para.sequence_in_page}-{ln.sequence_in_paragraph}"
                     et = ln.engine_texts or {}
                     engine_texts_json = json.dumps(et, ensure_ascii=False)
                     cur.execute(
