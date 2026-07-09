@@ -38,6 +38,7 @@ class Config:
     sensenova_api_key: str = ""
     sensenova_model: str = "sensenova-6.7-flash-lite"
     sensenova_base_url: str = "https://token.sensenova.cn/v1/chat/completions"
+    sensenova_timeout: int = 300
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -59,6 +60,7 @@ class Config:
             sensenova_api_key=os.environ.get("SENSENOVA_API_KEY", ""),
             sensenova_model=os.environ.get("SENSENOVA_MODEL", "sensenova-6.7-flash-lite"),
             sensenova_base_url=os.environ.get("SENSENOVA_BASE_URL", "https://token.sensenova.cn/v1/chat/completions"),
+            sensenova_timeout=int(os.environ.get("SENSENOVA_TIMEOUT", "300")),
         )
 
 

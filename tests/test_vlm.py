@@ -99,12 +99,16 @@ def test_vlm_renders_pdf_pages_to_markdown(mock_init_vlm, mock_fitz_open):
     mock_doc.__iter__.return_value = iter([mock_page, mock_page])
     mock_fitz_open.return_value = mock_doc
 
-    # Mock VLM adapter
-    mock_vlm = MagicMock()
-    mock_vlm.recognize_page.side_effect = [
-        "方用白术三钱，茯苓二钱。",
-        "取足三里、合谷以调气和胃。",
-    ]
+        # Mock VLM adapter
+        mock_vlm = MagicMock()
+        mock_vlm.recognize_page.side_effect = [
+            "方用白术三钱，茯苓二钱。",
+            "取足三里、合谷以调气和胃。",
+        ]
+        mock_vlm.recognize_pages.side_effect = [
+            "方用白术三钱，茯苓二钱。",
+            "取足三里、合谷以调气和胃。",
+        ]
     mock_init_vlm.return_value = mock_vlm
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake_vlm_engine")
@@ -121,7 +125,8 @@ def test_vlm_renders_pdf_pages_to_markdown(mock_init_vlm, mock_fitz_open):
     assert len(result.pages) == 2
     assert len(result.pages[0].paragraphs) == 1
     lines_p1 = result.pages[0].paragraphs[0].lines
-    assert len(lines_p1) == 1  # 只有 VLM 原文
+    # 跨页合并未触发（页末是句号），所以第 1 页只有原文
+    assert len(lines_p1) == 1
     assert lines_p1[0].final == "方用白术三钱，茯苓二钱。"
     lines_p2 = result.pages[1].paragraphs[0].lines
     assert len(lines_p2) == 1
@@ -145,15 +150,16 @@ def test_vlm_multi_line_page(mock_init_vlm, mock_fitz_open):
     mock_doc.__iter__.return_value = iter([mock_page])
     mock_fitz_open.return_value = mock_doc
 
-    mock_vlm = MagicMock()
-    mock_vlm.recognize_page.return_value = "第一行\n第二行\n第三行"
+        mock_vlm = MagicMock()
+        mock_vlm.recognize_page.return_value = "第一行\n第二行\n第三行"
+        mock_vlm.recognize_pages.return_value = "第一行\n第二行\n第三行"
     mock_init_vlm.return_value = mock_vlm
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
     result = run_engine("/fake.pdf", book_code="MULTI", config=cfg)
 
     lines = result.pages[0].paragraphs[0].lines
-    # 3 行内容（无页标题，因为 pages_text 不存标题了）
+    # 3 行内容（跨页合并未触发，因为页末是"。"）
     assert len(lines) == 3
     assert lines[0].final == "第一行"
     assert lines[1].final == "第二行"

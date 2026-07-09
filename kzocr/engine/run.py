@@ -178,6 +178,7 @@ def _init_vlm_adapter(cfg) -> object:
                 api_key=cfg.sensenova_api_key,
                 model=cfg.sensenova_model,
                 base_url=cfg.sensenova_base_url,
+                timeout=cfg.sensenova_timeout,
             )
             logger.info("[VLM] 使用 SenseNova API（model=%s）", cfg.sensenova_model)
             return adapter
@@ -359,12 +360,26 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
 
     try:
         pages_text: list[str] = []
-        for i, page in enumerate(doc):
-            if i > 0 and i % 10 == 0:
+        # 是否支持双页上下文（SenseNova 适配器）
+        supports_two_page = hasattr(vlm, "recognize_pages")
+
+        # 一次展开所有页（避免 doc[i+1] 在 mock 下出错）
+        all_pages = list(doc)
+
+        for i, page in enumerate(all_pages):
+            if i > 0 and i % 5 == 0:
                 logger.info("[VLM] 已识别 %d/%d 页", i, total_pages)
 
-            img = _pdf_page_to_numpy(page)
-            text = vlm.recognize_page(img)
+            imgs = [_pdf_page_to_numpy(page)]
+            # SenseNova 思考模式：送当前页 + 下一页，只输出当前页
+            if supports_two_page and i < len(all_pages) - 1:
+                next_img = _pdf_page_to_numpy(all_pages[i + 1])
+                imgs.append(next_img)
+
+            if supports_two_page:
+                text = vlm.recognize_pages(imgs)
+            else:
+                text = vlm.recognize_page(imgs[0])
             pages_text.append(text)
 
         # 跨页合并：检测方剂在页末断裂，将下页续接行合并到本页末尾
