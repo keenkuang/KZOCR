@@ -2,188 +2,316 @@
 
 > 本文件是 `ocr-engine-unification.v0.3-FREEZE.md` 的**增量修订**。v0.3 FREEZE (B1–B8) 和 v0.4 AMEND (C1–C5) 维持有效，此处仅追加 D1–D4 共 4 项从 TOC OCR 项目（970 页实战验证）吸收的异常处理体系改进。
 > 来源项目：`/home/keen/Documents/trae_projects/traedocu/docs/`
+>
+> **多角色评审（6 角色）：** `docs/reviews/2026-07-10-round6/`
+> 本次修订吸收了架构师、软件工程、测试、安全、领域 5 项评审意见（裁决：**有条件通过 / 需修订**）。
 
 ---
 
-## D1 —— 异常分类 + 重试策略统一
+## D0 —— 基础设施：Config 新增 `kzocr_output_dir`
 
-**来源：** TOC 项目 V3 §6.2–6.3 的 8 种异常类型 × 检测方式 × 处理策略表 + 3 种重试策略，经 13 个缺陷修复验证。
+**来源：** 架构师评审 D3-1（Blocking）——`cfg.kzocr_output_dir` 在 Config 类中不存在。
 
-**问题：** KZOCR 当前异常处理散落在各模块中：
+**裁决：** Config（`kzocr/config.py`）新增 `kzocr_output_dir` 字段，映射环境变量 `KZOCR_OUTPUT_DIR`（默认 `/tmp/kzocr/output`）。
 
-| 位置 | 当前行为 | 问题 |
-|------|---------|------|
-| `_run_vlm` 逐页循环 | `except Exception: continue` | 所有失败一视同仁跳过，无重试、无日志上下文 |
-| `_run_real` | `except Exception: raise`（require_real）或降级 mock | 无重试、无失败原因分类 |
-| `_init_vlm_adapter` | `except Exception: logger.warning + 降级` | 降级日志已清晰，合理 |
-| `ratelimit.py` | `ExponentialBackoff` 类已实现 | 但未被主循环使用 |
+- 该目录用于：D3 的 `vlm_cache/` 子目录、C1 L3 重 OCR 产物、后续可能的其他中间产物
+- 新增字段须经过 C2 `_check_base` 路径穿越校验（`atomic.py`）
+- 确保 `config.py` 中处理 `None` 默认值场景
 
-**裁决：** 新增 `kzocr/engines/errors.py`，统一异常分类 + 重试入口：
-
-**异常继承体系：**
-```
-OcrError (Exception)           # 基类
-├── ApiError                   # API 调用失败（HTTP 错误/超时）
-│   └── RateLimitedError       # 429/503 限流
-├── LeakageError               # 跨页泄漏检测未通过（L4 截断后仍残留）
-├── OverSizeError              # 字数超阈值（L1 触发后重 OCR 仍超）
-├── CrossPageIncompleteError   # 跨页方剂不完整（9 字段缺组成）
-├── HierarchyAnomalyError      # 层级异常（三级编号等）
-├── OcrSkipError               # 跳过页（重试耗尽但仍失败）
-└── DbWriteError               # 数据库写入冲突
-```
-
-**重试策略表（复用 `ratelimit.py` 已有 `ExponentialBackoff`）：**
-
-| 异常类型 | 策略 | 参数 | 说明 |
-|---------|------|------|------|
-| `ApiError` | 指数退避 | 3 次, 2s→4s→8s | 网络/超时错误 |
-| `RateLimitedError` | 指数退避 | 3 次, 尊重 Retry-After | 限流 429/503 |
-| `OverSizeError` | 重 OCR | 1 次, max_tokens×1.8 | 字数超阈值 |
-| `DbWriteError` | 幂等 | 0 次 | UPSERT 保证幂等 |
-| 其他 | 跳过 | 0 次 | 记录日志，继续 |
-
-**`retry_with_policy()` 辅助函数：**
 ```python
-def retry_with_policy(fn, policy: dict, error_types: tuple[type] = (ApiError,)):
-    """按策略执行 fn；指数退避或幂等重试，耗尽后抛出源异常。"""
+@dataclass
+class Config:
+    ...
+    kzocr_output_dir: str = field(
+        default_factory=lambda: os.environ.get("KZOCR_OUTPUT_DIR", "/tmp/kzocr/output")
+    )
 ```
 
-**测试要求：**
-- 每个异常类型可独立构造和捕获
-- `retry_with_policy` 成功/失败/耗尽三种路径
-- `ExponentialBackoff` 集成测试（与现有 18 项 ratelimit 测试合并）
+**测试要求：** Config 默认值测试 + 环境变量覆盖测试。
+
+---
+
+## D1 —— 异常分类 + `retry_with_policy`
+
+**来源：** TOC 项目 V3 §6.2–6.3 的异常类型 × 重试策略表。
+
+**问题：** KZOCR 当前异常处理散落各处，`_run_vlm` 的 `except Exception: continue` 对所有失败一视同仁。
+
+**裁决：** 新增 `kzocr/engines/errors.py`，按 YAGNI 原则初始只保留 4 个实际使用的子类：
+
+```python
+class OcrError(Exception):           # 基类
+    """KZOCR 所有的 OCR 相关异常基类。"""
+class ApiError(OcrError):            # API 调用失败（HTTP 错误/超时）
+class RateLimitedError(ApiError):    # 429/503 限流
+class OverSizeError(OcrError):       # 字数超阈值（L1 触发后重 OCR 仍超）
+class RetryExhaustedError(OcrError): # 重试耗尽，跳过该页
+```
+
+**关于 `@dataclass RetryPolicy`**（测试评审建议：`policy: dict` 弱类型 → `@dataclass`）：
+- 重试策略使用 `@dataclass` 而非 `dict`，获得 IDE 类型检查
+
+```python
+@dataclass
+class RetryPolicy:
+    strategy: str                     # "exponential" | "reocr" | "none"
+    max_retries: int = 3
+    base_delay: float = 2.0
+    max_delay: float = 300.0
+    jitter: float = 0.5
+
+RETRY_POLICIES = {
+    "api":      RetryPolicy("exponential", max_retries=3, base_delay=2.0),
+    "ratelimit": RetryPolicy("exponential", max_retries=3, base_delay=1.0),
+    "oversize": RetryPolicy("reocr",        max_retries=1),
+    "db":       RetryPolicy("none"),
+}
+```
+
+**`retry_with_policy()` 辅助函数**（定义在 `errors.py` 中，靠近异常类和策略表）：
+
+```python
+def retry_with_policy(
+    fn: Callable[..., T],
+    policy: RetryPolicy,
+    error_types: tuple[type[Exception], ...] = (ApiError,),
+    retry_kwargs: dict[int, dict] | None = None,  # attempt → fn kwargs
+    on_exhausted: Callable[[int, Exception], None] | None = None,
+) -> T:
+    """按 RetryPolicy 执行 fn；指数退避或幂等重试，耗尽后调用 on_exhausted。
+
+    Args:
+        fn              : 要执行的函数。
+        policy          : 重试策略（@dataclass RetryPolicy）。
+        error_types     : 哪些异常触发重试（默认 ApiError）。
+        retry_kwargs    : attempt 序号 → fn 的参数字典（用于 OverSizeError 的 max_tokens 调整）。
+        on_exhausted    : 所有重试耗尽后回调（可选，用于记录失败）。
+
+    Returns:
+        fn 成功执行的返回值。
+
+    Raises:
+        重试耗尽后抛出最后一次捕获的异常。
+    """
+```
+
+- 重试行为：
+  - `strategy="exponential"`：使用 `ExponentialBackoff` 计算延迟 + 随机抖动
+  - `strategy="reocr"`：使用 `retry_kwargs` 传入调整参数（如 `max_tokens×1.8`）
+  - `strategy="none"`：不重试，直接抛出
+- `RateLimitedError` 尊重 `Retry-After` header（若有则用其值覆盖延迟）
+
+**测试要求（32–42 个用例）：**
+- 每个异常类型可独立构造和捕获（参数化 + 继承关系验证）
+- `retry_with_policy` 成功/重试后成功/耗尽三种路径
+- `ExponentialBackoff` 集成测试
 
 ---
 
 ## D2 —— VLM 主循环重试 + 失败分类增强
 
-**来源：** TOC 项目 V3 §6.3 重试策略（OCR API 失败重试 3 次 + 超阈值重 OCR 1 次 + 仍失败标记跳过）。
+**来源：** 架构师 + 软件工程评审均指出 D1 的 `retry_with_policy` 必须被 D2 消费才能避免 dead code。
 
-**问题：** `_run_vlm`（`kzocr/engine/run.py:503`）当前：
-
+**问题：** `_run_vlm` 逐页循环当前为：
 ```python
 except Exception as exc:
     logger.warning("[VLM] 第 %d 页识别失败，跳过：%s", i + 1, exc)
     continue
 ```
 
-所有异常统一处理，无重试、无分类、无失败计数。
+无重试、无分类、无失败记录。
 
-**裁决：** 增强 `_run_vlm` 逐页循环的异常处理：
-
-```python
-# 每页重试逻辑
-for attempt in range(1, RETRY_POLICIES["api"]["max_retries"] + 1):
-    try:
-        text = vlm.recognize_pages(imgs)
-        # L3: 字数超阈值的重 OCR
-        if baseline.ready and len(text) > baseline.threshold:
-            raise OverSizeError(...)
-        break
-    except RateLimitedError:
-        backoff.sleep(attempt + 1)
-    except OverSizeError:
-        # 1 次重 OCR 带更紧的 max_tokens
-        text = vlm.recognize_pages(imgs, max_tokens=int(baseline.median * 1.8))
-        if len(text) > baseline.threshold:
-            logger.warning("L3 重 OCR 仍超阈值，继续使用结果")
-    except (ApiError, OcrSkipError) as exc:
-        logger.warning("第 %d 页 attempt %d 失败: %s", i + 1, attempt, exc)
-        if attempt < max_retries:
-            backoff.sleep(attempt + 1)
-else:
-    logger.error("第 %d 页重试耗尽，跳过", i + 1)
-    _record_failure(pipeline_state, i + 1, type(exc).__name__)
-    continue
-```
-
-**效果目标：** 瞬时失败自动恢复，持久失败有分类和记录。
-
----
-
-## D3 —— VLM 主循环断点续跑集成
-
-**来源：** TOC 项目 `pipeline_state.json` + C2 `is_complete()`。经 v0.4 AMEND 验证，文件存在 = 状态，无需 state.json。
-
-**问题：** `atomic.py` 已有 `is_complete()`，但 `_run_vlm` 未使用——中断后必须从头识别所有页。
-
-**裁决：** 为 VLM 路径增加文件级断点：
+**裁决：** D2 通过 `retry_with_policy` 实现重试，不手写循环：
 
 ```python
-def _get_vlm_cache_path(cfg, book_code: str, page_num: int) -> Path:
-    """VLM 缓存目录：{output_dir}/vlm_cache/{book_code}/page_{page_num:04d}.txt"""
+from kzocr.engines.errors import (
+    retry_with_policy, RetryPolicy,
+    ApiError, RateLimitedError, OverSizeError, RetryExhaustedError,
+)
+from kzocr.engines.ratelimit import ExponentialBackoff
 
-# 主循环开头
-cache_dir = cfg.kzocr_output_dir / "vlm_cache" / safe_book_code
-cache_dir.mkdir(parents=True, exist_ok=True)
+failed_pages: dict[int, str] = {}       # page_num → error_type
+backoff = ExponentialBackoff(base_delay=2.0)
 
 for i, page in enumerate(all_pages):
-    cache_path = _get_vlm_cache_path(cfg, safe_book_code, i + 1)
-
-    # 断点检测：已有缓存文件 → 跳过
-    if is_complete(cache_path):
-        text = cache_path.read_text(encoding="utf-8")
-        pages_text.append(text)
-        baseline.feed(text)
+    imgs = [_prepare_image(page, all_pages, i)]
+    text = ""
+    try:
+        # 正常 OCR → 字数校验
+        text = retry_with_policy(
+            lambda: vlm.recognize_pages(imgs) if supports_two_page else vlm.recognize_page(imgs[0]),
+            policy=RETRY_POLICIES["api"],
+            error_types=(ApiError, RateLimitedError),
+            on_exhausted=lambda pn, exc: failed_pages.update({pn: type(exc).__name__}),
+        )
+        # OverSizeError 检测 + 重 OCR
+        if baseline.ready and len(text) > baseline.threshold:
+            text = retry_with_policy(
+                lambda: vlm.recognize_pages(imgs, max_tokens=int(baseline.median * 1.8))
+                       if supports_two_page else vlm.recognize_page(imgs[0], max_tokens=...),
+                policy=RETRY_POLICIES["oversize"],
+                error_types=(OverSizeError,),
+                on_exhausted=lambda pn, exc: failed_pages.update({pn: "OverSize" + type(exc).__name__}),
+            )
+    except RetryExhaustedError as exc:
+        # 重试耗尽 → 记录失败页 + 跳过
+        failed_pages[i + 1] = "Exhausted:" + type(exc.__cause__).__name__
+        logger.error("[VLM] 第 %d 页重试耗尽，跳过", i + 1)
         continue
 
-    # ... 正常 OCR 流程 ...
-
-    # 原子写入缓存
-    atomic_write(cache_path, text)
+    # 即使重 OCR 后仍然超阈值 → 走 RetryExhaustedError
+    pages_text.append(text)
+    baseline.feed(text)
 ```
 
-**断点清除：** 环境变量 `KZOCR_CLEAR_CACHE=1` 清除所有缓存重新 OCR；默认保留缓存。
+**关键细节：**
+- `RateLimitedError` 尊重 `Retry-After` header（`ApiError` 的 `retry_with_policy` 内部处理）
+- OverSizeError 重 OCR 失败后**抛出 `RetryExhaustedError`**，不走静默使用泄漏结果
+- C1 L3 的日志标记在 D2 实施后变多余 → 调整为仅做 L4 探针检测（见 冲突-2 修订）
+- `failed_pages` 在 `_run_vlm` 结束时可通过日志输出或扩展 `BookResult` 返回
+- 适配器需确认支持 `max_tokens` 参数（若不支持则 OverSizeError 不触发重试）
 
-**效果目标：** 任意中断恢复，零页重复 OCR。
+**测试要求（约 15 个用例）：**
+- ApiError 退避重试 → 第 3 次成功
+- OverSizeError 重 OCR → 成功
+- OverSizeError 重 OCR → 仍超 → 抛出 RetryExhaustedError → 跳过
+- 所有重试耗尽 → `failed_pages` 正确记录
+- D2 使用 `retry_with_policy` → 验证 `errors.py` 无 dead code
 
 ---
 
-## D4 —— 层级异常检测（可选，P3 低优先）
+## D3 —— VLM 断点续跑
 
-**来源：** TOC 项目 V3 §2.2 `_check_hierarchy_anomaly()` + `hierarchy_anomaly` 表。
+**来源：** 架构师评审 D3-1（Blocking）+ D3-2（Blocking）+ 安全评审。
 
-**问题：** 方剂编号如 `16.7.1`（三级编号）表示 4 级目录结构，超出正常 2 段编号（节号.方序号）。当前 VLM 路径不做检测，异常编号方剂可能在后续入库阶段遗漏。
+**问题：** 中断后从头识别所有页，无恢复机制。简单 `is_complete` 存在缓存与语义冲突。
 
-**裁决：** （低优先，与 TOC 管线阶段合并实施）
+### D3.0 —— 前提
 
-- 新增 `kzocr/engines/hierarchy.py`：
-  ```python
-  @dataclass
-  class HierarchyAnomaly:
-      recipe_no: str
-      depth: int
-      source_page: int
-      resolution: str = "pending"
+- P0 `kzocr_output_dir` Config 字段已存在（D0）
+- Config 路径须传入 C2 `_check_base` 校验
 
-  def check_hierarchy_anomaly(text: str, page_num: int) -> list[HierarchyAnomaly]:
-      """扫描 OCR 文本中段数 > 2 的编号，返回异常列表。"""
-  ```
+### D3.1 —— 缓存路径
 
-- 输出：JSON 文件 `{output_dir}/hierarchy_anomalies.json`
-- 集成点：`_run_vlm` 中 VLM 后处理之后
+```python
+VLM_CACHE_DIR = "vlm_cache"  # 可配置常量
+
+def _get_vlm_cache_path(cfg, engine_tag: str, book_code: str, page_num: int) -> Path:
+    """缓存文件路径：{kzocr_output_dir}/vlm_cache/{engine_tag}/{book_code}/page_{page_num:04d}.txt"""
+    return Path(cfg.kzocr_output_dir) / VLM_CACHE_DIR / engine_tag / safe_book_code / f"page_{page_num:04d}.txt"
+```
+
+- **engine_tag** 参与路径，避免 SenseNova ↔ PaddleOCR-VL 切换时误用旧缓存
+
+### D3.2 —— 缓存有效性校验（解决 C2 哲学冲突）
+
+- 缓存文件包含**参数签名（config_hash）** 作为首行元数据
+- 写入时：`# config_hash={sha256(VLM_PARAMS_JSON)[:16]}\n{page_text}`
+- 读取时：校验元数据匹配当前配置，不匹配则视为无效缓存
+- `VLM_PARAMS_JSON` 包含当前使用的引擎标识、max_tokens、VLM prompt 等影响输出的参数
+
+```python
+def _cache_is_valid(cache_path: Path, cfg: Config) -> bool:
+    """验证缓存文件是否由当前配置生成。"""
+    if not is_complete(cache_path):
+        return False
+    try:
+        first_line = cache_path.read_text(encoding="utf-8").split("\n")[0]
+        expected_hash = _compute_config_hash(cfg)
+        return first_line == f"# config_hash={expected_hash}"
+    except (OSError, IndexError):
+        return False
+```
+
+### D3.3 —— 缓存生命周期
+
+- 安全评审建议：缓存文件含 PDF 明文，需 TTL 策略
+- 默认 TTL：24 小时（可通过 `KZOCR_CACHE_TTL` 环境变量覆盖，单位秒）
+- `KZOCR_CLEAR_CACHE=1` 清除所有缓存
+- `KZOCR_OUTPUT_DIR` 应指向可清理的临时目录
+
+**测试要求（约 6 个用例）：**
+- 中断+恢复 → 跳过缓存页（config_hash 匹配）
+- 参数变化 → 缓存不匹配 → 不跳过
+- config_hash 不匹配 → 重新 OCR
+- `KZOCR_CLEAR_CACHE=1` 全量重跑
+- `is_complete` 检查后再读取（TOCTOU 防护，security O1）
+
+---
+
+## D4 —— 层级异常检测（P3 低优先）
+
+**来源：** TOC 项目 V3 §2.2 `hierarchy_anomaly` 表。
+
+**问题：** 方剂编号如 `16.7.1`（三级编号）表示超正常层级，当前 VLM 路径不做检测。
+
+**裁决：** P3 低优先，**expected_depth 参数化**（domain 评审 P0 发现——硬编码 2 段在通用 TCM 书籍场景将产生 100% 假阳性）。
+
+### 设计（草案，不参与 P1/P2 实施）
+
+```python
+@dataclass
+class HierarchyAnomaly:
+    recipe_no: str
+    depth: int
+    expected_depth: int
+    source_page: int
+    resolution: str = "pending"
+
+def check_hierarchy_anomaly(
+    text: str, page_num: int,
+    expected_depth: int = 2,    # 可配置：CLI --expected-depth 或 TOC 推断
+) -> list[HierarchyAnomaly]:
+    """扫描 OCR 文本中段数 > expected_depth 的编号，返回异常列表。"""
+```
+
+- 输出：JSON 文件 `{kzocr_output_dir}/hierarchy_anomalies.json`
+- 仅属于 KZOCR 内部的检测工具，不直接介入 VLM 主流程
+- `HierarchyAnomalyError` 异常类型不参与初始提交（按 D1 YAGNI 原则）
 
 **效果目标：** 0 三级编号方剂在入库前漏报。
 
 ---
 
+## 冲突-2 修订：C1 L3 与 D2 OverSizeError 的职责边界
+
+**来源：** 架构师评审 冲突-2（Major）。
+
+**事实：** C1 L3（`leakage.py:192`）当前的"日志标记重 OCR"功能在 D2 到来后变得多余——D2 已经实时处理了超阈页面。
+
+**裁决：** D2 实施后修改 C1 `apply_leakage_defense`：
+- C1 L1（基线检测）保留——用于日志告警
+- C1 L2（max_tokens 物理上限）保留
+- C1 L3（日志标记重 OCR）**移除**——D2 已接管实时重试
+- C1 L4（探针重叠检测）保留
+- 确保 D2 的重 OCR 处理后，LeakageDetector.detect 的输入是"已重试的文本"，不会重复触发阈值告警
+
+---
+
 ## 实施顺序
 
-| 优先级 | 项 | 文件 | 工作量 |
-|--------|-----|------|--------|
-| **P1** | D1 异常分类 + retry_with_policy | `kzocr/engines/errors.py` (新建) | 小 |
-| **P1** | D1 `retry_with_policy` + 测试 | `kzocr/engines/ratelimit.py` (小改) | 小 |
-| **P1** | D2 VLM 主循环重试 + 失败分类 | `kzocr/engine/run.py` (改) | 中 |
-| **P2** | D3 VLM 断点续跑 | `kzocr/engine/run.py` (改) | 中 |
-| **P3** | D4 层级异常检测 | `kzocr/engines/hierarchy.py` (新建) | 小 |
+| 优先级 | 项 | 文件 | 说明 |
+|--------|-----|------|------|
+| **P0** | D0 Config 扩展 | `kzocr/config.py` (改) | 新增 `kzocr_output_dir` 映射 `KZOCR_OUTPUT_DIR` |
+| **P1** | D1 异常分类 (4 类) | `kzocr/engines/errors.py` (新建) | 初始提交仅 ApiError/RateLimitedError/OverSizeError/RetryExhaustedError |
+| **P1** | D1 retry_with_policy + 测试 | `kzocr/engines/errors.py` (同上) | 32-42 用例，D2 使用它消除 dead code |
+| **P1** | D2 VLM 主循环重试 + 失败分类 | `kzocr/engine/run.py` (改) | 通过 retry_with_policy，不手写循环 |
+| **P1** | 冲突-2 修正 | `kzocr/engines/leakage.py` (小改) | C1 L3 日志标记移除 |
+| **P2** | D3 VLM 断点续跑 | `kzocr/engine/run.py` (改) | 依赖 P0 + P1 |
+| **P3** | D4 层级异常检测 | `kzocr/engines/hierarchy.py` (新建) | 可选，延迟到 TOC 管线阶段 |
 
-## v0.5 评审要求
+## 实施注意事项
 
-| 角色 | 评审重点 |
-|------|---------|
-| **架构师** | D1 异常继承体系与现有模块兼容性；D3 缓存策略对输出目录结构的影响 |
-| **软件工程** | D2 `retry_with_policy` 模式正确性；D1 异常不滥用继承层级 |
-| **测试** | D2 重试路径覆盖（成功/耗尽/超阈值三种）；D3 断点续跑测试（中断恢复 + 缓存清除） |
-| **安全** | D3 VLM 缓存文件内容可能包含敏感 PDF 数据，清除策略 |
-| **领域** | D4 层级异常对中医方剂编号的实用性（三级编号是否确实为异常） |
+1. **D1 + D2 由同一人实施**——确保 `retry_with_policy` 被 D2 实际消费，消除架构脱节
+2. **D2 + D3 修改同一函数 `_run_vlm`**——即使分 P1/P2 实施，建议同人处理避免 diff 冲突
+3. **D3 缓存路径必须经过 C2 路径穿越校验**——调用 `atomic_write(cache_path, text, allowed_base=cfg.kzocr_output_dir)`
+4. **C1 L3 修改不破坏现有测试**——现有 leakage 测试中 L3 仅验证日志输出，移除后测试需对应调整
+5. **适配器 `max_tokens` 参数兼容**——PaddleOCRVl16Adapter / SenseNovaAdapter 需确认支持 `max_tokens` 参数；若不支持，D2 OverSizeError 不触发重试而是直接走过 OversizeError 路径（抛出异常）
+6. **`_run_real` 路径待未来升级**——当前 v0.5 不覆盖 `_run_real` 的异常增强（架构师 A-3 备查项）
+
+## 版本历史
+
+| 版本 | 日期 | 修订内容 |
+|------|------|----------|
+| v0.5-rc1 | 2026-07-10 | 初始方案，D1-D4 完整 |
+| **v0.5-rc2** | **2026-07-10** | **吸收 6 角色评审：** P0 Config 扩展、D1 YAGNI 缩小异常范围、D2 retry_with_policy 消除脱节、D2 OverSizeError 逻辑修复、D3 参数哈希校验 + 引擎标签 + TTL、D4 expected_depth 参数化、冲突-2 C1 L3 修订 |
