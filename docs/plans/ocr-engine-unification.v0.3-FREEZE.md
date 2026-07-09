@@ -61,6 +61,24 @@
 
 ---
 
+## K5 补充裁定 —— run_engine 薄门面保留 + 15 测试迁移表
+
+**裁定：`run_engine` 保留为 `EngineRouter.run()` 的向后兼容薄门面。**
+
+- `run_engine(pdf_path, book_code, config) -> BookResult` 签名维持不变，内部简化为仅调 `EngineRouter(config).run(pdf_path, book_code)`。
+- 删除现有 `run.py` 中的三路硬编码分支（`_run_vlm`/`_run_real`/`_init_vlm_adapter`），降级链收口到 `EngineRouter`。
+- 现有 15 测试经 facade 迁移，patch 目标从 `_run_vlm` 改为 `EngineRouter`，测试逻辑不丢失。
+
+**15 测试迁移表（来自 round3 testing.md）：**
+
+| 现有测试 | 处置 |
+|---|---|
+| `test_routes_to_vlm` / `to_real` / `mock_precedence` / `vlm_failure_*`（5 个） | 改写为 `EngineRouter.select` + 降级到 mock 的断言（门面保留则可不动） |
+| `test_vlm_renders_pdf_pages_to_markdown` / `multi_line` / `empty`（3 个） | 拆为：渲染（`_pdf_page_to_numpy`）、识别（注入 FakeAdapter）、结构化（`_vlm_markdown_to_pages`）三段单测 |
+| `test_vlm_markdown_to_pages_*`（2 个） | 保留，并入统一分段切割单测 |
+| `test_run_real_regression_unaffected`（1 个） | 改为断言 Router 在 `prefer=["kimi"]` 时选中真实适配器（importorskip kimi） |
+| `test_mock_engine_*` / `push_to_zai` / `export_*`（4 个，pipeline） | 完全保留，不受架构迁移影响 |
+
 ## 定稿后实施顺序（冻结即生效）
 1. **阶段 1 切片①（B4）**：`to_zai_prisma.py` 加 `is_mock` 列 + publish 守卫。
 2. **阶段 1 切片②（B2/B3）**：`_common.py` 沉降 + `adapter_to_line_result` + `egress.py` allowlist + `BaseAdapter` 可观测性 + 降级收口 Router。
