@@ -52,7 +52,7 @@ L4: 增量探针重叠检测（合并阶段）
   ```python
   def atomic_write(path: Path, content: str) -> None:
       """原子写入：先写 .tmp 再 os.replace。"""
-      tmp = path.with_suffix(path.suffix + ".tmp")
+      tmp = path.parent / (path.name + ".tmp")  # 防 path.with_suffix 丢失无后缀路径
       tmp.write_text(content, encoding="utf-8")
       os.replace(tmp, path)
 
@@ -78,7 +78,7 @@ L4: 增量探针重叠检测（合并阶段）
 
 ```
 Layer 1 (固定间隔 + 自适应): AdaptiveRateLimiter
-  - base_interval: 6.0s （可配置）
+  - base_interval: 3.0s （可配置）
   - 503/429: interval × 2（上限 60s）
   - 连续 5 次成功: interval × 0.9（不低于 base）
 
@@ -105,7 +105,9 @@ Layer 3 (退避重试): ExponentialBackoff
 **问题：** v1.1 `book_pipeline.py:880,936` 对 `book_metadata` 和 `content_node` 使用 `INSERT OR REPLACE`。如果后续只更新部分字段，丢失的数据不可恢复。
 
 **裁决：** 立即修复（不等待评审）：
-- `book_metadata` 写：`INSERT OR REPLACE` → `INSERT INTO ... ON CONFLICT(book_id) DO UPDATE SET col1=COALESCE(EXCLUDED.col1, col1), col2=COALESCE(...)` 逐字段保护
+- `book_metadata` 写：`INSERT OR REPLACE` → `INSERT INTO ... ON CONFLICT(book_id) DO UPDATE SET ...` 逐字段保护
+  - **mutable 字段**（`title`, `author`, `pub_year`, `page_start`, `page_end`, `total_pages`, `ocr_version`, `confidence`）：直接 `SET col=EXCLUDED.col`
+  - **immutable 字段**（`created_at`, `book_id`）：`SET col=COALESCE(EXCLUDED.col, col)` 保护已有值不被 NULL 覆盖
 - `content_node` 写：同上，按 `node_id` 冲突处理
 - v1.0 frozen 同步修复
 
