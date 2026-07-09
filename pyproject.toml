@@ -1,6 +1,6 @@
 [project]
 name = "kzocr"
-version = "0.2.0"
+version = "0.6.0"
 description = "KZOCR — 整合 kimi OCR 引擎 + zai 校对台，并将最终文档送入 kHUB"
 requires-python = ">=3.10"
 dependencies = [
