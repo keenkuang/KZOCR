@@ -93,15 +93,24 @@ def _build_engine_config() -> dict:
     }
 
 
-def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
-    """调用 kimi tcm_ocr 的 BookPipeline（需安装引擎依赖并配置环境）。"""
-    # CloudLLM 环境变量映射：KZOCR_LLM_* → GLM_*（CloudLLMClient 从 ENV 读取）
+def _map_cloudllm_env() -> None:
+    """将 KZOCR_LLM_* 环境变量映射到 CloudLLMClient 使用的 GLM_*。
+
+    CloudLLMClient 从环境变量读取配置（GLM_API_KEY 等），
+    而 KZOCR 用户配置的是 KZOCR_LLM_* 变量。
+    仅在目标变量（GLM_*）未设置时才做映射。
+    """
     if os.environ.get("KZOCR_LLM_API_KEY") and not os.environ.get("GLM_API_KEY"):
         os.environ["GLM_API_KEY"] = os.environ["KZOCR_LLM_API_KEY"]
     if os.environ.get("KZOCR_LLM_BASE_URL") and not os.environ.get("GLM_API_BASE"):
         os.environ["GLM_API_BASE"] = os.environ["KZOCR_LLM_BASE_URL"]
     if os.environ.get("KZOCR_LLM_MODEL") and not os.environ.get("GLM_MODEL"):
         os.environ["GLM_MODEL"] = os.environ["KZOCR_LLM_MODEL"]
+
+
+def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
+    """调用 kimi tcm_ocr 的 BookPipeline（需安装引擎依赖并配置环境）。"""
+    _map_cloudllm_env()
 
     engine_dir = Path(str(cfg.kimi_engine_dir))
     if not engine_dir.exists():
