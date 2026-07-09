@@ -3,7 +3,7 @@
 [![Test Status](https://github.com/keenkuang/KZOCR/actions/workflows/test.yml/badge.svg)](https://github.com/keenkuang/KZOCR/actions/workflows/test.yml)
 ![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.2.0-orange)
+![Version](https://img.shields.io/badge/version-0.6.0-orange)
 
 ---
 
@@ -268,7 +268,7 @@ cd KZOCR
 # 安装开发版本
 pip install -e .
 
-# 运行测试（177 个用例，~1s）
+# 运行测试（268 个用例，~15s）
 python -m pytest tests/ -v
 
 # 端到端冒烟
@@ -297,11 +297,11 @@ kzocr smoke --skip-push
 
 ## 项目状态
 
-**最新版本**：v0.2.0（语义版本号，功能里程碑见 CHANGELOG.md）
+**最新版本**：v0.6.0（语义版本号，功能里程碑见 CHANGELOG.md）
 
-**已实现**：v0.3 FREEZE 基础架构 + v0.4 AMEND 健壮性 + v0.5 AMEND 异常处理体系
+**已实现**：v0.3 FREEZE 基础架构 + v0.4 AMEND 健壮性 + v0.5 AMEND 异常处理体系 + v0.6 测试覆盖与项目基础设施
 
-**测试覆盖率**：177 个测试全通过（~1s）
+**测试覆盖率**：268 个测试全通过（~15s）
 
 **文档**：架构设计文档见 `docs/plans/`，多角色评审报告见 `docs/reviews/`
 

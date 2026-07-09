@@ -29,7 +29,7 @@ jobs:
         run: python -m pytest tests/ -v --tb=short
 
       - name: List test count (sanity check)
-        run: python -m pytest tests/ --co --quiet
+        run: python -m pytest tests/ --no-header -q
 
       - name: All tests passed
         run: echo "Tests: ✅"
