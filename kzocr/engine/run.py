@@ -13,6 +13,8 @@ import os
 import re
 import sys
 import time
+import hashlib
+import shutil
 from pathlib import Path
 
 import fitz
@@ -359,6 +361,73 @@ def _vlm_postprocess(text: str) -> str:
     return text.strip()
 
 
+# ── D3: VLM 逐页缓存（断点续跑）──
+
+
+def _compute_config_hash(cfg) -> str:
+    """计算 VLM 相关配置的哈希，用于判断缓存是否有效。
+
+    包含关键的 VLM 配置变量。配置变更时缓存自动失效。
+    """
+    parts = [
+        cfg.vlm_engine,
+        cfg.vlm_host,
+        str(cfg.vlm_port),
+        cfg.sensenova_api_key or "",
+        cfg.sensenova_model,
+        cfg.sensenova_base_url,
+        # 缓存 TTL 影响策略但本身不参与 hash（由调用侧校验 TTL）
+    ]
+    raw = "|".join(parts)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _get_vlm_cache_dir(cfg, safe_book_code: str) -> Path | None:
+    """返回 VLM 缓存目录路径。若 kzocr_output_dir 未设置则返回 None（无缓存）。"""
+    if not cfg.kzocr_output_dir:
+        return None
+    return Path(cfg.kzocr_output_dir) / "vlm_cache" / safe_book_code
+
+
+def _cache_page_path(cache_dir: Path, page_num: int) -> Path:
+    """单页缓存文件路径。"""
+    return cache_dir / f"page_{page_num}.txt"
+
+
+def _cache_config_hash_path(cache_dir: Path) -> Path:
+    """存储 config_hash 的路径。"""
+    return cache_dir / "config_hash"
+
+
+def _load_cache_text(cache_dir: Path, page_num: int, config_hash: str,
+                     cache_ttl: int) -> str | None:
+    """从缓存加载单页文本。若缓存无效/过期/不匹配返回 None。"""
+    page_path = _cache_page_path(cache_dir, page_num)
+    hash_path = _cache_config_hash_path(cache_dir)
+    if not page_path.exists() or not hash_path.exists():
+        return None
+    # 检查 TTL（文件 mtime 基于 time.time）
+    if cache_ttl > 0:
+        age = time.time() - page_path.stat().st_mtime
+        if age > cache_ttl:
+            logger.info("[VLM cache] P%d 缓存已过期（%.0fs > TTL %ds）", page_num, age, cache_ttl)
+            return None
+    stored_hash = hash_path.read_text(encoding="utf-8").strip()
+    if stored_hash != config_hash:
+        logger.info("[VLM cache] P%d 缓存配置不匹配，跳过", page_num)
+        return None
+    return page_path.read_text(encoding="utf-8").strip()
+
+
+def _save_cache_text(cache_dir: Path, page_num: int, text: str, config_hash: str) -> None:
+    """将单页文本写入缓存。"""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    _cache_page_path(cache_dir, page_num).write_text(text, encoding="utf-8")
+    hash_path = _cache_config_hash_path(cache_dir)
+    if not hash_path.exists():
+        hash_path.write_text(config_hash, encoding="utf-8")
+
+
 # ── D2: VLM 单页处理（含输出长度检查）──
 
 
@@ -478,6 +547,16 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
     # book_code 只保留安全字符（ASCII 字母/数字/连字符/下划线）
     safe_book_code = re.sub(r"[^A-Za-z0-9_\-]", "_", raw_book_code)
 
+    # ── D3: VLM 缓存初始化 ──
+    config_hash = _compute_config_hash(cfg)
+    cache_dir = _get_vlm_cache_dir(cfg, safe_book_code)
+    cache_ttl = cfg.cache_ttl_seconds if hasattr(cfg, 'cache_ttl_seconds') else 86400
+    if cache_dir and os.environ.get("KZOCR_CLEAR_CACHE") == "1":
+        if cache_dir.exists():
+            shutil.rmtree(str(cache_dir))
+            logger.info("[VLM] 缓存已清除: %s", cache_dir)
+    # ── end D3 ──
+
     doc = fitz.open(pdf_path)
     total_pages = len(doc)
     if total_pages == 0:
@@ -517,6 +596,17 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
                     elapsed, total_timeout, i, total_pages,
                 )
                 break
+            # ── D3: 尝试从缓存读取 ──
+            if cache_dir is not None and cache_dir.exists():
+                cached = _load_cache_text(cache_dir, i + 1, config_hash, cache_ttl)
+                if cached is not None:
+                    pages_text.append(cached)
+                    baseline.feed(cached)
+                    logger.debug("[VLM cache] P%d 命中缓存", i + 1)
+                    if failed_pages and i + 1 in failed_pages:
+                        del failed_pages[i + 1]
+                    continue
+            # ── end D3 ──
             # --- D2: structured error handling ---
             try:
                 img = _crop_to_body(_pdf_page_to_numpy(page))
@@ -573,6 +663,15 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
             pages_text.append(processed_text)
             # C1: 向基线注册当前页字数
             baseline.feed(processed_text)
+            # ── D3: 写入缓存 ──
+            if cache_dir is not None:
+                _save_cache_text(cache_dir, i + 1, processed_text, config_hash)
+            # ── end D3 ──
+        # ── D3: 缓存统计 ──
+        if cache_dir is not None and cache_dir.exists():
+            cached_count = len(list(cache_dir.glob("page_*.txt")))
+            logger.info("[VLM] 缓存页数: %d / %d", cached_count, len(all_pages))
+        # ── end D3 ──
         if not any(pages_text):
             raise RuntimeError(f"VLM 全部 {total_pages} 页识别均失败")
 

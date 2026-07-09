@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -19,6 +21,8 @@ from kzocr.engine.run import (
     VLM_ENGINE_LABEL,
     _vlm_markdown_to_pages,
     run_engine,
+    _compute_config_hash,
+    _get_vlm_cache_dir,
 )
 from kzocr.engines.errors import ApiError, OcrError, OverSizeError
 
@@ -484,3 +488,273 @@ class TestD2VlmRetry:
             last_call = mock_pdf2np.call_args_list[-1]
             _args, kwargs = last_call
             assert kwargs.get("dpi") == 72, f"expected dpi=72, got {kwargs}"
+
+
+# =============================================================================
+# D3: VLM 逐页缓存（断点续跑）
+# =============================================================================
+
+
+class TestD3VlmCache:
+    """D3: VLM 逐页缓存测试。
+
+    通过 tmp_path 创建缓存目录，模拟缓存命中/未命中/过期/配置变更等场景。
+    """
+
+    @staticmethod
+    def _create_cache_file(cache_dir: Path, page_num: int, text: str, config_hash: str):
+        """在测试中创建缓存文件。"""
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / f"page_{page_num}.txt").write_text(text, encoding="utf-8")
+        (cache_dir / "config_hash").write_text(config_hash, encoding="utf-8")
+
+    @staticmethod
+    def _make_mock_page() -> MagicMock:
+        p = MagicMock()
+        p.get_pixmap.return_value = MagicMock(
+            samples=b"\xff" * (100 * 200 * 3), n=3, height=100, width=200,
+        )
+        return p
+
+    @staticmethod
+    def _mock_pdf(mock_fitz_open, n_pages: int = 1) -> MagicMock:
+        doc = MagicMock()
+        doc.__len__.return_value = n_pages
+        doc.__iter__.return_value = iter([TestD3VlmCache._make_mock_page() for _ in range(n_pages)])
+        mock_fitz_open.return_value = doc
+        return doc
+
+    # ------------------------------------------------------------------
+    # 1) 缓存命中 → 跳过 VLM
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_hit_skips_vlm(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """缓存文件存在且 config_hash 匹配 → VLM adapter 不被调用。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+        config_hash = _compute_config_hash(cfg)
+        cache_dir = _get_vlm_cache_dir(cfg, "D3-HIT")
+        self._create_cache_file(cache_dir, 1, "缓存页正文。", config_hash)
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-HIT", config=cfg)
+
+        assert "缓存页正文。" in result.final_markdown
+        # VLM 不应被调用（缓存命中）
+        mock_vlm.recognize_pages.assert_not_called()
+        mock_vlm.recognize_page.assert_not_called()
+        assert len(result.failed_pages) == 0
+
+    # ------------------------------------------------------------------
+    # 2) 缓存未命中 → 正常处理
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_miss_processes_page(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """无缓存文件 → VLM 正常处理。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_vlm.recognize_pages.return_value = "来自VLM的正文。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-MISS", config=cfg)
+
+        assert "来自VLM的正文。" in result.final_markdown
+        mock_vlm.recognize_pages.assert_called_once()
+        assert len(result.failed_pages) == 0
+
+    # ------------------------------------------------------------------
+    # 3) 配置变更 → 缓存失效 → 重新处理
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_config_mismatch_reprocesses(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """缓存存在但 config_hash 不匹配 → VLM 被调用。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_vlm.recognize_pages.return_value = "新配置下识别的正文。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+        # 使用错误的 hash 创建缓存文件
+        cache_dir = _get_vlm_cache_dir(cfg, "D3-CFG")
+        self._create_cache_file(cache_dir, 1, "旧缓存的正文。", "wronghash1234567")
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-CFG", config=cfg)
+
+        # 应该是新配置下识别出的正文，不是旧缓存
+        assert "新配置下识别的正文。" in result.final_markdown
+        assert "旧缓存的正文。" not in result.final_markdown
+        mock_vlm.recognize_pages.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # 4) TTL 过期 → 缓存失效
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_ttl_expiry(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """缓存文件 mtime 早于 TTL → VLM 被调用。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_vlm.recognize_pages.return_value = "缓存过期后重新识别的正文。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+        config_hash = _compute_config_hash(cfg)
+        cache_dir = _get_vlm_cache_dir(cfg, "D3-TTL")
+        self._create_cache_file(cache_dir, 1, "过期缓存正文。", config_hash)
+        # 将缓存文件 mtime 设为 epoch（1970-01-01），确保远超 TTL
+        page_path = cache_dir / "page_1.txt"
+        os.utime(str(page_path), (0, 0))
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-TTL", config=cfg)
+
+        # 应为新识别结果
+        assert "缓存过期后重新识别的正文。" in result.final_markdown
+        mock_vlm.recognize_pages.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # 5) KZOCR_CLEAR_CACHE=1 → 清除旧缓存
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    @patch.dict(os.environ, {"KZOCR_CLEAR_CACHE": "1"})
+    def test_clear_cache_env_var(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """KZOCR_CLEAR_CACHE=1 → 已有缓存被清除，VLM 重新处理。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_vlm.recognize_pages.return_value = "清除后重新识别的正文。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+        config_hash = _compute_config_hash(cfg)
+        cache_dir = _get_vlm_cache_dir(cfg, "D3-CLR")
+        self._create_cache_file(cache_dir, 1, "将被清除的缓存正文。", config_hash)
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-CLR", config=cfg)
+
+        assert "清除后重新识别的正文。" in result.final_markdown
+        mock_vlm.recognize_pages.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # 6) kzocr_output_dir 有值 → 启用缓存
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_nonempty_output_dir(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """kzocr_output_dir 有值 → 缓存生效，命中后跳过 VLM。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_vlm.recognize_pages.return_value = "不应被调用。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+        config_hash = _compute_config_hash(cfg)
+        cache_dir = _get_vlm_cache_dir(cfg, "D3-OUTDIR")
+        self._create_cache_file(cache_dir, 1, "缓存命中正文。", config_hash)
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-OUTDIR", config=cfg)
+
+        assert "缓存命中正文。" in result.final_markdown
+        mock_vlm.recognize_pages.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # 7) kzocr_output_dir 为空 → 无缓存行为
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_empty_output_dir(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """kzocr_output_dir="" → 即使目录下有缓存文件也不使用。"""
+        self._mock_pdf(mock_fitz_open, n_pages=1)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        mock_vlm.recognize_pages.return_value = "VLM 正常处理结果。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            # kzocr_output_dir 默认为 ""（无缓存）
+        )
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-EMPTY", config=cfg)
+
+        assert "VLM 正常处理结果。" in result.final_markdown
+        mock_vlm.recognize_pages.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # 8) 部分缓存恢复
+    # ------------------------------------------------------------------
+
+    @patch("kzocr.engine.run.fitz.open")
+    @patch("kzocr.engine.run._init_vlm_adapter")
+    def test_cache_partial_recovery(self, mock_init_vlm, mock_fitz_open, tmp_path):
+        """前 2 页有缓存，第 3 页无缓存 → 前 2 页跳过 VLM，第 3 页正常处理。"""
+        self._mock_pdf(mock_fitz_open, n_pages=3)
+        mock_vlm = MagicMock()
+        mock_vlm.engine_label = VLM_ENGINE_LABEL
+        # 第 3 页的结果
+        mock_vlm.recognize_pages.return_value = "第三页正文。"
+        mock_init_vlm.return_value = mock_vlm
+
+        cfg = Config(
+            use_vlm=True,
+            kimi_engine_dir="/tmp/fake",
+            kzocr_output_dir=str(tmp_path),
+        )
+        config_hash = _compute_config_hash(cfg)
+        cache_dir = _get_vlm_cache_dir(cfg, "D3-PARTIAL")
+        # 只缓存前 2 页
+        self._create_cache_file(cache_dir, 1, "第一页缓存。", config_hash)
+        self._create_cache_file(cache_dir, 2, "第二页缓存。", config_hash)
+
+        result = run_engine("/fake/doc.pdf", book_code="D3-PARTIAL", config=cfg)
+
+        assert "第一页缓存。" in result.final_markdown
+        assert "第二页缓存。" in result.final_markdown
+        assert "第三页正文。" in result.final_markdown
+        # VLM 只被调用一次（第 3 页）
+        assert mock_vlm.recognize_pages.call_count == 1
+        assert len(result.failed_pages) == 0
