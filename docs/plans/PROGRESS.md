@@ -1,20 +1,26 @@
 # KZOCR 工作状态快照（crash-safe）
 
-> 最后更新：2026-07-09
+> 最后更新：2026-07-10
 > 用途：CodeBuddy 当机/重启后，从这里恢复上下文。本文件随代码一起提交并推送到 GitHub。
-> 当前焦点：**统一 OCR 引擎架构方案**（用户愿景：统一适配器 / 可切换路由 / 字形校验门 / 人工兜底 / 校对后结构化归档）
+> 当前焦点：**v0.5 AMEND — 异常处理体系改进**（D1-D4 方案已发布待评审）
 
 ## 1. 最近已落地并推送 GitHub 的提交（origin/main，用 id_ed25519_kzocr key）
 
 | commit | 内容 |
 |---|---|
-| （待提交） | docs: v0.3 定稿冻结(B1–B8) + 更新 PROGRESS |
-| `1afca27` | docs: round4 多角色评审 v0.2 (8角色) + 汇总 |
-| `a92935d` | docs: round3 评审汇总 summary（含 6 项假设裁决 + 修订清单） |
-| `f3ce06b` | docs: round3 多角色评审(8角色)初稿 |
-| `d69c37f` | docs: 加入工作状态快照 PROGRESS.md |
-| `a16af41` | docs: 统一 OCR 引擎架构方案（草案 v0.1） |
-| `1a0f27c` | fix/feat: 落地第2轮评审整改(H1–H8) + 修复 2 个集成阻塞 bug |
+| `2904869` | **docs: v0.5 AMEND** — 异常处理体系改进方案 (D1-D4) |
+| `e9c3c44` | fix: B7 crop_img 瞬态 — mock 示例填充 crop_img_path |
+| `e2df42e` | feat: B5 内置种子资源目录 — 4 个非空 JSON + ResourceStore 加载器 |
+| `835df7d` | fix: C2+C3 安全加固 — 路径穿越防御 + 限流器持久化 + 数据上限守卫 |
+| `7c7dff8` | feat: B6 MAX_PAGES=50 + TOTAL_TIMEOUT=7200s wall-clock budget |
+| `f5168d8` | feat: B3 egress allowlist — code-level hardcoded domain whitelist |
+| `581a958` | feat: Stage 1 implementation — C1 Leakage + C2 Atomic + C3 RateLimiter |
+| `0ac0d85` | docs: round5 multi-role review (6 roles) — v0.4 AMEND summary |
+| `cf3561d` | docs: v0.4 AMEND — absorb TOC project experience (C1-C5) |
+| `0630d57` | fix: round4 review residual issues — freeze contract types + conversion |
+| `d94ec0e` | docs: add test report (21 tests, coverage gaps) |
+| `2e15e87` | test: CloudLLM env mapping unit tests (5 cases) |
+| `a33325d` | docs: v0.3 定稿冻结(B1-B8 裁决) + 更新状态快照 |
 
 - **推送方式**：本仓库已设 `git config core.sshCommand "ssh -i ~/.ssh/id_ed25519_kzocr -o IdentitiesOnly=yes"`（默认 `id_ed25519` 是 khub-TCM 只读 deploy key，会被拒）。推送 KZOCR 必须用 kzocr key。
 - 测试：`pytest tests/` 全 15 例通过（整改提交前已验证）。
@@ -27,7 +33,10 @@
 4. **round3 多角色评审（8 角色）完成**：`docs/reviews/2026-07-09-round3/` 下 8 份 + `summary.md`。
 5. **方案修订到 v0.2**：吸收评审，落定 5 道硬门槛、结构化适配器返回、字形 `glyph_status` 枚举、版心裁剪非脱敏修正、`UNKNOWN` 入 HumanGate、`is_mock` 阻断 publish、目标 schema=规范 `schema.prisma`、6 项假设裁决。
 6. **round4 多角色评审（v0.2）完成**：`docs/reviews/2026-07-09-round4/` 下 8 份 + `summary.md`。结论 v0.2「有条件定稿」。
-7. **v0.3 定稿冻结（B1–B8）**：写入 `docs/plans/ocr-engine-unification.v0.3-FREEZE.md`，8 项 blocker 全部拍板（不再"二者择一"悬决），可直接进阶段 1。
+7. **v0.3 定稿冻结（B1–B8）**：写入 `docs/plans/ocr-engine-unification.v0.3-FREEZE.md`，8 项 blocker 全部拍板。
+8. **v0.4 AMEND 落地**：C1-C5 全部实现，114 测试通过。C2+C3 安全加固（Security C2/C3）。B5/B6/B7 内建种子资源、MAX_PAGES、crop_img 瞬态修复。
+9. **kimi_agent_ocr C4 修复**：INSERT OR REPLACE → ON CONFLICT DO UPDATE（本地 `d833cb4`，远程仓库未创建）。
+10. **v0.5 AMEND 方案**：D1-D4 异常处理体系改进方案已写入并推送到 GitHub，准备多角色评审。
 
 ## 3. 环境关键事实（重启后先读这个）
 
@@ -42,14 +51,18 @@
 - round4（审 v0.2）：8/8「有条件通过」，v0.2 相对 v0.1 是质变性改善，round3 问题全被接住（无一项未闭合）。但定稿前须冻结 8 项 blocker（B1–B8），最大 blocker：`glyph_status`/`glyph_verified` 二择一未决 + `AdapterPageResult→LineResult` 转换责任悬空 + 性能双闸阈值互斥。
 - v0.3 已把 B1–B8 全部裁决冻结（详见第 6 节）。
 
-## 5. 任务清单（TaskCreate #15–#20）
+## 5. 任务清单
 
-- #15 编写统一 OCR 引擎架构方案（草案）—— ✅ 已完成（v0.2）
-- #16 多角色评审统一 OCR 引擎方案 —— ✅ 已完成（round3，8 角色 + summary）
-- #17 依评审修订方案并频繁提交到 github —— ✅ 已完成（v0.2）
-- #18 实施阶段1-6（适配器注册表→路由→字形校验→人工兜底→归档）—— ⏳ 定稿后启动
-- #19 round4 多角色评审 v0.2 方案 —— ✅ 已完成（8 角色 + summary）
-- #20 定稿冻结 B1–B8（v0.3）+ 启动阶段1 实施 —— 🔄 进行中（v0.3 已写，待提交；下一步切片① B4）
+- v0.3 定稿冻结 B1–B8 — ✅ 已冻结
+- v0.4 AMEND C1–C5 — ✅ 已实现（114 测试通过）
+- Stage 1 实现 (C1 Leakage + C2 Atomic + C3 RateLimiter) — ✅ 已落地
+- B3 egress allowlist — ✅ 已落地
+- B4 is_mock sink 守卫 — ✅ 已落地
+- B5 内置种子资源 — ✅ 已落地
+- B6 MAX_PAGES/TOTAL_TIMEOUT — ✅ 已落地
+- B7 crop_img 瞬态 — ✅ 已落地
+- C2+C3 安全加固 — ✅ 已落地
+- **v0.5 AMEND D1-D4 — 🔄 方案已发布，待多角色评审**
 
 ## 6. v0.3 定稿冻结 B1–B8（全部裁决，无悬决）
 
