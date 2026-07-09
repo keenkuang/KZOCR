@@ -32,11 +32,13 @@
 - VLM 本地服务（PaddleOCR-VL-1.6 llama-server）**当前未监听** 127.0.0.1:18080 → 跑 VLM 直连需先起服务或配 SenseNova key。
 - 无 GPU 环境：真实 kimi 多引擎逐行 OCR 可能跑不动；VLM 整页推理是无 GPU 的最佳出路。
 
-## 4. round3 多角色评审（进行中，需继续）
+## 4. round3 多角色评审（✅ 已完成，2026-07-09）
 
-- 计划 8 角色：architect / security / performance / domain(中医) / maintainability / data_integrity / proofreading_ux / testing。
-- 每个角色应产出 `docs/reviews/2026-07-09-round3/<role>.md` + 一份 `summary.md`。
-- **未完成**：8 个评审文件均未写；需在重启后补 spawn 并行评审 agent，再综合修订方案。
+- 8 角色评审文件均已产出：`docs/reviews/2026-07-09-round3/{architect,security,performance,domain,maintainability,data_integrity,proofreading_ux,testing}.md`
+- 综合汇总：`docs/reviews/2026-07-09-round3/summary.md`
+- **总评**：有条件通过。方向获一致认可，但有 12 项 High 级硬伤须先闭合（A1–A4 架构契约/职责、B1–B3 安全暴露面/数据最小化/假数据、C1–C4 性能资源、D1–D4 领域贴合、E1–E5 数据完整与校对闭环）。
+- **第 8 章 6 项假设已全部收口**（见 summary 第二节表格），其中假设 1/2/5 被修订。
+- **下一步**：据 summary 修订 `ocr-engine-unification.md` → v0.2，提交推送，再进阶段 1 实施。
 
 ## 5. 任务清单（TaskCreate #15–#18）
 
