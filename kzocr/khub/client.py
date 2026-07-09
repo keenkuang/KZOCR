@@ -13,6 +13,7 @@ import urllib.request
 from typing import Optional
 
 from .. import config
+from ..security.egress import validate_url as egress_validate_url
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,18 @@ def _validate_url(base_url: str) -> str:
     """校验 kHUB 基址协议与主机，防止 SSRF / 本地文件读取。
 
     仅允许 http/https；拒绝 file:/ftp: 等非 HTTP 协议与保留/元数据网段。
+    委托 kzocr.security.egress.validate_url 进行统一出站校验（含 allowlist + DNS 复检）。
     """
     if not base_url:
         raise KHUBError("未配置 kHUB 地址（KHUB_BASE_URL）")
     if not (base_url.startswith("http://") or base_url.startswith("https://")):
         raise KHUBError(f"kHUB 地址协议不被允许（仅支持 http/https）：{base_url}")
     host = urllib.parse.urlparse(base_url).hostname or ""
-    if host in ("169.254.169.254", "metadata.google.internal"):
-        raise KHUBError(f"kHUB 地址指向保留/元数据网段，已拒绝：{base_url}")
+
+    # DNS 复检 + 内网拒绝（委托统一 egress 模块）
+    if _is_private_host(host):
+        raise KHUBError(f"kHUB 地址指向内网/保留网段，已拒绝：{base_url}")
+
     if base_url.startswith("http://"):
         if host not in ("127.0.0.1", "localhost", "::1"):
             logger.warning(
@@ -40,6 +45,12 @@ def _validate_url(base_url: str) -> str:
                 "建议改用 https 并仅限可信网络"
             )
     return base_url.rstrip("/")
+
+
+def _is_private_host(host: str) -> bool:
+    """判断 host 是否为内网/保留地址（复用 egress 模块的内网检测）。"""
+    from ..security.egress import _is_private_ip
+    return _is_private_ip(host)
 
 
 def push_document(
