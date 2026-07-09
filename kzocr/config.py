@@ -7,8 +7,20 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_int(val: str, default: int, name: str = "") -> int:
+    """安全解析整数环境变量，解析失败时回退到默认值并记录警告。"""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        logger.warning("[config] %s='%s' 不是有效整数，使用默认值 %d", name, val, default)
+        return default
 
 
 @dataclass
@@ -64,17 +76,17 @@ class Config:
             khub_base_url=os.environ.get("KHUB_BASE_URL", "http://127.0.0.1:8000"),
             khub_db=khub_db,
             vlm_host=os.environ.get("KZOCR_VLM_HOST", "127.0.0.1"),
-            vlm_port=int(os.environ.get("KZOCR_VLM_PORT", "18080")),
+            vlm_port=_safe_int(os.environ.get("KZOCR_VLM_PORT", "18080"), 18080, "KZOCR_VLM_PORT"),
             sensenova_api_key=os.environ.get("SENSENOVA_API_KEY", ""),
             sensenova_model=os.environ.get("SENSENOVA_MODEL", "sensenova-6.7-flash-lite"),
             sensenova_base_url=os.environ.get("SENSENOVA_BASE_URL", "https://token.sensenova.cn/v1/chat/completions"),
-            sensenova_timeout=int(os.environ.get("SENSENOVA_TIMEOUT", "180")),
+            sensenova_timeout=_safe_int(os.environ.get("SENSENOVA_TIMEOUT", "180"), 180, "SENSENOVA_TIMEOUT"),
             deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
             deepseek_model=os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash"),
             deepseek_base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-            deepseek_rpm=int(os.environ.get("DEEPSEEK_RPM", "20")),
+            deepseek_rpm=_safe_int(os.environ.get("DEEPSEEK_RPM", "20"), 20, "DEEPSEEK_RPM"),
             kzocr_output_dir=os.environ.get("KZOCR_OUTPUT_DIR", "/tmp/kzocr/output"),
-            cache_ttl_seconds=int(os.environ.get("KZOCR_CACHE_TTL", "86400")),
+            cache_ttl_seconds=_safe_int(os.environ.get("KZOCR_CACHE_TTL", "86400"), 86400, "KZOCR_CACHE_TTL"),
         )
 
 
