@@ -20,6 +20,7 @@ import numpy as np
 from kzocr import config as app_config
 from .mock import mock_book_result as build_mock_book
 from .types import BookResult, PageResult, ParagraphResult, LineResult
+from kzocr.engines.leakage import CharCountBaseline, apply_leakage_defense
 
 logger = logging.getLogger(__name__)
 
@@ -453,6 +454,8 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
 
     try:
         pages_text: list[str] = []
+        # C1: 初始化字符数基线（前 50 页建立中位数基线）
+        baseline = CharCountBaseline(window=50)
         # 是否支持双页上下文（SenseNova 适配器）
         supports_two_page = hasattr(vlm, "recognize_pages")
 
@@ -488,8 +491,13 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
                 logger.warning("[VLM] 第 %d 页识别失败，跳过：%s", i + 1, exc)
                 continue
             pages_text.append(text)
+            # C1: 向基线注册当前页字数
+            baseline.feed(text)
         if not any(pages_text):
             raise RuntimeError(f"VLM 全部 {total_pages} 页识别均失败")
+
+        # C1: 跨页泄漏防御（L1-L4 四层，在跨页合并之前执行）
+        pages_text = apply_leakage_defense(pages_text, baseline)
 
         # 跨页合并：检测方剂在页末断裂，将下页续接行合并到本页末尾
         pages_text = _merge_cross_page_breaks(pages_text)

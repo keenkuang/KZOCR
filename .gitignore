@@ -11,7 +11,7 @@ exports/
 *.log
 
 # 本地子模块（按需通过 scripts/setup_submodules.sh 拉取）
-engines/
+/engines/
 console/
 
 # 运行时数据库产物
