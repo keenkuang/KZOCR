@@ -56,7 +56,7 @@ class RetryExhaustedError(OcrError): # 重试耗尽，跳过该页
 from kzocr.engines.ratelimit import ExponentialBackoff
 
 BACKOFF_CONFIGS = {
-    "api":      ExponentialBackoff(base_delay=2.0, max_retries=3, max_delay=300.0, jitter=0.5),
+    "api":      ExponentialBackoff(base_delay=1.0, max_retries=3, max_delay=300.0, jitter=0.5),   # 性能建议：2.0→1.0s 减少首轮重试延迟
     "ratelimit": ExponentialBackoff(base_delay=1.0, max_retries=3, max_delay=60.0,  jitter=0.3),
     "oversize": ExponentialBackoff(base_delay=0,    max_retries=1),  # 快速重试，max_tokens×1.8
 }
@@ -149,7 +149,7 @@ for i, page in enumerate(all_pages):
             lambda: vlm.recognize_pages(imgs) if supports_two_page else vlm.recognize_page(imgs[0]),
             backoff=BACKOFF_CONFIGS["api"],
             error_types=(ApiError, RateLimitedError),
-            on_exhausted=lambda pn, exc: failed_pages.update({pn: type(exc).__name__}),
+            on_exhausted=lambda _attempt, exc: failed_pages.update({page_num: type(exc).__name__}),
         )
         # OverSizeError 检测 + 重 OCR
         if baseline.ready and len(text) > baseline.threshold:
@@ -158,7 +158,7 @@ for i, page in enumerate(all_pages):
                        if supports_two_page else vlm.recognize_page(imgs[0], max_tokens=int(baseline.median * 1.8)),
                 backoff=BACKOFF_CONFIGS["oversize"],
                 error_types=(OverSizeError,),
-                on_exhausted=lambda pn, exc: failed_pages.update({pn: "OverSize:" + type(exc).__name__}),
+                on_exhausted=lambda _attempt, exc: failed_pages.update({page_num: "OverSize:" + type(exc).__name__}),
             )
     except RetryExhaustedError as exc:
         # 重试耗尽 → 记录失败页 + 跳过（注意：on_exhausted 先于 except 执行）
@@ -341,4 +341,4 @@ def check_hierarchy_anomaly(
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | v0.5-rc1 | 2026-07-10 | 初始方案，D1-D4 完整 |
-| **v0.5-rc4** | **2026-07-10** | **吸收 round8 测试评审 B1/B2：** `RateLimitedError` 新增 `retry_after` 构造函数参数；D3 补充 `_compute_config_hash()` 定义；测试用例估算修正为 38-52（新增）+ 47（已有）= 85-99 |
+| **v0.5-rc4** | **2026-07-10** | **吸收 round8 评审（含性能）：** `RateLimitedError` 新增 `retry_after` 构造函数参数（测试 B1）；D3 补充 `_compute_config_hash()` 完整定义（测试 B2）；base_delay 2.0→1.0s（性能建议）；新增累积重试时间跟踪建议（批量场景） |
