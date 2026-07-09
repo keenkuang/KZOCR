@@ -1,0 +1,121 @@
+[
+  {
+    "herb": "附子",
+    "max_dosage_g": 15.0,
+    "usual_dosage_g": "3~15",
+    "toxic_component": "乌头碱",
+    "note": "须炮制减毒；先煎30~60分钟至口尝无麻舌感；剂量超15g需医师双签"
+  },
+  {
+    "herb": "川乌",
+    "max_dosage_g": 9.0,
+    "usual_dosage_g": "1.5~3",
+    "toxic_component": "乌头碱",
+    "note": "制后用；不宜与贝母、半夏、白及、天花粉同用"
+  },
+  {
+    "herb": "草乌",
+    "max_dosage_g": 4.5,
+    "usual_dosage_g": "1.5~3",
+    "toxic_component": "乌头碱",
+    "note": "制后用；毒性强于川乌，煎煮更须充分"
+  },
+  {
+    "herb": "细辛",
+    "max_dosage_g": 3.0,
+    "usual_dosage_g": "1~3",
+    "toxic_component": "马兜铃酸",
+    "note": "用量不宜过钱（≈3g）；散剂更须减量"
+  },
+  {
+    "herb": "马钱子",
+    "max_dosage_g": 0.6,
+    "usual_dosage_g": "0.3~0.6",
+    "toxic_component": "士的宁",
+    "note": "炮制后入丸散；严禁生用；单次极量0.6g"
+  },
+  {
+    "herb": "巴豆",
+    "max_dosage_g": 0.3,
+    "usual_dosage_g": "0.1~0.3",
+    "toxic_component": "巴豆油",
+    "note": "去油制霜入丸散；服后勿食热物"
+  },
+  {
+    "herb": "砒石",
+    "max_dosage_g": 0.009,
+    "usual_dosage_g": "0.002~0.004",
+    "toxic_component": "三氧化二砷",
+    "note": "大毒，须严格控量；入丸散，不宜煎煮"
+  },
+  {
+    "herb": "蟾酥",
+    "max_dosage_g": 0.03,
+    "usual_dosage_g": "0.015~0.03",
+    "toxic_component": "蟾酥毒素",
+    "note": "入丸散；孕妇禁用；对心脏有强心苷样作用"
+  },
+  {
+    "herb": "雄黄",
+    "max_dosage_g": 0.1,
+    "usual_dosage_g": "0.05~0.1",
+    "toxic_component": "硫化砷",
+    "note": "入丸散，不入煎剂；不宜久服"
+  },
+  {
+    "herb": "朱砂",
+    "max_dosage_g": 0.5,
+    "usual_dosage_g": "0.1~0.5",
+    "toxic_component": "硫化汞",
+    "note": "入丸散，不入煎剂；不宜长期使用"
+  },
+  {
+    "herb": "闹羊花",
+    "max_dosage_g": 1.5,
+    "usual_dosage_g": "0.6~1.5",
+    "toxic_component": "木藜芦毒素",
+    "note": "宜入散剂；体弱者慎用"
+  },
+  {
+    "herb": "雪上一枝蒿",
+    "max_dosage_g": 0.02,
+    "usual_dosage_g": "0.002~0.02",
+    "toxic_component": "乌头碱",
+    "note": "极毒，炮制后入散剂；极量0.02g"
+  },
+  {
+    "herb": "雷公藤",
+    "max_dosage_g": 10.0,
+    "usual_dosage_g": "6~10",
+    "toxic_component": "雷公藤甲素",
+    "note": "去皮木质部煎煮；肝肾毒性显著；须监测肝肾功能"
+  },
+  {
+    "herb": "斑蝥",
+    "max_dosage_g": 0.06,
+    "usual_dosage_g": "0.03~0.06",
+    "toxic_component": "斑蝥素",
+    "note": "炮制后入丸散；外用适量，皮肤破损禁敷"
+  },
+  {
+    "herb": "水蛭",
+    "max_dosage_g": 3.0,
+    "usual_dosage_g": "1~3",
+    "toxic_component": "水蛭素",
+    "note": "入煎剂3g；研末冲服0.3~0.5g；孕妇禁用"
+  },
+  {
+    "herb": "蜈蚣",
+    "max_dosage_g": 1.0,
+    "usual_dosage_g": "0.5~1",
+    "toxic_component": "组胺类",
+    "note": "研末冲服0.5~1.0g；孕妇禁用"
+  },
+  {
+    "herb": "全蝎",
+    "max_dosage_g": 5.0,
+    "usual_dosage_g": "3~5",
+    "toxic_component": "蝎毒素",
+    "note": "研末冲服0.5~1.0g；孕妇慎用"
+  }
+]

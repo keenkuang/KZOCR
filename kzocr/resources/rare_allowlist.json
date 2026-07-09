@@ -1,0 +1,146 @@
+[
+  {
+    "term": "萆薢",
+    "pinyin": "bì xiè",
+    "category": "herb",
+    "description": "祛风湿、利湿浊药（Dioscorea hypoglauca）"
+  },
+  {
+    "term": "䗪虫",
+    "pinyin": "zhè chóng",
+    "category": "herb",
+    "description": "活血化瘀药（Eupolyphaga sinensis）"
+  },
+  {
+    "term": "蘡薁",
+    "pinyin": "yīng yù",
+    "category": "herb",
+    "description": "山葡萄（Vitis bryoniifolia），利水消肿"
+  },
+  {
+    "term": "薤白",
+    "pinyin": "xiè bái",
+    "category": "herb",
+    "description": "通阳散结药（Allium macrostemon）"
+  },
+  {
+    "term": "豨莶",
+    "pinyin": "xī xiān",
+    "category": "herb",
+    "description": "豨莶草（Siegesbeckia orientalis），祛风湿利关节"
+  },
+  {
+    "term": "穞豆",
+    "pinyin": "lǚ dòu",
+    "category": "herb",
+    "description": "穞豆衣（Glycine max testa），养血平肝"
+  },
+  {
+    "term": "礞石",
+    "pinyin": "méng shí",
+    "category": "mineral",
+    "description": "金石药，坠痰下气"
+  },
+  {
+    "term": "硇砂",
+    "pinyin": "náo shā",
+    "category": "mineral",
+    "description": "矿物药（Sal Ammoniac），消积软坚"
+  },
+  {
+    "term": "砒石",
+    "pinyin": "pī shí",
+    "category": "mineral",
+    "description": "砒霜矿石，大毒，外用为主"
+  },
+  {
+    "term": "羸弱",
+    "pinyin": "léi ruò",
+    "category": "symptom",
+    "description": "瘦弱（古籍描述体质的常见词）"
+  },
+  {
+    "term": "齆鼻",
+    "pinyin": "wèng bí",
+    "category": "symptom",
+    "description": "鼻塞不通声重（古籍常见症状描述）"
+  },
+  {
+    "term": "鼽衄",
+    "pinyin": "qiú nǜ",
+    "category": "symptom",
+    "description": "鼻塞流涕兼鼻出血（古籍常见描述）"
+  },
+  {
+    "term": "瘛瘲",
+    "pinyin": "chì zòng",
+    "category": "symptom",
+    "description": "筋脉挛急（'抽搐'的古称）"
+  },
+  {
+    "term": "痏",
+    "pinyin": "wěi",
+    "category": "symptom",
+    "description": "瘢痕、针刺痕迹（古籍描述针灸后反应）"
+  },
+  {
+    "term": "瞤",
+    "pinyin": "rún",
+    "category": "symptom",
+    "description": "肌肉掣动（眼睑瞤动为常见表现）"
+  },
+  {
+    "term": "瞀",
+    "pinyin": "mào",
+    "category": "symptom",
+    "description": "头目昏花、视物不清"
+  },
+  {
+    "term": "眥",
+    "pinyin": "zì",
+    "category": "anatomy",
+    "description": "眼角（内眥、外眥），中医眼部辨证常用"
+  },
+  {
+    "term": "頏顙",
+    "pinyin": "háng sǎng",
+    "category": "anatomy",
+    "description": "咽喉上口（古籍解剖部位名）"
+  },
+  {
+    "term": "膻中",
+    "pinyin": "dàn zhōng",
+    "category": "acupoint",
+    "description": "任脉穴位，'膻'读 dàn 非 tán"
+  },
+  {
+    "term": "瘰疬",
+    "pinyin": "luǒ lì",
+    "category": "disease",
+    "description": "颈部淋巴结结核（中医病名）"
+  },
+  {
+    "term": "癥瘕",
+    "pinyin": "zhēng jiǎ",
+    "category": "disease",
+    "description": "腹中结块（'癥'为有形、'瘕'为聚散无常）"
+  },
+  {
+    "term": "痃癖",
+    "pinyin": "xuán pǐ",
+    "category": "disease",
+    "description": "胁肋间积块（古籍常见病名）"
+  },
+  {
+    "term": "㿂疝",
+    "pinyin": "zhēng shàn",
+    "category": "disease",
+    "description": "古籍疝病分类之一"
+  },
+  {
+    "term": "臌胀",
+    "pinyin": "gǔ zhàng",
+    "category": "disease",
+    "description": "腹部膨胀如鼓（水臌、气臌）"
+  }
+]

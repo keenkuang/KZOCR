@@ -1,0 +1,152 @@
+[
+  {
+    "wrong": "我术",
+    "correct": "莪术",
+    "category": "形似",
+    "note": "莪术（Curcuma zedoaria）常被误写为'我术'"
+  },
+  {
+    "wrong": "黄芹",
+    "correct": "黄芩",
+    "category": "形似",
+    "note": "黄芩（Scutellaria baicalensis）与芹菜无关"
+  },
+  {
+    "wrong": "黄芪",
+    "correct": "黄芪",
+    "category": "正确",
+    "note": "注意与'黄芩'区分，黄芪为 Astragalus"
+  },
+  {
+    "wrong": "半下",
+    "correct": "半夏",
+    "category": "音似",
+    "note": "半夏（Pinellia ternata）—'下'与'夏'方言音近"
+  },
+  {
+    "wrong": "白木",
+    "correct": "白术",
+    "category": "形似",
+    "note": "白术（Atractylodes macrocephala）—'术'非'木'"
+  },
+  {
+    "wrong": "苍术",
+    "correct": "苍术",
+    "category": "正确",
+    "note": "苍术（Atractylodes lancea），与白术同属异种"
+  },
+  {
+    "wrong": "夕草",
+    "correct": "甘草",
+    "category": "形似",
+    "note": "甘草（Glycyrrhiza uralensis）—'甘'误为'夕'"
+  },
+  {
+    "wrong": "玉金",
+    "correct": "郁金",
+    "category": "音似",
+    "note": "郁金（Curcuma aromatica）—'郁'音近'玉'"
+  },
+  {
+    "wrong": "夕加",
+    "correct": "血竭",
+    "category": "字形误",
+    "note": "血竭（Dragon's Blood）OCR 常见形误"
+  },
+  {
+    "wrong": "己",
+    "correct": "己",
+    "category": "笔误",
+    "note": "注意'己'（jǐ）、'已'（yǐ）、'巳'（sì）三者区别"
+  },
+  {
+    "wrong": "姜虫",
+    "correct": "僵虫",
+    "category": "音似",
+    "note": "僵蚕（Bombyx batryticatus）—'僵'音近'姜'"
+  },
+  {
+    "wrong": "生夕",
+    "correct": "生晒",
+    "category": "形似",
+    "note": "生晒参与'生夕'形似"
+  },
+  {
+    "wrong": "夕傅",
+    "correct": "血府",
+    "category": "形似",
+    "note": "血府逐瘀汤—'血府'误为'夕傅'"
+  },
+  {
+    "wrong": "王不流行",
+    "correct": "王不留行",
+    "category": "缺字",
+    "note": "王不留行（Vaccaria segetalis）—缺'留'"
+  },
+  {
+    "wrong": "栀了",
+    "correct": "栀子",
+    "category": "形似",
+    "note": "栀子（Gardenia jasminoides）—'子'误为'了'"
+  },
+  {
+    "wrong": "大黄",
+    "correct": "大黄",
+    "category": "正确",
+    "note": "大黄（Rheum palmatum），注意与'大蓟'区分"
+  },
+  {
+    "wrong": "大吉",
+    "correct": "大蓟",
+    "category": "形似",
+    "note": "大蓟（Cirsium japonicum）—'蓟'误为'吉'"
+  },
+  {
+    "wrong": "小吉",
+    "correct": "小蓟",
+    "category": "形似",
+    "note": "小蓟（Cirsium setosum）—'蓟'误为'吉'"
+  },
+  {
+    "wrong": "山枝",
+    "correct": "山栀",
+    "category": "音似",
+    "note": "山栀（Gardenia jasminoides 别名）常用，但'枝'应为'栀'"
+  },
+  {
+    "wrong": "天丁",
+    "correct": "天丁",
+    "category": "正确",
+    "note": "天丁（皂角刺别名），非'天了'"
+  },
+  {
+    "wrong": "双白",
+    "correct": "桑白",
+    "category": "音似",
+    "note": "桑白皮（Morus alba root bark）—'桑'音近'双'"
+  },
+  {
+    "wrong": "双枝",
+    "correct": "桑枝",
+    "category": "音似",
+    "note": "桑枝（Morus alba twig）—'桑'音近'双'"
+  },
+  {
+    "wrong": "双叶",
+    "correct": "桑叶",
+    "category": "音似",
+    "note": "桑叶（Morus alba leaf）—'桑'音近'双'"
+  },
+  {
+    "wrong": "全虫",
+    "correct": "全蝎",
+    "category": "别名等效",
+    "note": "全蝎（Scorpio）别名全虫，两者皆可"
+  },
+  {
+    "wrong": "勾藤",
+    "correct": "钩藤",
+    "category": "形似",
+    "note": "钩藤（Uncaria rhynchophylla）—'钩'误为'勾'"
+  }
+]
