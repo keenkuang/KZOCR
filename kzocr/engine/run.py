@@ -39,7 +39,8 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
         except Exception as exc:  # noqa: BLE001
             if cfg.require_real:
                 raise
-            logger.warning("[engine] VLM 引擎执行失败，降级到桩数据：%s", exc)
+            logger.error("[engine] ⚠ VLM 引擎执行失败，已降级为占位【假数据】（非真实 OCR）：%s", exc)
+            print("⚠ 警告：VLM 引擎失败，本次产出为占位假数据，并非真实 OCR 结果。")
             return build_mock_book(book_code=book_code or "TCM-MOCK-001")
 
     try:
@@ -47,8 +48,9 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
     except Exception as exc:  # noqa: BLE001
         if cfg.require_real:
             raise
-        logger.warning("[engine] 真实引擎执行失败，降级到桩数据：%s", exc)
-        return build_mock_book(book_code=book_code or "TCM-MOCK-001")
+            logger.error("[engine] ⚠ 真实引擎执行失败，已降级为占位【假数据】（非真实 OCR）：%s", exc)
+            print("⚠ 警告：真实引擎失败，本次产出为占位假数据，并非真实 OCR 结果。")
+            return build_mock_book(book_code=book_code or "TCM-MOCK-001")
 
 
 def _build_engine_config() -> dict:
@@ -70,8 +72,8 @@ def _build_engine_config() -> dict:
         "model": os.environ.get("KZOCR_LLM_MODEL", "qwen-max"),
     }
     return {
-        "book_library_dir": os.environ.get("KZOCR_ENGINE_LIB_DIR", "/home/keen/kzocr_engine_lib"),
-        "output_dir": os.environ.get("KZOCR_ENGINE_OUTPUT_DIR", "/home/keen/kzocr_engine_lib/results"),
+        "book_library_dir": os.environ.get("KZOCR_ENGINE_LIB_DIR", ""),
+        "output_dir": os.environ.get("KZOCR_ENGINE_OUTPUT_DIR", ""),
         "pg_dsn": os.environ.get("KZOCR_PG_DSN", ""),
         "engine_configs": {
             "paddleocr": {
@@ -103,20 +105,27 @@ def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
     from tcm_ocr.pipeline.book_pipeline import BookPipeline
 
     engine_config = _build_engine_config()
-    logger.info("[engine] 实例化 BookPipeline（lib_dir=%s）", engine_config["book_library_dir"])
-    pipeline = BookPipeline(engine_config)
     book_id = book_code or "KZOCR-real"
+    logger.info("[engine] 调用 kimi BookPipeline 处理 %s（%s）", os.path.basename(pdf_path), book_id)
+    pipeline = BookPipeline(engine_config)
     result = pipeline.process_book(pdf_path, book_id)
+    logger.info("[engine] BookPipeline 完成，读取交付物…")
 
     final_md = _read_deliverable(result, engine_config["book_library_dir"], book_id)
     meta = getattr(pipeline, "current_book_meta", {}) or {}
     title = meta.get("title") or os.path.basename(pdf_path)
-    return BookResult(
+    book = BookResult(
         book_code=book_id,
         title=title,
         engine_label="kimi",
         final_markdown=final_md or "",
     )
+    # H4 修复：真实引擎路径若未给出结构化 pages（如仅 final_markdown），
+    # 从 Markdown 重建至少一页多段落，保证 zai 校对台非空（pageCount>0）。
+    if not book.pages and book.final_markdown:
+        book.pages = _markdown_to_pages(book.final_markdown, book_id)
+        logger.warning("[engine] 真实引擎未返回结构化 pages，已从 final_markdown 重建 %d 页", len(book.pages))
+    return book
 
 
 def _read_deliverable(result, lib_dir: str, book_id: str) -> str:
@@ -145,6 +154,36 @@ def _read_deliverable(result, lib_dir: str, book_id: str) -> str:
         if mds:
             return mds[0].read_text(encoding="utf-8", errors="ignore")
     return ""
+
+
+def _markdown_to_pages(markdown: str, book_code: str) -> list:
+    """把 final_markdown 拆成 PageResult[]（保底，使校对台非空）。
+
+    优先按 '## 第 N 页' 分段；无标记则整本作为单页多行。
+    """
+    chunks = re.split(r"(?m)^##\s*第\s*\d+\s*页\s*$", markdown)
+    pages: list = []
+    idx = 1
+    for seg in chunks[1:]:
+        text = seg.strip()
+        if not text:
+            continue
+        lines = [
+            LineResult(sequence_in_paragraph=i + 1, consensus=ln, final=ln,
+                       engine_texts={"kimi": ln})
+            for i, ln in enumerate(text.splitlines()) if ln.strip()
+        ]
+        paras = [ParagraphResult(sequence_in_page=1, lines=lines)] if lines else []
+        pages.append(PageResult(page_num=idx, paragraphs=paras))
+        idx += 1
+    if not pages:
+        lines = [
+            LineResult(sequence_in_paragraph=i + 1, consensus=ln, final=ln,
+                       engine_texts={"kimi": ln})
+            for i, ln in enumerate(markdown.splitlines()) if ln.strip()
+        ]
+        pages = [PageResult(page_num=1, paragraphs=[ParagraphResult(sequence_in_page=1, lines=lines)])]
+    return pages
 
 
 # =============================================================================
@@ -180,6 +219,7 @@ def _init_vlm_adapter(cfg) -> object:
                 base_url=cfg.sensenova_base_url,
                 timeout=cfg.sensenova_timeout,
             )
+            adapter.engine_label = "SenseNova"
             logger.info("[VLM] 使用 SenseNova API（model=%s）", cfg.sensenova_model)
             return adapter
         except Exception as exc:
@@ -188,12 +228,14 @@ def _init_vlm_adapter(cfg) -> object:
     # 降级到 PaddleOCR-VL-1.6（本地 llama-server）
     from tcm_ocr.core.engines.paddleocr_vl16_adapter import PaddleOCRVl16Adapter
 
-    logger.info("[VLM] 使用 PaddleOCR-VL-1.6（本地 llama-server）")
-    return PaddleOCRVl16Adapter(
+    adapter = PaddleOCRVl16Adapter(
         host=cfg.vlm_host,
         port=cfg.vlm_port,
         auto_start=True,
     )
+    adapter.engine_label = "PaddleOCR-VL-1.6"
+    logger.info("[VLM] 使用 PaddleOCR-VL-1.6（本地 llama-server）")
+    return adapter
 
 
 def _pdf_page_to_numpy(page) -> np.ndarray:
@@ -201,12 +243,52 @@ def _pdf_page_to_numpy(page) -> np.ndarray:
 
     自动处理 RGBA（alpha 通道）和灰度页面的通道转换。
     """
-    mat = fitz.Matrix(200 / 72, 200 / 72)  # 200 DPI
+    mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
     pix = page.get_pixmap(matrix=mat)
-    # RGBA → RGB：fitz.Pixmap(pix, 0) 的 0 表示 RGB 输出
-    if pix.n > 3:
+    # RGBA(alpha) 或灰度(n=1) → 转 RGB；否则 reshape(...,3) 会因样本数不符报错
+    if pix.n != 3:
         pix = fitz.Pixmap(pix, 0)
     return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+
+
+def _crop_to_body(img: np.ndarray) -> np.ndarray:
+    """通过水平投影裁剪版心，去除页眉/页脚/侧边空白。
+
+    使用 numpy 做投影分析，轻量无额外依赖。
+    返回裁剪后的 (H', W', 3) RGB 数组。
+    """
+    h, w = img.shape[:2]
+    gray = np.mean(img, axis=2)  # 灰度
+    # 每行暗像素比例（文字区域）
+    row_dark = np.mean(gray < 128, axis=1)
+
+    # 找正文上下边界：跳过顶部/底部稀疏行
+    threshold = 0.01
+    top = 0
+    for y in range(h):
+        if row_dark[y] > threshold:
+            top = max(0, y - int(h * 0.02))  # 留 2% 上边距
+            break
+    bottom = h
+    for y in range(h - 1, -1, -1):
+        if row_dark[y] > threshold:
+            bottom = min(h, y + int(h * 0.02))  # 留 2% 下边距
+            break
+
+    # 垂直投影找左右边界
+    col_dark = np.mean(gray[top:bottom, :] < 128, axis=0)
+    left = 0
+    for x in range(w):
+        if col_dark[x] > threshold:
+            left = max(0, x - int(w * 0.02))
+            break
+    right = w
+    for x in range(w - 1, -1, -1):
+        if col_dark[x] > threshold:
+            right = min(w, x + int(w * 0.02))
+            break
+
+    return img[top:bottom, left:right]
 
 
 def _vlm_markdown_to_pages(pages_text: list[str]) -> list[PageResult]:
@@ -257,10 +339,10 @@ def _vlm_postprocess(text: str) -> str:
 _PAGE_BREAK_HEADER = re.compile(
     r"^(\d+\.\d+\s|治|§|第)", re.MULTILINE
 )
-# 页末不完整行特征：以"、"结尾、以"克"结尾无"。"、以"沙兔"类不完整药名结尾
-_PAGE_END_INCOMPLETE = re.compile(
-    r"、$|，$|、\w{0,5}$|克$|(?<![。！？])$"
-)
+
+
+# 句末标点集合（用于判断页末行是否完整）
+_SENTENCE_END = set("。！？；）】」\"'")
 
 
 def _merge_cross_page_breaks(pages_text: list[str]) -> list[str]:
@@ -280,14 +362,8 @@ def _merge_cross_page_breaks(pages_text: list[str]) -> list[str]:
         if not cur or not nxt:
             continue
 
-        # 本页最后一行是非完整行（以顿号或"克"结尾）
-        cur_lines = cur.split("\n")
-        last_line = cur_lines[-1].strip()
-        if not last_line:
-            continue
 
         # 本页末行不完整检测：不以句末标点结尾，且不是独立行
-        _SENTENCE_END = set("。！？；）】」\"\'")
         cur_lines = cur.split("\n")
         last_line = cur_lines[-1].strip()
         if not last_line:
@@ -350,7 +426,7 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
     title = os.path.basename(pdf_path)
     raw_book_code = book_code or os.path.splitext(title)[0]
     # book_code 只保留安全字符（ASCII 字母/数字/连字符/下划线）
-    safe_book_code = re.sub(r"[^\w\-]", "_", raw_book_code)
+    safe_book_code = re.sub(r"[^A-Za-z0-9_\-]", "_", raw_book_code)
 
     doc = fitz.open(pdf_path)
     total_pages = len(doc)
@@ -365,22 +441,38 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
 
         # 一次展开所有页（避免 doc[i+1] 在 mock 下出错）
         all_pages = list(doc)
+        # 页数上限保护（防资源耗尽 DoS），0=不限制
+        max_pages = int(os.environ.get("KZOCR_MAX_PAGES", "2000"))
+        if max_pages and len(all_pages) > max_pages:
+            logger.warning("[VLM] PDF 页数 %d 超过上限 %d，仅处理前 %d 页", len(all_pages), max_pages, max_pages)
+            all_pages = all_pages[:max_pages]
+            total_pages = len(all_pages)
 
         for i, page in enumerate(all_pages):
             if i > 0 and i % 5 == 0:
                 logger.info("[VLM] 已识别 %d/%d 页", i, total_pages)
+            try:
+                # 版心裁剪后再送识别，减少外传信息量（数据最小化）
+                img = _crop_to_body(_pdf_page_to_numpy(page))
+                imgs = [img]
+                # SenseNova 思考模式：送当前页 + 下页顶部 3 行作上下文
+                if supports_two_page and i < len(all_pages) - 1:
+                    next_full = _pdf_page_to_numpy(all_pages[i + 1])
+                    h = next_full.shape[0]
+                    # 只取顶部 15% 作为上下文（约 3-5 行）
+                    next_img = next_full[:int(h * 0.15), :, :]
+                    imgs.append(next_img)
 
-            imgs = [_pdf_page_to_numpy(page)]
-            # SenseNova 思考模式：送当前页 + 下一页，只输出当前页
-            if supports_two_page and i < len(all_pages) - 1:
-                next_img = _pdf_page_to_numpy(all_pages[i + 1])
-                imgs.append(next_img)
-
-            if supports_two_page:
-                text = vlm.recognize_pages(imgs)
-            else:
-                text = vlm.recognize_page(imgs[0])
+                if supports_two_page:
+                    text = vlm.recognize_pages(imgs)
+                else:
+                    text = vlm.recognize_page(imgs[0])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[VLM] 第 %d 页识别失败，跳过：%s", i + 1, exc)
+                continue
             pages_text.append(text)
+        if not any(pages_text):
+            raise RuntimeError(f"VLM 全部 {total_pages} 页识别均失败")
 
         # 跨页合并：检测方剂在页末断裂，将下页续接行合并到本页末尾
         pages_text = _merge_cross_page_breaks(pages_text)
@@ -395,7 +487,7 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
         return BookResult(
             book_code=safe_book_code,
             title=title,
-            engine_label=VLM_ENGINE_LABEL,
+            engine_label=getattr(vlm, "engine_label", VLM_ENGINE_LABEL),
             final_markdown=full_md,
             pages=pages,
         )

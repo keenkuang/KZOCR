@@ -99,16 +99,17 @@ def test_vlm_renders_pdf_pages_to_markdown(mock_init_vlm, mock_fitz_open):
     mock_doc.__iter__.return_value = iter([mock_page, mock_page])
     mock_fitz_open.return_value = mock_doc
 
-        # Mock VLM adapter
-        mock_vlm = MagicMock()
-        mock_vlm.recognize_page.side_effect = [
-            "方用白术三钱，茯苓二钱。",
-            "取足三里、合谷以调气和胃。",
-        ]
-        mock_vlm.recognize_pages.side_effect = [
-            "方用白术三钱，茯苓二钱。",
-            "取足三里、合谷以调气和胃。",
-        ]
+    # Mock VLM adapter
+    mock_vlm = MagicMock()
+    mock_vlm.recognize_page.side_effect = [
+        "方用白术三钱，茯苓二钱。",
+        "取足三里、合谷以调气和胃。",
+    ]
+    mock_vlm.recognize_pages.side_effect = [
+        "方用白术三钱，茯苓二钱。",
+        "取足三里、合谷以调气和胃。",
+    ]
+    mock_vlm.engine_label = VLM_ENGINE_LABEL  # 真实 _init_vlm_adapter 会设置该属性
     mock_init_vlm.return_value = mock_vlm
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake_vlm_engine")
@@ -132,7 +133,7 @@ def test_vlm_renders_pdf_pages_to_markdown(mock_init_vlm, mock_fitz_open):
     assert len(lines_p2) == 1
     assert lines_p2[0].final == "取足三里、合谷以调气和胃。"
 
-    assert mock_vlm.recognize_page.call_count == 2
+    assert mock_vlm.recognize_pages.call_count == 2
 
 
 @patch("kzocr.engine.run.fitz.open")
@@ -150,9 +151,9 @@ def test_vlm_multi_line_page(mock_init_vlm, mock_fitz_open):
     mock_doc.__iter__.return_value = iter([mock_page])
     mock_fitz_open.return_value = mock_doc
 
-        mock_vlm = MagicMock()
-        mock_vlm.recognize_page.return_value = "第一行\n第二行\n第三行"
-        mock_vlm.recognize_pages.return_value = "第一行\n第二行\n第三行"
+    mock_vlm = MagicMock()
+    mock_vlm.recognize_page.return_value = "第一行\n第二行\n第三行"
+    mock_vlm.recognize_pages.return_value = "第一行\n第二行\n第三行"
     mock_init_vlm.return_value = mock_vlm
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")

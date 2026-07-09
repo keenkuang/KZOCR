@@ -38,17 +38,21 @@ class Config:
     sensenova_api_key: str = ""
     sensenova_model: str = "sensenova-6.7-flash-lite"
     sensenova_base_url: str = "https://token.sensenova.cn/v1/chat/completions"
-    sensenova_timeout: int = 300
+    sensenova_timeout: int = 180
+    # DeepSeek 后处理配置（设计 §2.3，TOC 分节管线后处理阶段使用）
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_rpm: int = 20
+    # 是否允许把页面图像发往第三方云端 vision（数据出境许可，默认关闭）
+    allow_cloud_vision: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
-        kimi = os.environ.get("KIMI_ENGINE_DIR", "/home/keen/kimi_agent_ocr/tcm_ocr_system_v1.1")
+        kimi = os.environ.get("KIMI_ENGINE_DIR", "")
         zai = os.environ.get("ZAI_DIR", "/home/keen/tcm_ocr_zai")
         zai_db = os.environ.get("ZAI_DB", os.path.join(zai, "db", "custom.db"))
-        khub_db = os.environ.get(
-            "KHUB_DB",
-            os.path.expanduser(os.environ.get("KHUB_DB", "~/.khub/khub.db")),
-        )
+        khub_db = os.path.expanduser(os.environ.get("KHUB_DB", "~/.khub/khub.db"))
         return cls(
             kimi_engine_dir=kimi,
             zai_dir=zai,
@@ -60,7 +64,11 @@ class Config:
             sensenova_api_key=os.environ.get("SENSENOVA_API_KEY", ""),
             sensenova_model=os.environ.get("SENSENOVA_MODEL", "sensenova-6.7-flash-lite"),
             sensenova_base_url=os.environ.get("SENSENOVA_BASE_URL", "https://token.sensenova.cn/v1/chat/completions"),
-            sensenova_timeout=int(os.environ.get("SENSENOVA_TIMEOUT", "300")),
+            sensenova_timeout=int(os.environ.get("SENSENOVA_TIMEOUT", "180")),
+            deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+            deepseek_model=os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            deepseek_base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+            deepseek_rpm=int(os.environ.get("DEEPSEEK_RPM", "20")),
         )
 
 
@@ -82,6 +90,7 @@ def load_config() -> "Config":
     cfg.require_real = os.environ.get("KZOCR_REQUIRE_REAL", "0") in ("1", "true", "True")
     cfg.use_vlm = os.environ.get("KZOCR_USE_VLM", "0") in ("1", "true", "True")
     cfg.vlm_engine = os.environ.get("KZOCR_VLM_ENGINE", "auto")
+    cfg.allow_cloud_vision = os.environ.get("KZOCR_ALLOW_CLOUD_VISION", "0") in ("1", "true", "True")
     return cfg
 
 

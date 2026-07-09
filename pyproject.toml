@@ -4,10 +4,14 @@ version = "0.1.0"
 description = "KZOCR — 整合 kimi OCR 引擎 + zai 校对台，并将最终文档送入 kHUB"
 requires-python = ">=3.10"
 dependencies = [
+    # 编排层运行依赖（mock 链路也需这两项）：
+    "PyMuPDF>=1.23",          # fitz：PDF 渲染（_pdf_page_to_numpy）
+    "numpy>=1.24",             # 版心裁剪/数组处理
     # 真实引擎依赖（MinerU/PaddleOCR/torch/LLM）在运行环境另行安装。
-    # KZOCR 编排层仅用 Python 标准库（sqlite3 / urllib / argparse / dataclasses），
-    # 无需额外 pip 依赖即可跑通 mock → 适配器 → kHUB 推送 全链路。
 ]
+
+[project.optional-dependencies]
+llm = ["openai>=1.0"]   # 仅 modelscope_pool 云端 LLM 大池需要（当前未接入管线，可选）
 
 [project.scripts]
 kzocr = "kzocr.cli:main"

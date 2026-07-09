@@ -40,7 +40,7 @@ class ProviderSpec:
     name: str
     base_url: str
     api_key_env: str            # 读取密钥用的环境变量名
-    api_key_fallback: str = ""  # 未设环境变量时的兜底值（仅对已知完整 key 的 provider 填）
+    api_key_fallback: str = ""  # 仅占位；密钥必须从环境变量读取，缺失即禁用本 provider（禁止硬编码明文 key）
     models: List[str] = field(default_factory=list)
     vision: bool = False        # 是否支持视觉 OCR
 
@@ -98,7 +98,7 @@ _PROVIDER_SPECS: List[ProviderSpec] = [
         name="modelscope",
         base_url="https://api-inference.modelscope.cn/v1",
         api_key_env="MODELSCOPE_API_KEY",
-        api_key_fallback="ms-40d78a2b-f786-433a-92e3-8e5f4049f602",
+        api_key_fallback="",  # 密钥仅从环境变量读取；缺失即禁用本 provider
         models=_MODESCOPE_MODELS,
         vision=False,
     ),
@@ -138,7 +138,7 @@ _PROVIDER_SPECS: List[ProviderSpec] = [
         name="sensenova",
         base_url="https://token.sensenova.cn/v1",
         api_key_env="SENSENOVA_API_KEY",
-        api_key_fallback="sk-4u2jMee2wGvEPtM7qXg6kPkc5H3gDKmw",
+        api_key_fallback="",  # 密钥仅从环境变量读取；缺失即禁用本 provider
         models=_SENSENOVA_MODELS,
         vision=True,
     ),

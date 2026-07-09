@@ -13,6 +13,7 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
 
 from kzocr import __version__
 from kzocr.config import load_config
@@ -40,13 +41,25 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _safe_out_path(out: str | None, book_code: str) -> str:
+    """把导出路径限制在 exports/ 基目录下，仅取文件名，防路径穿越与裸文件名崩溃。"""
+    base = Path("exports")
+    base.mkdir(exist_ok=True)
+    if out:
+        name = os.path.basename(out) or "export.md"
+        return str(base / name)
+    return str(base / f"{book_code}.md")
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     cfg = load_config()
     if args.db:
         cfg.zai_db = args.db
+    else:
+        # 与 pipeline 默认库一致，避免"写入 A、读出 B 报未找到书籍"
+        cfg.zai_db = "kzocr.db"
     md = export_book_markdown(args.book_code, db_path=cfg.zai_db)
-    out = args.out or f"exports/{args.book_code}.md"
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    out = _safe_out_path(args.out, args.book_code)
     with open(out, "w", encoding="utf-8") as f:
         f.write(md)
     log.info("已导出：%s (%d 字符)", out, len(md))
@@ -58,13 +71,18 @@ def cmd_push(args: argparse.Namespace) -> int:
     with open(args.file, "r", encoding="utf-8") as f:
         content = f.read()
     title = args.title or os.path.splitext(os.path.basename(args.file))[0]
-    resp = khub_client.push_document(
-        title=title, content=content, source="KZOCR",
-        source_id=args.source_id, metadata={"exported_at": time.strftime("%Y-%m-%dT%H:%M:%S")},
-        base_url=args.khub_url,
-    )
-    log.info("已推送至 kHUB：%s", resp)
-    print(resp.get("doc_id") or resp)
+    try:
+        resp = khub_client.push_document(
+            title=title, content=content, source="KZOCR",
+            source_id=args.source_id, metadata={"exported_at": time.strftime("%Y-%m-%dT%H:%M:%S")},
+            base_url=args.khub_url,
+        )
+    except khub_client.KHUBError as e:
+        log.error("推送失败：%s", e)
+        return 1
+    doc_id = resp.get("doc_id") if isinstance(resp, dict) else None
+    log.info("已推送至 kHUB（doc_id=%s）", doc_id)  # 不记录响应正文（含敏感文本）
+    print(doc_id or resp)
     return 0
 
 
@@ -96,7 +114,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
                 title=book.title, content=md, source="KZOCR", source_id=book.book_code,
                 metadata={"smoke": True}, base_url=args.khub_url,
             )
-            log.info("    kHUB 响应：%s", resp)
+            log.info("    kHUB 已接收（doc_id=%s）", resp.get("doc_id") if isinstance(resp, dict) else None)
             if args.verify and resp.get("doc_id"):
                 rec = khub_client.verify_in_khub(resp["doc_id"])
                 log.info("    本地核验：%s", rec)
@@ -144,7 +162,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except khub_client.KHUBError as e:
+        log.error("%s", e)
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        log.error("执行失败：%s", exc)
+        return 1
 
 
 if __name__ == "__main__":

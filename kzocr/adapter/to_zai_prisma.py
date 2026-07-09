@@ -12,6 +12,7 @@ zai 控制台（`tcm_ocr_zai`）完全自包含，数据模型在 `prisma/schema
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import uuid
@@ -20,6 +21,8 @@ from typing import Optional
 
 from .. import config
 from ..engine.types import BookResult
+
+logger = logging.getLogger(__name__)
 
 
 # 自动建表：列名对齐 prisma/schema.prisma（写库所需子集）
@@ -44,24 +47,32 @@ _SCHEMA_DDL = [
         originalText TEXT, correctedText TEXT, changeType TEXT, severity TEXT,
         notes TEXT, triggeredPattern TEXT)""",
     """CREATE TABLE IF NOT EXISTS Pattern (
-        id TEXT PRIMARY KEY, correctName TEXT, ocrErrorPattern TEXT, patternType TEXT,
+        id TEXT PRIMARY KEY, bookCode TEXT, correctName TEXT, ocrErrorPattern TEXT, patternType TEXT,
         isToxic INTEGER, severity TEXT, sourceBooks TEXT, evidenceCount INTEGER,
         libType INTEGER, entityType TEXT, meridianBelonging TEXT, bodyRegion TEXT,
         patternText TEXT, regex TEXT, example TEXT, lib TEXT)""",
     """CREATE TABLE IF NOT EXISTS Term (
-        id TEXT PRIMARY KEY, termName TEXT, sublib TEXT, errorPattern TEXT,
+        id TEXT PRIMARY KEY, bookCode TEXT, termName TEXT, sublib TEXT, errorPattern TEXT,
         correctForm TEXT, scope TEXT, scopeScore INTEGER, confidence REAL,
         sourceBooks TEXT)""",
     """CREATE TABLE IF NOT EXISTS Formula (
-        id TEXT PRIMARY KEY, formulaName TEXT, sourcePages TEXT, createdAt TEXT)""",
+        id TEXT PRIMARY KEY, bookCode TEXT, formulaName TEXT, sourcePages TEXT, createdAt TEXT)""",
     """CREATE TABLE IF NOT EXISTS FormulaIngredient (
-        id TEXT PRIMARY KEY, formulaId TEXT, herbName TEXT, herbCorrectedName TEXT,
+        id TEXT PRIMARY KEY, formulaId TEXT, bookCode TEXT, herbName TEXT, herbCorrectedName TEXT,
         dosageValue TEXT, unit TEXT, roleInFormula TEXT, isToxic INTEGER)""",
 ]
 
 
 def _uid() -> str:
     return "c" + uuid.uuid4().hex
+
+
+def _restrict_db_perms(db: Path) -> None:
+    """库文件限制为本用户读写（0600），避免同机其他用户读取含敏感文本的库。"""
+    try:
+        os.chmod(str(db), 0o600)
+    except OSError:
+        pass
 
 
 def _resolve_db(db_path: Optional[Path], zai_path: Optional[Path]) -> Path:
@@ -75,21 +86,28 @@ def _resolve_db(db_path: Optional[Path], zai_path: Optional[Path]) -> Path:
 def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                      zai_path: Optional[Path] = None,
                      skip_prisma_marker: bool = False) -> dict:
-    db = _resolve_db(db_path, zai_path)
+    db = _resolve_db(db_path, zai_path).resolve()
     os.makedirs(db.parent, exist_ok=True)
-    conn = sqlite3.connect(str(db))
+    conn = sqlite3.connect(str(db), timeout=30)
+    _restrict_db_perms(db)
     try:
         cur = conn.cursor()
         for ddl in _SCHEMA_DDL:
             cur.execute(ddl)
+        # 自动迁移：旧库的四张全局表可能无 bookCode 列，补列并清空一次全域
+        # （旧全域数据归属未知，首次迁移清空，避免脏数据串书）
+        for t in ("Pattern", "Term", "Formula", "FormulaIngredient"):
+            try:
+                cur.execute(f"SELECT bookCode FROM {t} LIMIT 1")
+            except sqlite3.OperationalError:
+                cur.execute(f"ALTER TABLE {t} ADD COLUMN bookCode TEXT")
+                cur.execute(f"DELETE FROM {t}")
 
-        # 幂等：同一 bookCode 先清旧数据（含 bookCode 的表）
-        for t in ("Proofread", "Line", "Paragraph", "Page", "Book"):
+        # 幂等：同一 bookCode 先清旧数据（全部含 bookCode 列，按书隔离）
+        for t in ("Proofread", "Line", "Paragraph", "Page", "Book",
+                   "FormulaIngredient", "Formula", "Pattern", "Term"):
             cur.execute(f"DELETE FROM {t} WHERE bookCode=?", (book.book_code,))
-
-        # Pattern/Term/Formula/FormulaIngredient 无 bookCode 列，全量清（zai 单书模式）
-        for t in ("FormulaIngredient", "Formula", "Pattern", "Term"):
-            cur.execute(f"DELETE FROM {t}")
+        logger.info("[adapter] 已清空旧数据（bookCode=%s），开始写入", book.book_code)
 
         total_lines = sum(len(para.lines) for p in book.pages for para in p.paragraphs)
 
