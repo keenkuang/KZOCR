@@ -76,7 +76,7 @@ from typing import Callable, Any
 class EngineRegistration:
     """引擎注册项。每个引擎一个实例，由 EngineRegistry 管理。"""
     meta: AdapterMeta                            # 元信息（含 tier, probe 等）
-    config: dict = field(default_factory=dict)   # 仅存环境变量名引用，无明文凭证
+    config: EngineConfig = field(default_factory=EngineConfig)  # 类型约束，防明文凭证
     status: EngineStatus = "HEALTHY"
     stats: "EngineStats" = field(default_factory=lambda: EngineStats())
     adapter: Callable | None = None              # EngineRunner 实例引用
@@ -91,7 +91,7 @@ class EngineRegistration:
 ```
 
 **设计要点：**
-- `config` 只存环境变量名引用（如 `{"api_key_env": "SENSENOVA_API_KEY", "base_url": "https://..."}`），不存明文 —— 见第 3 节
+- `config` 用 `EngineConfig` 类型约束（安全 R1，防裸 dict 误放明文 key），只存环境变量名引用（如 `{"api_key_env": "SENSENOVA_API_KEY", "base_url": "https://..."}`），不存明文 —— 见第 3 节 + §9.1
 - `adapter` 字段引用 `EngineRunner` 实例，供 Orchestrator 调用
 - `__repr__` 掩码敏感字段，防止日志泄露
 
@@ -349,15 +349,15 @@ AVG_LATENCY_DEFAULT_MS = 10000    # 10s 保守估计，非 0
 **全局 preset priority 顺序（Tier 无关，在全集内定序）：**
 
 ```
-sensenova > paddleocr_vl16 > paddleocr > rapidocr > mineru > unirec > shizhengpt
+sensenova > paddleocr > rapidocr > mineru > unirec > paddleocr_vl16 > shizhengpt
 ```
 
-即：sensenova 优先级最高，shizhengpt 最低。
+即：sensenova 优先级最高，shizhengpt 最低。sensenova 能力上限最高放在首位合理；paddleocr_vl16 因实测通过率 89.2%、延迟 18.7s/页且有 temp=0 死循环风险，冷启动期不应排在前列，故调至 unirec 之后。
 
 ```python
 PRESET_PRIORITY = [
-    "sensenova", "paddleocr_vl16", "paddleocr",
-    "rapidocr", "mineru", "unirec", "shizhengpt",
+    "sensenova", "paddleocr", "rapidocr",
+    "mineru", "unirec", "paddleocr_vl16", "shizhengpt",
 ]
 
 def _preset_sort_key(engine: EngineRegistration) -> int:
@@ -396,17 +396,20 @@ def _select_poll_candidate(registry: EngineRegistry, tier: int,
 
 ### 3.1 核心原则
 
-**`EngineRegistration.config` 绝不存储 API key 明文。** 改为存环境变量名引用：
+**`EngineRegistration.config` 绝不存储 API key 明文。** 使用 `EngineConfig` 类型约束，存环境变量名引用：
 
 ```python
 # ❌ 禁止：
-config = {"api_key": "sk-xxxxxx", "base_url": "https://..."}
+config = EngineConfig(api_key_env="sk-xxxxxx", base_url="https://...")
+# 或更坏：config = {"api_key": "sk-xxxxxx", ...}
 
 # ✅ 允许：
-config = {
-    "api_key_env": "SENSENOVA_API_KEY",   # 运行时从 os.environ 读取
-    "base_url": "https://api.sensenova.com/v1",
-}
+config = EngineConfig(
+    api_key_env="SENSENOVA_API_KEY",      # ❌ 不，这仍是错误的——api_key_env 是环境变量名
+    base_url="https://api.sensenova.com/v1",
+)
+# 正确的理解：api_key_env 存放 *环境变量名*（如 "SENSENOVA_API_KEY"），
+# 运行时从 os.environ["SENSENOVA_API_KEY"] 读取实际值
 ```
 
 ### 3.2 运行时读取
@@ -415,12 +418,20 @@ config = {
 
 ```python
 def _resolve_config(registration: EngineRegistration) -> dict:
-    """将 config 中的环境变量引用解析为实际值。"""
-    resolved = dict(registration.config)
-    key_env = resolved.pop("api_key_env", None)
-    if key_env:
-        resolved["api_key"] = os.environ.get(key_env, "")
-    return resolved
+    """将 EngineConfig 中的环境变量引用解析为实际值。
+    返回包含实际 api_key 的 dict（仅运行时使用，不存回 config）。"""
+    cfg = registration.config  # type: EngineConfig
+    api_key = os.environ.get(cfg.api_key_env, "")
+    if not api_key:
+        raise ConfigError(
+            f"API key environment variable '{cfg.api_key_env}' not set "
+            f"for engine '{registration.meta.name}'"
+        )
+    return {
+        "api_key": api_key,
+        "base_url": cfg.base_url,
+        **cfg.extra,
+    }
 ```
 
 ### 3.3 配套改动
@@ -591,9 +602,11 @@ def domain_adjust(
     adjustments = 0.0
     tier = engine.meta.tier
 
-    # 竖排页：Tier 2/3 获得正向偏移
+    # 竖排页：Tier 2/3 混合模式偏移（base_score * 1.5 + 0.2）
+    # 乘法因子 1.5 确保高精度引擎在竖排古籍场景不因高延迟被低精度低延迟引擎排挤
+    # 加法偏移 0.2 作为保底，覆盖无历史数据的新引擎
     if page_layout and page_layout.is_vertical and tier >= 2:
-        adjustments += 0.2
+        return base_score * 1.5 + 0.2 + adjustments
 
     # 激光照排：快速引擎（延迟低于 5000ms）获得正向偏移
     if page_info.pub_era == "laser" and engine.stats.avg_latency_per_page_ms < 5000:
@@ -607,11 +620,12 @@ def domain_adjust(
 ```
 
 **设计要点（基于领域评审反馈）：**
-- 竖排页跳过 T1（在 `select_candidates()` 中直接 return []），所以竖排规则给 T2/T3 正向偏移而非 T1 降权
+- 竖排页跳过 T1（在 `select_candidates()` 中直接 return []），所以竖排规则给 T2/T3 `base_score * 1.5 + 0.2` 混合模式偏移而非 T1 降权
 - 出版时代感知（pub_era=laser→快速引擎提权）回应领域评审第 4 点
 - 方剂书感知（book_type=formula→高召回提权）回应领域评审遗漏 C
-- 不使用 `base_score * adjustments` 的乘法模式，改用加法偏移（避免乘法使得分归零）
-- 二级领域评审建议的"竖排/雕版场景优先级偏移"通过 `tier >= 2` 偏移 0.2 实现
+- 不使用 `base_score * adjustments` 的纯乘法模式，改用加法+乘法混合模式（避免乘法使低分归零，加法提供保底）
+- 竖排混合模式中乘法因子 1.5 确保高延迟高精度引擎（sensenova 12s/页）不因低延迟低精度引擎（2s/页）的 base_score 优势而被排挤；加法偏移 0.2 为新引擎提供保底
+- 二级领域评审建议的"竖排/雕版场景优先级偏移"通过 `tier >= 2` 混合偏移实现
 
 ### 4.4 `max_tier_N_engines` 配置映射
 
@@ -725,16 +739,18 @@ class ToxinDoseDetector:
         return self._enabled
 
     def check(self, text: str, context: DetectorContext) -> GlyphVerdict | None:
-        """匹配 pattern: (药名) + (数字)(g/克/钱)"""
+        """匹配 pattern: (药名) + (数字)(g/克/钱/两)"""
         import re
         for herb, info in self.toxic_db.items():
             # 使用 re.escape 防止药名含正则特殊字符（如 + / ( 等）
-            pattern = re.compile(rf"{re.escape(herb)}\s*(\d+(?:\.\d+)?)\s*(g|克|钱)")
+            pattern = re.compile(rf"{re.escape(herb)}\s*(\d+(?:\.\d+)?)\s*(g|克|钱|两)")
             for match in pattern.finditer(text):
                 dosage = float(match.group(1))
                 unit = match.group(2)
                 if unit == "钱":
                     dosage *= 3.0  # 1钱 ≈ 3g
+                elif unit == "两":
+                    dosage *= 30.0  # 1两 ≈ 30g（汉制，后世沿用）
                 if dosage > info["max_dosage_g"]:
                     return GlyphVerdict(
                         status="FAIL",
@@ -750,7 +766,7 @@ class ToxinDoseDetector:
 
 **设计要点（基于领域评审）：**
 - 使用 `re.escape(herb)` 防止药名含正则特殊字符（修复测试评审 4.6）
-- 支持 `g`、`克`、`钱` 三种单位，钱自动转换为克（领域第二轮建议）
+- 支持 `g`、`克`、`钱`、`两` 四种单位，钱/两自动转换为克（领域第二轮建议，第三轮补充"两"）
 - 浮点剂量支持（`\d+(?:\.\d+)?`)
 - 正则 `附子汤` 不会匹配 `附子`（re.escape 只转义特殊字符，但 `附子汤` ≠ `附子` 需要药名后跟空格或边界，可加 `\b`）
 
@@ -985,7 +1001,36 @@ class PageInput:
     context: str | None = None             # 上页的底部 15% 文本（跨页上下文）
 ```
 
-### 6.2 PageLayout
+### 6.2 EngineCallRecord
+
+```python
+from dataclasses import dataclass, field
+from typing import Literal
+
+
+@dataclass
+class EngineCallRecord:
+    """单次引擎调用的完整记录。用于 trace 和运维排障。"""
+    page: int                                    # 页号
+    tier: int                                    # 所在 tier (1/2/3)
+    engine: str                                  # 引擎名
+    latency_ms: int                              # 延迟（毫秒）
+    glyph_status: str | None = None              # 字形验证状态
+    error: str | None = None                     # 错误信息（已 sanitize，无凭证）
+    status: str = "HEALTHY"                      # 调用前引擎状态
+    detector_chain: list[str] = field(default_factory=list)  # 触发的 detector 列表
+    ts: float = 0.0                              # 调用时间戳（time.time()）
+    cache_hit: bool = False                      # 是否来自 VLM 缓存
+    breakdown: dict[str, float] = field(default_factory=dict)  # 子阶段耗时分解（ms）
+```
+
+**设计要点：**
+- `glyph_status` 为 None 表示未做验证（如 Tier 1 全书引擎的中间页仅计入统计，但不代表验证结果）
+- `error` 字段在写入前需经过凭证过滤（sanitize），防止 API key 等敏感信息泄露到 trace 文件
+- `breakdown` 示例：`{"render": 120, "engine": 3400, "verify": 15}`，用于运维排障性能瓶颈
+- `detector_chain` 记录本次 verify 按序触发了哪些 detector（如 `["ToxinDoseDetector", "LeakageDetector", "TermKBMatcher"]`）
+
+### 6.3 PageLayout
 
 ```python
 @dataclass
@@ -996,7 +1041,7 @@ class PageLayout:
     has_table: bool = False                 # 是否含表格
 ```
 
-### 6.3 引擎适配映射表
+### 6.4 引擎适配映射表
 
 | 引擎名 | 协议实现 | 方式 | tier |
 |--------|---------|------|------|
@@ -1010,7 +1055,7 @@ class PageLayout:
 | paddleocr_vl16 | `run_page` | 现有 PaddleOCRVl16Adapter | 3 |
 | shizhengpt | `run_page` | 现有 ShizhengptAdapter | 3 |
 
-### 6.4 BookPipelineAdapter
+### 6.5 BookPipelineAdapter
 
 ```python
 class BookPipelineAdapter:
@@ -1098,20 +1143,35 @@ def orchestrate_book(
             _logger.error("[orchestrator] Tier 1 book engine failed: %s", exc)
         finally:
             t1_elapsed = int((time.monotonic() - t0) * 1000)
+            # ★全书延迟均摊到各页：避免每页 trace 记录全书耗时导致 avg_latency 失真
+            t1_elapsed_per_page = (
+                t1_elapsed // len(tier1_result.pages)
+                if tier1_result and tier1_result.pages
+                else t1_elapsed
+            )
     else:
         t1_elapsed = 0
 
     # ── 第 2 步：逐页处理（render_pages 必须为流式生成器） ──
     for page_num, page_input in enumerate(render_pages(pdf_path, config)):
+        # ── 进度日志（每 5 页输出，响应 PM Round 1 要求） ──
+        if page_num % 5 == 0:
+            elapsed_m = (time.monotonic() - start_time) / 60
+            _logger.info(
+                "[progress] book=%s page=%d/%d | elapsed=%dm | tier1=%s",
+                book_code or "unknown", page_num + 1, budget.max_pages,
+                int(elapsed_m),
+                tier1_candidates[0].meta.name if tier1_candidates else "none",
+            )
         # ── B6 双闸：页数闸 ──
         if page_num >= budget.max_pages:
             _logger.warning("[orchestrator] page_limit=%d reached, truncating", budget.max_pages)
             budget.exhaust()
             break
 
-        # ── B6 双闸：时间闸（每页检查） ──
+        # ── B6 双闸：时间闸（每页检查，统一使用 budget.check_time_budget） ──
         elapsed = time.monotonic() - start_time
-        if elapsed > config.total_timeout_s:
+        if not budget.check_time_budget(elapsed):
             _logger.warning("[orchestrator] total_timeout=%ds reached at page=%d",
                             config.total_timeout_s, page_num)
             budget.exhaust()
@@ -1135,7 +1195,7 @@ def orchestrate_book(
             page_trace_records.append(EngineCallRecord(
                 page=page_num, tier=1,
                 engine=tier1_candidates[0].meta.name if tier1_candidates else "unknown",
-                latency_ms=t1_elapsed,
+                latency_ms=t1_elapsed_per_page,  # ★使用均摊后的每页延迟
                 glyph_status=verdict.status,
             ))
 
@@ -1159,10 +1219,17 @@ def orchestrate_book(
                 try:
                     # 云引擎调用前 B3 校验
                     validate_url(engine.config.get("base_url", ""))
-                    result = _run_page_engine(engine, page_input)
+                    # Tier 2 云端引擎也加超时保护（默认 300s，Tier 3 的 2 倍，云端较慢但不应挂死）
+                    result = _run_single_engine_with_timeout(
+                        engine, page_input,
+                        timeout_s=config.max_time_per_page_ms // 1000 * 2,
+                    )
                 except EgressBlockedError as exc:
                     _logger.warning("egress blocked for %s: %s", engine.meta.name, exc)
                     registry.mark_unavailable(engine.meta.name, str(exc))
+                    continue
+                except TimeoutError as exc:
+                    _logger.warning("Tier 2 engine=%s timed out: %s", engine.meta.name, exc)
                     continue
                 except Exception as exc:
                     _logger.error("Tier 2 engine=%s failed: %s", engine.meta.name, exc)
@@ -1235,9 +1302,11 @@ def orchestrate_book(
     # 批量持久化 benchmark
     registry.persist_benchmarks(book_code or "")
 
-    # 输出 trace 文件（可选）
-    if config.trace_dir:
-        _write_trace(config.trace_dir, book_code or f"book_{int(time.time())}", trace)
+    # 输出 trace 文件（默认启用，路径 $KZOCR_OUTPUT_DIR/trace/）
+    # 可通过 KZOCR_TRACE_DIR 覆盖，设为空字符串禁用
+    trace_dir = config.scheduler.trace_dir or os.path.join(config.output_dir, "trace")
+    os.makedirs(trace_dir, exist_ok=True)
+    _write_trace(trace_dir, book_code or f"book_{int(time.time())}", trace)
 
     # 输出引擎报告日志
     _log_engine_report(book_code, pages_text, failed_pages, uncertain_pages,
@@ -1285,7 +1354,7 @@ def _build_pages_result(
     return results
 ```
 
-### 7.3 引擎调用超时包裹
+### 7.3 引擎调用超时包裹（Tier 2 + Tier 3）
 
 ```python
 import concurrent.futures
@@ -1296,7 +1365,12 @@ def _run_single_engine_with_timeout(
     page_input: PageInput,
     timeout_s: int = 120,
 ) -> "AdapterPageResult":
-    """带超时的引擎调用。防止 Tier 3 本地 LLM 挂死。"""
+    """带超时的引擎调用。防止云端 VLM（Tier 2）或本地 LLM（Tier 3）挂死。
+    Tier 2 调用时 timeout_s 传入 max_time_per_page_ms 的两倍（默认 240s）。
+    
+    注意：concurrent.futures 超时不会终止后台线程，
+    挂死的线程会遗留为僵尸线程。v0.7 串行模式下数量可控（≤3），可接受。
+    """
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(engine.adapter.run_page, page_input)
         try:
@@ -1328,7 +1402,7 @@ def _run_single_engine_with_timeout(
 |------|---------|------|--------|
 | 页数上限 (`MAX_PAGES`) | `for page` 循环入口 | 循环顶部，渲染前截断 | 50 页 |
 | 总时间预算 (`TOTAL_TIMEOUT`) | `for page` 循环入口，每页 | 每页 start 后立即检查 | 7200s |
-| 单页超时 (`MAX_TIME_PER_PAGE`) | Tier 3 引擎调用 | `_run_single_engine_with_timeout` | 120s |
+| 单页超时 (`MAX_TIME_PER_PAGE`) | Tier 2/3 引擎调用 | `_run_single_engine_with_timeout` | 120s (T3) / 240s (T2) |
 
 ### 7.6 D3 VLM 缓存集成
 
@@ -1380,7 +1454,8 @@ $KZOCR_OUTPUT_DIR/benchmarks/{engine_name}.ndjson
 
 - 追加式写入（行级追加，O(1) 写，禁止 JSON 全文覆写）
 - 进程内 `EngineStats` 实时更新内存，每本书完成后批量 flush
-- 复用 `kzocr/engines/atomic.py` 的原子写入
+- 追加写入使用 `fcntl.flock` 进程级文件锁保证并发安全（见 §8.5 实现）
+- 不使用 `kzocr/engines/atomic.py` 的整文件原子写入（`atomic_write` 为覆写模式，与追加模式不兼容），改用带锁的逐行追加
 - 每本书写入独立文件？不——按引擎名分区写入同一文件，避免文件数爆炸
 
 ### 8.4 启动加载
@@ -1392,7 +1467,7 @@ def load_benchmarks(benchmark_dir: str, max_age_days: int = 90,
 
     策略：
     - 只加载最近 max_age_days 内的数据
-    - 每个引擎最多读取 max_load_lines 条（超过只加载最新 N 条）
+    - 每个引擎最多读取 max_load_lines 条（从文件尾部向前取最新 N 条）
     - 跳过损坏的行（日志警告，不崩溃）
     """
     cutoff = time.time() - max_age_days * 86400
@@ -1400,47 +1475,134 @@ def load_benchmarks(benchmark_dir: str, max_age_days: int = 90,
 
     for ndjson_path in Path(benchmark_dir).glob("*.ndjson"):
         engine_name = ndjson_path.stem
-        lines_loaded = 0
-        with open(ndjson_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    _logger.warning("corrupt benchmark line in %s: %s", ndjson_path.name, exc)
-                    continue
-                if event["ts"] < cutoff:
-                    continue
-                lines_loaded += 1
-                if lines_loaded > max_load_lines:
-                    break
-                # 累加统计
-                if engine_name not in stats_map:
-                    stats_map[engine_name] = EngineStats()
-                stats = stats_map[engine_name]
-                stats.total_calls += 1
-                stats.total_latency_ms += event.get("latency_ms", 0)
-                glyph_status = event.get("glyph_status")
-                if glyph_status == "PASS":
-                    stats.glyph_pass_count += 1
-                elif glyph_status == "FAIL":
-                    stats.glyph_fail_count += 1
-                elif glyph_status in ("UNKNOWN", "UNCERTAIN"):
-                    stats.glyph_unknown_count += 1
-                # last_seen 取最新事件的时间戳
-                stats.last_seen = max(stats.last_seen, event["ts"])
-                if event.get("error"):
-                    stats.last_error = event["error"]
+        # ★从文件尾部读取最新 N 行（NDJSON 追加写入，新数据在尾部）
+        lines = _tail_lines(ndjson_path, max_load_lines)
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                _logger.warning("corrupt benchmark line in %s: %s", ndjson_path.name, exc)
+                continue
+            if event.get("ts", 0) < cutoff:
+                continue
+            # 累加统计
+            if engine_name not in stats_map:
+                stats_map[engine_name] = EngineStats()
+            stats = stats_map[engine_name]
+            stats.total_calls += 1
+            if event.get("latency_ms"):
+                stats.total_latency_ms += event["latency_ms"]
+            glyph_status = event.get("glyph_status")
+            if glyph_status == "PASS":
+                stats.glyph_pass_count += 1
+                stats.total_pages += 1        # ★修复：PASS 时累加 total_pages
+            elif glyph_status == "FAIL":
+                stats.glyph_fail_count += 1
+            elif glyph_status in ("UNKNOWN", "UNCERTAIN"):
+                stats.glyph_unknown_count += 1
+            # last_seen 取最新事件的时间戳
+            stats.last_seen = max(stats.last_seen, event["ts"])
+            if event.get("error"):
+                stats.last_error = _sanitize_error(event["error"])  # ★凭证过滤
     return stats_map
+
+
+def _tail_lines(path: Path, n: int) -> list[str]:
+    """从文件尾部读取最多 n 行，类似 tail -n 的语义。
+    使用块读取 + 反向扫描避免全量加载。"""
+    lines: list[str] = []
+    block_size = 8192
+    total_size = path.stat().st_size
+    with open(path, "rb") as f:
+        # 从文件末尾向前读块
+        position = total_size
+        while position > 0 and len(lines) < n:
+            read_size = min(block_size, position)
+            position -= read_size
+            f.seek(position)
+            chunk = f.read(read_size)
+            # 按行分割，取后面的行
+            chunk_lines = chunk.split(b"\n")
+            if lines:
+                # 不是第一块：块的最后一行与已有结果的第一行拼接
+                chunk_lines[-1] = chunk_lines[-1] + lines[0].encode()
+            for bline in reversed(chunk_lines):
+                if bline:
+                    decoded = bline.decode("utf-8", errors="replace")
+                    lines.insert(0, decoded)
+                    if len(lines) >= n:
+                        break
+    return lines[-n:]
 ```
 
 ### 8.5 容量管理
 
-- 文件超 100MB 时自动截断最老 50%
-- 启动时只读最近 90 天数据
-- 每个引擎最多加载 50000 行（运维 D1 建议）
+#### 截断策略
+
+- 文件超 `benchmark_max_mb`（默认 100MB）时自动截断最老 50%
+- 截断实现：
+  1. 对文件加独占锁（`fcntl.flock`）
+  2. 读取全部行到内存（100MB ≈ 50-67 万条）
+  3. 保留最新 50% 行
+  4. 写入临时文件（峰值磁盘：原文件 100MB + 临时文件 ~50MB → 1.5x 峰值）
+  5. `os.replace(tmp_path, original_path)` 原子替换
+  6. 释放锁
+- 截断检查时机：每次 `persist_benchmarks()` 批量 flush 时检查单引擎文件大小
+- 原子性保障：通过写临时文件 + `os.replace()` 实现，即使进程在步骤 4 崩溃，原文件仍完整
+
+#### 并发安全
+
+- **追加写入使用进程级文件锁**（`fcntl.flock`），防止多进程并行写入行交错：
+
+```python
+import fcntl
+import os
+import json
+
+def _append_benchmark(engine_name: str, event: dict, benchmark_dir: str):
+    """带进程级锁的 NDJSON 追加写入。"""
+    path = Path(benchmark_dir) / f"{engine_name}.ndjson"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+            # 写入后检查文件大小，超限则截断
+            if path.stat().st_size > _get_max_bytes():
+                _truncate_benchmark(path)
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+```
+
+- `load_benchmarks()` 与 `persist_benchmarks()` 的读写冲突：load 时遇到不完整行 → `json.JSONDecodeError` → 跳过（已处理）；截断操作的独占锁保证读写不会同时发生在临界区
+- **凭证过滤**：写入 NDJSON 前对所有 `error` 字段执行 `_sanitize_error()`，使用正则移除可能的凭证模式：
+  ```python
+  import re
+  
+  _CREDENTIAL_PATTERNS = [
+      r'(api_key|token|secret|password)[=:]\s*\S+',
+      r'(sk-[a-zA-Z0-9]{20,})',
+  ]
+  
+  def _sanitize_error(msg: str) -> str:
+      """移除错误消息中的凭证信息。"""
+      result = msg[:200]  # 先截断
+      for pattern in _CREDENTIAL_PATTERNS:
+          result = re.sub(pattern, r'\1=***', result, flags=re.IGNORECASE)
+      return result
+  ```
+
+#### 其他容量约束
+
+- 启动时只读最近 90 天数据（`benchmark_retention_days`，仅加载时过滤，非磁盘清理策略）
+- 每个引擎最多加载 50000 行
+- 注意：`benchmark_retention_days` 仅为启动加载时的时间窗口过滤，磁盘数据需配合大小触发的截断机制清理。运维人员不应期望 90 天前的数据被自动删除。
+- 文件权限默认 `0o700`（安全 R5），容器/备份场景可改为 `0o750`
 
 ### 8.6 数据格式演进
 
@@ -1450,7 +1612,27 @@ def load_benchmarks(benchmark_dir: str, max_age_days: int = 90,
 
 ## 9. Config 新增字段
 
-### 9.1 SchedulerConfig
+### 9.1 EngineConfig（新增类型）
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EngineConfig:
+    """引擎配置类型。用于 EngineRegistration.config，替代裸 dict。
+    只存环境变量名引用，不存明文凭证。"""
+    api_key_env: str = ""       # 环境变量名（如 "SENSENOVA_API_KEY"），运行时从 os.environ 读取
+    base_url: str = ""          # 服务端点 URL
+    extra: dict = field(default_factory=dict)  # 非敏感额外参数
+```
+
+**设计要点：**
+- 使用 `@dataclass` 而非 `TypedDict`，因为 `dataclass` 支持默认值和 `field()` 选项
+- 禁止添加 `api_key` 明文字段——仅在运行时从 `os.environ` 通过 `api_key_env` 读取
+- 安全 R1 要求：通过类型约束防止开发者误放明文 key
+
+### 9.2 SchedulerConfig
 
 ```python
 @dataclass
@@ -1460,7 +1642,8 @@ class SchedulerConfig:
     max_tier1_engines: int = 2          # KZOCR_MAX_TIER1_ENGINES（默认 2，最大 3）
     max_tier2_engines: int = 1          # KZOCR_MAX_TIER2_ENGINES
     max_tier3_engines: int = 1          # KZOCR_MAX_TIER3_ENGINES
-    engine_parallel: bool = False       # KZOCR_ENGINE_PARALLEL（仅 GPU 生效）
+    engine_parallel: bool = False       # KZOCR_ENGINE_PARALLEL（仅 GPU 生效，v0.7 串行占位）
+    disabled_tiers: list[int] = field(default_factory=list)  # KZOCR_DISABLED_TIERS（如 [1] 禁用 T1）
 
     # ── 预算 ──
     max_pages: int = 50                 # KZOCR_MAX_PAGES
@@ -1469,20 +1652,22 @@ class SchedulerConfig:
 
     # ── 数据目录 ──
     benchmark_dir: str = ""             # KZOCR_BENCHMARK_DIR（默认 $KZOCR_OUTPUT_DIR/benchmarks/）
-    trace_dir: str = ""                 # KZOCR_TRACE_DIR
+    trace_dir: str = ""                 # KZOCR_TRACE_DIR（默认 $KZOCR_OUTPUT_DIR/trace/，设为 "" 禁用）
+    trace_retention_days: int = 7       # KZOCR_TRACE_RETENTION_DAYS
 
     # ── 安全 ──
     allow_cloud_vision: bool = False    # KZOCR_ALLOW_CLOUD_VISION
 
     # ── 兜底 ──
     tier_limit: int = 3                 # KZOCR_TIER_LIMIT
+    fail_on_no_pass: bool = False       # KZOCR_FAIL_ON_NO_PASS（=1 时无人肉可读通过页抛异常）
 
     # ── Benchmark 容量 ──
     benchmark_retention_days: int = 90  # KZOCR_BENCHMARK_RETENTION_DAYS
     benchmark_max_mb: int = 100         # KZOCR_BENCHMARK_MAX_MB
 ```
 
-### 9.2 环境变量 → Python 字段映射
+### 9.3 环境变量 → Python 字段映射
 
 | 环境变量 | Python 字段 | 类型 | 默认值 |
 |---------|------------|------|--------|
@@ -1491,15 +1676,18 @@ class SchedulerConfig:
 | `KZOCR_MAX_TIER2_ENGINES` | `scheduler.max_tier2_engines` | int | 1 |
 | `KZOCR_MAX_TIER3_ENGINES` | `scheduler.max_tier3_engines` | int | 1 |
 | `KZOCR_ENGINE_PARALLEL` | `scheduler.engine_parallel` | bool | False |
-| `KZOCR_TRACE_DIR` | `scheduler.trace_dir` | str | "" |
+| `KZOCR_DISABLED_TIERS` | `scheduler.disabled_tiers` | list[int] | [] |
+| `KZOCR_TRACE_DIR` | `scheduler.trace_dir` | str | `$KZOCR_OUTPUT_DIR/trace/` |
+| `KZOCR_TRACE_RETENTION_DAYS` | `scheduler.trace_retention_days` | int | 7 |
 | `KZOCR_BENCHMARK_DIR` | `scheduler.benchmark_dir` | str | `$KZOCR_OUTPUT_DIR/benchmarks/` |
 | `KZOCR_BENCHMARK_RETENTION_DAYS` | `scheduler.benchmark_retention_days` | int | 90 |
 | `KZOCR_BENCHMARK_MAX_MB` | `scheduler.benchmark_max_mb` | int | 100 |
 | `KZOCR_ALLOW_CLOUD_VISION` | `scheduler.allow_cloud_vision` | bool | False |
 | `KZOCR_TIER_LIMIT` | `scheduler.tier_limit` | int | 3 |
+| `KZOCR_FAIL_ON_NO_PASS` | `scheduler.fail_on_no_pass` | bool | False |
 | `KZOCR_MAX_TIME_PER_PAGE_MS` | `scheduler.max_time_per_page_ms` | int | 120000 |
 
-### 9.3 Config 集成
+### 9.4 Config 集成
 
 ```python
 @dataclass
