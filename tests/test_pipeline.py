@@ -25,6 +25,7 @@ def test_mock_engine_produces_expected_book():
 
 def test_push_to_zai_writes_all_tables():
     book = mock_book_result("TCM-TEST-001")
+    book.is_mock = False  # 实际数据（非桩）允许写入校对台
     db = tempfile.mktemp(suffix=".db")
     res = push_book_to_zai(book, db_path=db, skip_prisma_marker=True)
     assert res["book_code"] == "TCM-TEST-001"
@@ -51,6 +52,7 @@ def test_push_to_zai_writes_all_tables():
 
 def test_export_markdown_roundtrip():
     book = mock_book_result("TCM-TEST-001")
+    book.is_mock = False  # 实际数据（非桩）允许写入校对台
     db = tempfile.mktemp(suffix=".db")
     push_book_to_zai(book, db_path=db, skip_prisma_marker=True)
 
@@ -58,6 +60,15 @@ def test_export_markdown_roundtrip():
     assert "白术" in md
     assert "足三里" in md
     assert "三大永久范式库" in md
+
+
+def test_push_to_zai_blocks_mock():
+    """桩/降级假数据(is_mock=True) 不得写入校对台。"""
+    book = mock_book_result("TCM-BLOCKED-001")
+    assert book.is_mock is True
+    db = tempfile.mktemp(suffix=".db")
+    res = push_book_to_zai(book, db_path=db, skip_prisma_marker=True)
+    assert res == {"published": False, "blocked": "is_mock", "bookCode": "TCM-BLOCKED-001"}
 
 
 def test_adapter_export_markdown_from_object():

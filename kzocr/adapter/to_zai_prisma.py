@@ -30,7 +30,8 @@ _SCHEMA_DDL = [
     """CREATE TABLE IF NOT EXISTS Book (
         bookCode TEXT PRIMARY KEY, title TEXT, author TEXT, publisher TEXT,
         pubYear INTEGER, pubEra TEXT, bookType TEXT, source TEXT,
-        pageCount INTEGER, lineCount INTEGER, cerValue REAL, lineAccuracy REAL)""",
+        pageCount INTEGER, lineCount INTEGER, cerValue REAL, lineAccuracy REAL,
+        isMock INTEGER)""",
     """CREATE TABLE IF NOT EXISTS Page (
         pageNum INTEGER, bookCode TEXT, paragraphCount INTEGER, lineCount INTEGER)""",
     """CREATE TABLE IF NOT EXISTS Paragraph (
@@ -86,6 +87,13 @@ def _resolve_db(db_path: Optional[Path], zai_path: Optional[Path]) -> Path:
 def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                      zai_path: Optional[Path] = None,
                      skip_prisma_marker: bool = False) -> dict:
+    # B4（v0.3 冻结）：桩/降级假数据(is_mock) 不得入校对台，阻断 publish
+    if getattr(book, "is_mock", False):
+        logger.error(
+            "[adapter] ⚠ 阻断 publish：桩/降级假数据(is_mock=True)，"
+            "不得写入校对台（防 round2「假古籍」重演）"
+        )
+        return {"published": False, "blocked": "is_mock", "bookCode": book.book_code}
     db = _resolve_db(db_path, zai_path).resolve()
     os.makedirs(db.parent, exist_ok=True)
     conn = sqlite3.connect(str(db), timeout=30)
@@ -114,10 +122,11 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
         # Book
         cur.execute(
             "INSERT INTO Book (bookCode,title,author,publisher,pubYear,pubEra,bookType,"
-            "source,pageCount,lineCount,cerValue,lineAccuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "source,pageCount,lineCount,cerValue,lineAccuracy,isMock) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (book.book_code, book.title, book.author, book.publisher,
              book.pub_year, book.pub_era, book.book_type, book.engine_label,
-             len(book.pages), total_lines, None, None),
+             len(book.pages), total_lines, None, None,
+             int(bool(getattr(book, "is_mock", False)))),
         )
 
         counts = {"pages": 0, "paragraphs": 0, "lines": 0, "proofreads": 0,

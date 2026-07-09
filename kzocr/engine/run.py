@@ -46,11 +46,11 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
     try:
         return _run_real(pdf_path, cfg, book_code)
     except Exception as exc:  # noqa: BLE001
+        logger.error("[engine] ⚠ 真实引擎执行失败: %s", exc)
+        print("⚠ 警告：真实引擎失败，本次产出为占位假数据，并非真实 OCR 结果。")
         if cfg.require_real:
             raise
-            logger.error("[engine] ⚠ 真实引擎执行失败，已降级为占位【假数据】（非真实 OCR）：%s", exc)
-            print("⚠ 警告：真实引擎失败，本次产出为占位假数据，并非真实 OCR 结果。")
-            return build_mock_book(book_code=book_code or "TCM-MOCK-001")
+        return build_mock_book(book_code=book_code or "TCM-MOCK-001")
 
 
 def _build_engine_config() -> dict:
@@ -95,6 +95,14 @@ def _build_engine_config() -> dict:
 
 def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
     """调用 kimi tcm_ocr 的 BookPipeline（需安装引擎依赖并配置环境）。"""
+    # CloudLLM 环境变量映射：KZOCR_LLM_* → GLM_*（CloudLLMClient 从 ENV 读取）
+    if os.environ.get("KZOCR_LLM_API_KEY") and not os.environ.get("GLM_API_KEY"):
+        os.environ["GLM_API_KEY"] = os.environ["KZOCR_LLM_API_KEY"]
+    if os.environ.get("KZOCR_LLM_BASE_URL") and not os.environ.get("GLM_API_BASE"):
+        os.environ["GLM_API_BASE"] = os.environ["KZOCR_LLM_BASE_URL"]
+    if os.environ.get("KZOCR_LLM_MODEL") and not os.environ.get("GLM_MODEL"):
+        os.environ["GLM_MODEL"] = os.environ["KZOCR_LLM_MODEL"]
+
     engine_dir = Path(str(cfg.kimi_engine_dir))
     if not engine_dir.exists():
         raise RuntimeError(f"未找到 kimi 引擎目录：{engine_dir}（请设置 KIMI_ENGINE_DIR）")
