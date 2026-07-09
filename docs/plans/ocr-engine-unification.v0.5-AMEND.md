@@ -300,10 +300,12 @@ def check_hierarchy_anomaly(
 
 1. **D1 + D2 由同一人实施**——确保 `retry_with_policy` 被 D2 实际消费，消除架构脱节
 2. **D2 + D3 修改同一函数 `_run_vlm`**——即使分 P1/P2 实施，建议同人处理避免 diff 冲突
-3. **D3 缓存路径必须经过 C2 路径穿越校验**——调用 `atomic_write(cache_path, text, allowed_base=cfg.kzocr_output_dir)`
-4. **C1 L3 修改不破坏现有测试**——现有 leakage 测试中 L3 仅验证日志输出，移除后测试需对应调整
-5. **适配器 `max_tokens` 参数兼容**——PaddleOCRVl16Adapter / SenseNovaAdapter 需确认支持 `max_tokens` 参数；若不支持，D2 OverSizeError 不触发重试而是直接走过 OversizeError 路径（抛出异常）
-6. **`_run_real` 路径待未来升级**——当前 v0.5 不覆盖 `_run_real` 的异常增强（架构师 A-3 备查项）
+3. **`_run_vlm` 重构建议**（软件工程评审）：提取 `_process_vlm_page(page, page_num, ...)` 子函数封装单页 OCR + 重试 + 缓存逻辑，降低 `_run_vlm` 主循环复杂度
+4. **D3 缓存路径必须经过 C2 路径穿越校验**——调用 `atomic_write(cache_path, text, allowed_base=cfg.kzocr_output_dir)`
+5. **C1 L3 修改不破坏现有测试**——现有 leakage 测试中 L3 仅验证日志输出，移除后测试需对应调整
+6. **适配器 `max_tokens` 参数兼容**——PaddleOCRVl16Adapter / SenseNovaAdapter 需确认支持 `max_tokens` 参数；若不支持，D2 OverSizeError 不触发重试而是直接走过 OversizeError 路径（抛出异常）
+7. **`_run_real` 路径待未来升级**——当前 v0.5 不覆盖 `_run_real` 的异常增强（架构师 A-3 备查项）
+8. **`RateLimitedError` Retry-After header**——当前退避降级为纯指数退避；若适配器层不支持读取 `Retry-After` header，文档注明"纯指数退避，Retry-After 被忽略"
 
 ## 版本历史
 
