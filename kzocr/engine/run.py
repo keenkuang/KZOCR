@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import fitz
@@ -461,16 +462,28 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
 
         # 一次展开所有页（避免 doc[i+1] 在 mock 下出错）
         all_pages = list(doc)
-        # 页数上限保护（防资源耗尽 DoS），0=不限制
-        max_pages = int(os.environ.get("KZOCR_MAX_PAGES", "2000"))
+        # 页数上限保护（防资源耗尽 DoS），B6 裁决默认 50
+        max_pages = int(os.environ.get("KZOCR_MAX_PAGES", "50"))
         if max_pages and len(all_pages) > max_pages:
             logger.warning("[VLM] PDF 页数 %d 超过上限 %d，仅处理前 %d 页", len(all_pages), max_pages, max_pages)
             all_pages = all_pages[:max_pages]
             total_pages = len(all_pages)
 
+        # B6: wall-clock 总预算闸（到点即停后续页）
+        total_timeout = int(os.environ.get("KZOCR_TOTAL_TIMEOUT", "7200"))
+        _start_ts = time.monotonic()
+
         for i, page in enumerate(all_pages):
             if i > 0 and i % 5 == 0:
                 logger.info("[VLM] 已识别 %d/%d 页", i, total_pages)
+            # B6: 检查总时间预算
+            elapsed = time.monotonic() - _start_ts
+            if elapsed > total_timeout:
+                logger.warning(
+                    "[VLM] 总时间 %.1fs 超过预算 %ds，提前终止（已处理 %d/%d 页）",
+                    elapsed, total_timeout, i, total_pages,
+                )
+                break
             try:
                 # 版心裁剪后再送识别，减少外传信息量（数据最小化）
                 img = _crop_to_body(_pdf_page_to_numpy(page))
