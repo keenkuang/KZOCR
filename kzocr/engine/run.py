@@ -21,6 +21,15 @@ import numpy as np
 from kzocr import config as app_config
 from .mock import mock_book_result as build_mock_book
 from .types import BookResult, PageResult, ParagraphResult, LineResult
+from kzocr.engines.errors import (
+    ApiError,
+    OcrError,
+    OverSizeError,
+    RateLimitedError,
+    RetryExhaustedError,
+    BACKOFF_CONFIGS,
+    retry_with_policy,
+)
 from kzocr.engines.leakage import CharCountBaseline, apply_leakage_defense
 
 logger = logging.getLogger(__name__)
@@ -257,12 +266,12 @@ def _init_vlm_adapter(cfg) -> object:
     return adapter
 
 
-def _pdf_page_to_numpy(page) -> np.ndarray:
+def _pdf_page_to_numpy(page, dpi: int = 150) -> np.ndarray:
     """将 PyMuPDF page 渲染为 (H, W, 3) RGB numpy 数组。
 
     自动处理 RGBA（alpha 通道）和灰度页面的通道转换。
     """
-    mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
+    mat = fitz.Matrix(dpi / 72, dpi / 72)  # 默认 150 DPI
     pix = page.get_pixmap(matrix=mat)
     # RGBA(alpha) 或灰度(n=1) → 转 RGB；否则 reshape(...,3) 会因样本数不符报错
     if pix.n != 3:
@@ -348,6 +357,28 @@ def _vlm_postprocess(text: str) -> str:
     # 清理多余空行
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+# ── D2: VLM 单页处理（含输出长度检查）──
+
+
+def _process_vlm_page(vlm, img: np.ndarray, supports_two_page: bool, next_img: np.ndarray | None = None) -> str:
+    """处理单页 VLM 识别。返回文本。若文本过长可能抛出 OverSizeError。"""
+    imgs = [img]
+    if supports_two_page and next_img is not None:
+        imgs.append(next_img)
+    text: str
+    if supports_two_page:
+        text = vlm.recognize_pages(imgs)
+    else:
+        text = vlm.recognize_page(imgs[0])
+    # D2: 检查输出文本是否过长（超过 8000 字 ≈ 16k tokens，超过 VLM 常见输出上限）
+    # 注意: 这不是精确 token 计数，而是保守的字符数保护
+    if len(text) > 8000:
+        raise OverSizeError(
+            f"VLM output too long: {len(text)} chars (limit: 8000)",
+        )
+    return text
 
 
 # =============================================================================
@@ -457,6 +488,8 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
         pages_text: list[str] = []
         # C1: 初始化字符数基线（前 50 页建立中位数基线）
         baseline = CharCountBaseline(window=50)
+        # D2: 失败页记录 {page_num: reason}
+        failed_pages: dict[int, str] = {}
         # 是否支持双页上下文（SenseNova 适配器）
         supports_two_page = hasattr(vlm, "recognize_pages")
 
@@ -484,28 +517,62 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
                     elapsed, total_timeout, i, total_pages,
                 )
                 break
+            # --- D2: structured error handling ---
             try:
-                # 版心裁剪后再送识别，减少外传信息量（数据最小化）
                 img = _crop_to_body(_pdf_page_to_numpy(page))
-                imgs = [img]
-                # SenseNova 思考模式：送当前页 + 下页顶部 3 行作上下文
+                # 双页上下文（SenseNova 模式）
+                next_ctx = None
                 if supports_two_page and i < len(all_pages) - 1:
                     next_full = _pdf_page_to_numpy(all_pages[i + 1])
                     h = next_full.shape[0]
-                    # 只取顶部 15% 作为上下文（约 3-5 行）
-                    next_img = next_full[:int(h * 0.15), :, :]
-                    imgs.append(next_img)
-
-                if supports_two_page:
-                    text = vlm.recognize_pages(imgs)
-                else:
-                    text = vlm.recognize_page(imgs[0])
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("[VLM] 第 %d 页识别失败，跳过：%s", i + 1, exc)
+                    next_ctx = next_full[:int(h * 0.15), :, :]
+                processed_text = _process_vlm_page(vlm, img, supports_two_page, next_ctx)
+            except (ApiError, RateLimitedError) as exc:
+                # D2: transient API error → retry with exponential backoff
+                def _retry_fn():
+                    retry_img = _crop_to_body(_pdf_page_to_numpy(page))
+                    retry_ctx = None
+                    if supports_two_page and i < len(all_pages) - 1:
+                        nf = _pdf_page_to_numpy(all_pages[i + 1])
+                        retry_ctx = nf[:int(nf.shape[0] * 0.15), :, :]
+                    return _process_vlm_page(vlm, retry_img, supports_two_page, retry_ctx)
+                try:
+                    processed_text = retry_with_policy(
+                        _retry_fn,
+                        backoff=BACKOFF_CONFIGS["api"],
+                        error_types=(ApiError,),
+                    )
+                except RetryExhaustedError as rexc:
+                    failed_pages[i + 1] = f"API error after retries: {rexc}"
+                    logger.warning("[VLM] 第 %d 页 API 错误重试耗尽，跳过：%s", i + 1, rexc)
+                    continue
+            except OverSizeError:
+                # D2: 输出过长 → 降低 DPI 后重试
+                logger.info("[VLM] 第 %d 页输出过长，降低 DPI 重试", i + 1)
+                try:
+                    lo_img = _crop_to_body(_pdf_page_to_numpy(page, dpi=72))
+                    processed_text = retry_with_policy(
+                        lambda: _process_vlm_page(vlm, lo_img, supports_two_page, None),
+                        backoff=BACKOFF_CONFIGS["oversize"],
+                        error_types=(OverSizeError,),
+                    )
+                except RetryExhaustedError:
+                    failed_pages[i + 1] = "OverSize even after reduced DPI"
+                    logger.warning("[VLM] 第 %d 页降低 DPI 后仍超长，跳过", i + 1)
+                    continue
+            except OcrError as exc:
+                # D2: non-retriable OCR failure → skip page
+                failed_pages[i + 1] = f"OCR failed: {exc}"
+                logger.warning("[VLM] 第 %d 页 OCR 失败，跳过：%s", i + 1, exc)
                 continue
-            pages_text.append(text)
+            except Exception as exc:  # noqa: BLE001
+                failed_pages[i + 1] = f"Unexpected error: {exc}"
+                logger.warning("[VLM] 第 %d 页未知异常，跳过：%s", i + 1, exc)
+                continue
+            # --- end D2 ---
+            pages_text.append(processed_text)
             # C1: 向基线注册当前页字数
-            baseline.feed(text)
+            baseline.feed(processed_text)
         if not any(pages_text):
             raise RuntimeError(f"VLM 全部 {total_pages} 页识别均失败")
 
@@ -528,6 +595,7 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
             engine_label=getattr(vlm, "engine_label", VLM_ENGINE_LABEL),
             final_markdown=full_md,
             pages=pages,
+            failed_pages=failed_pages,
         )
     finally:
         doc.close()

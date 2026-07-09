@@ -183,6 +183,7 @@ class BookResult:
     context_patterns: list[ContextPattern] = field(default_factory=list)
     terms: list[TermEntry] = field(default_factory=list)
     formulas: list[FormulaEntry] = field(default_factory=list)
+    failed_pages: dict[int, str] = field(default_factory=dict)  # D2: 失败页记录 {page_num: reason}
     final_markdown: str = ""        # 导出文档（人工终校后填充）
 
     # 元信息：本次结果来自哪个引擎 / 是否 mock
