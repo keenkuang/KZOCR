@@ -48,50 +48,48 @@ class OverSizeError(OcrError):       # 字数超阈值（L1 触发后重 OCR 仍
 class RetryExhaustedError(OcrError): # 重试耗尽，跳过该页
 ```
 
-**关于 `@dataclass RetryPolicy`**（测试评审建议：`policy: dict` 弱类型 → `@dataclass`）：
-- 重试策略使用 `@dataclass` 而非 `dict`，获得 IDE 类型检查
+**关于 `retry_with_policy` 的退避参数**（软件工程评审建议：避免 `RetryPolicy` 与 `ExponentialBackoff` 重复字段）：
+- `retry_with_policy` 不引入独立的 `RetryPolicy` dataclass，直接接受 `ExponentialBackoff` 实例
+- 不同场景通过不同的 `ExponentialBackoff` 配置区分：
 
 ```python
-@dataclass
-class RetryPolicy:
-    strategy: str                     # "exponential" | "reocr" | "none"
-    max_retries: int = 3
-    base_delay: float = 2.0
-    max_delay: float = 300.0
-    jitter: float = 0.5
+from kzocr.engines.ratelimit import ExponentialBackoff
 
-RETRY_POLICIES = {
-    "api":      RetryPolicy("exponential", max_retries=3, base_delay=2.0),
-    "ratelimit": RetryPolicy("exponential", max_retries=3, base_delay=1.0),
-    "oversize": RetryPolicy("reocr",        max_retries=1),
-    "db":       RetryPolicy("none"),
+BACKOFF_CONFIGS = {
+    "api":      ExponentialBackoff(base_delay=2.0, max_retries=3, max_delay=300.0, jitter=0.5),
+    "ratelimit": ExponentialBackoff(base_delay=1.0, max_retries=3, max_delay=60.0,  jitter=0.3),
+    "oversize": ExponentialBackoff(base_delay=0,    max_retries=1),  # 快速重试，max_tokens×1.8
 }
 ```
 
-**`retry_with_policy()` 辅助函数**（定义在 `errors.py` 中，靠近异常类和策略表）：
+- `strategy="reocr"` 由调用方在 `retry_kwargs` 中传递调整参数（如 `max_tokens`），`retry_with_policy` 在重试时注入 fn 参数
+- `RateLimitedError` 尊重 `Retry-After` header（若有则用其值作为本轮延迟，覆盖退避计算）
+
+**`retry_with_policy()` 辅助函数**（定义在 `kzocr/engines/errors.py` 中，靠近异常类和策略表）：
 
 ```python
 def retry_with_policy(
     fn: Callable[..., T],
-    policy: RetryPolicy,
+    backoff: ExponentialBackoff,
     error_types: tuple[type[Exception], ...] = (ApiError,),
     retry_kwargs: dict[int, dict] | None = None,  # attempt → fn kwargs
     on_exhausted: Callable[[int, Exception], None] | None = None,
 ) -> T:
-    """按 RetryPolicy 执行 fn；指数退避或幂等重试，耗尽后调用 on_exhausted。
+    """按指数退避策略执行 fn，耗尽后抛出 RetryExhaustedError。
 
     Args:
         fn              : 要执行的函数。
-        policy          : 重试策略（@dataclass RetryPolicy）。
+        backoff         : ExponentialBackoff 实例（决定退避参数）。
         error_types     : 哪些异常触发重试（默认 ApiError）。
         retry_kwargs    : attempt 序号 → fn 的参数字典（用于 OverSizeError 的 max_tokens 调整）。
-        on_exhausted    : 所有重试耗尽后回调（可选，用于记录失败）。
+        on_exhausted    : 所有重试耗尽后回调 (page_num, last_exception) → None。
+                          注意：page_num 需由调用方闭包捕获，retry_with_policy 不管理此值。
 
     Returns:
         fn 成功执行的返回值。
 
     Raises:
-        重试耗尽后抛出最后一次捕获的异常。
+        RetryExhaustedError: 所有重试耗尽，原异常通过 __cause__ 链传递。
     """
 ```
 
@@ -125,22 +123,22 @@ except Exception as exc:
 
 ```python
 from kzocr.engines.errors import (
-    retry_with_policy, RetryPolicy,
+    retry_with_policy,
     ApiError, RateLimitedError, OverSizeError, RetryExhaustedError,
 )
 from kzocr.engines.ratelimit import ExponentialBackoff
 
 failed_pages: dict[int, str] = {}       # page_num → error_type
-backoff = ExponentialBackoff(base_delay=2.0)
 
 for i, page in enumerate(all_pages):
+    page_num = i + 1                    # 闭包捕获，避免 on_exhausted 使用 attempt 序号
     imgs = [_prepare_image(page, all_pages, i)]
     text = ""
     try:
         # 正常 OCR → 字数校验
         text = retry_with_policy(
             lambda: vlm.recognize_pages(imgs) if supports_two_page else vlm.recognize_page(imgs[0]),
-            policy=RETRY_POLICIES["api"],
+            backoff=BACKOFF_CONFIGS["api"],
             error_types=(ApiError, RateLimitedError),
             on_exhausted=lambda pn, exc: failed_pages.update({pn: type(exc).__name__}),
         )
@@ -148,18 +146,16 @@ for i, page in enumerate(all_pages):
         if baseline.ready and len(text) > baseline.threshold:
             text = retry_with_policy(
                 lambda: vlm.recognize_pages(imgs, max_tokens=int(baseline.median * 1.8))
-                       if supports_two_page else vlm.recognize_page(imgs[0], max_tokens=...),
-                policy=RETRY_POLICIES["oversize"],
+                       if supports_two_page else vlm.recognize_page(imgs[0], max_tokens=int(baseline.median * 1.8)),
+                backoff=BACKOFF_CONFIGS["oversize"],
                 error_types=(OverSizeError,),
-                on_exhausted=lambda pn, exc: failed_pages.update({pn: "OverSize" + type(exc).__name__}),
+                on_exhausted=lambda pn, exc: failed_pages.update({pn: "OverSize:" + type(exc).__name__}),
             )
     except RetryExhaustedError as exc:
-        # 重试耗尽 → 记录失败页 + 跳过
-        failed_pages[i + 1] = "Exhausted:" + type(exc.__cause__).__name__
-        logger.error("[VLM] 第 %d 页重试耗尽，跳过", i + 1)
+        # 重试耗尽 → 记录失败页 + 跳过（注意：on_exhausted 先于 except 执行）
+        logger.error("[VLM] 第 %d 页重试耗尽（%s），跳过", page_num, exc.__cause__)
         continue
 
-    # 即使重 OCR 后仍然超阈值 → 走 RetryExhaustedError
     pages_text.append(text)
     baseline.feed(text)
 ```
@@ -314,4 +310,4 @@ def check_hierarchy_anomaly(
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | v0.5-rc1 | 2026-07-10 | 初始方案，D1-D4 完整 |
-| **v0.5-rc2** | **2026-07-10** | **吸收 6 角色评审：** P0 Config 扩展、D1 YAGNI 缩小异常范围、D2 retry_with_policy 消除脱节、D2 OverSizeError 逻辑修复、D3 参数哈希校验 + 引擎标签 + TTL、D4 expected_depth 参数化、冲突-2 C1 L3 修订 |
+| **v0.5-rc3** | **2026-07-10** | **吸收 round7 软件工程再评审：** `RetryPolicy` 简化直接接受 `ExponentialBackoff` 实例；`retry_with_policy` 签名修正（Raises `RetryExhaustedError` + `__cause__`）；D2 `on_exhausted` 闭包捕获 `page_num` 修正；`_run_vlm` 提取 `_process_vlm_page` 子函数建议；`RateLimitedError` Retry-After 降级文档注明 |
