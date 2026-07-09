@@ -46,6 +46,10 @@ class Config:
     deepseek_rpm: int = 20
     # 是否允许把页面图像发往第三方云端 vision（数据出境许可，默认关闭）
     allow_cloud_vision: bool = False
+    # v0.5 AMEND D0: VLM 缓存及中间产物输出目录
+    kzocr_output_dir: str = ""  # will be set by from_env() / load_config()
+    # v0.5 AMEND D0: 缓存 TTL（秒），默认 24h
+    cache_ttl_seconds: int = 86400
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -69,6 +73,8 @@ class Config:
             deepseek_model=os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash"),
             deepseek_base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
             deepseek_rpm=int(os.environ.get("DEEPSEEK_RPM", "20")),
+            kzocr_output_dir=os.environ.get("KZOCR_OUTPUT_DIR", "/tmp/kzocr/output"),
+            cache_ttl_seconds=int(os.environ.get("KZOCR_CACHE_TTL", "86400")),
         )
 
 
@@ -84,6 +90,7 @@ def load_config() -> "Config":
         KZOCR_REQUIRE_REAL → require_real（真实失败是否抛错）
         KZOCR_USE_VLM     → use_vlm（是否启用 VLM 直接模式）
         KZOCR_VLM_ENGINE  → vlm_engine（VLM 引擎选择：auto/sensenova/paddleocr_vl16）
+        KZOCR_ALLOW_CLOUD_VISION → allow_cloud_vision（云端 vision 许可）
     """
     cfg = Config.from_env()
     cfg.use_mock = os.environ.get("KZOCR_USE_MOCK", "0") in ("1", "true", "True")

@@ -156,8 +156,7 @@ def apply_leakage_defense(
     流程:
     L1: 动态基线检测（char_count > threshold）
     L2: max_tokens 物理上限
-    L3: 超阈自动重 OCR（此处仅日志记录，实际重 OCR 由调用侧负责）
-    L4: 相邻页重叠探测 + 截断
+    L4: 相邻页重叠探测 + 截断（L3 已由 D2 OverSizeError 实时重试取代）
 
     Args:
         pages_text: 逐页文本列表。
@@ -172,7 +171,7 @@ def apply_leakage_defense(
 
     result = list(pages_text)
 
-    # L1/L2: 逐页检查字符数
+    # L1/L2: 逐页检查字符数（L3 已由 D2 实时重试取代）
     threshold = baseline.threshold if baseline.ready else None
     for i in range(len(result)):
         char_count = len(result[i])
@@ -188,8 +187,6 @@ def apply_leakage_defense(
                 "[leakage] L2 触发: P%d 字符数 %d > max_tokens*2=%d",
                 i + 1, char_count, max_tokens * 2,
             )
-            # L3: 标记需要重 OCR（日志提示）
-            logger.info("[leakage] L3: P%d 建议重 OCR（max_tokens=%.0f）", i + 1, char_count * 0.5)
 
     # L4: 相邻页重叠探测（从后往前避免索引偏移）
     for i in range(len(result) - 2, -1, -1):
