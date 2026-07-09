@@ -97,7 +97,16 @@ def retry_with_policy(
   - `strategy="exponential"`：使用 `ExponentialBackoff` 计算延迟 + 随机抖动
   - `strategy="reocr"`：使用 `retry_kwargs` 传入调整参数（如 `max_tokens×1.8`）
   - `strategy="none"`：不重试，直接抛出
-- `RateLimitedError` 尊重 `Retry-After` header（若有则用其值覆盖延迟）
+- `RateLimitedError` 构造函数接受可选 `retry_after: float | None` 参数，`retry_with_policy` 在捕获 `RateLimitedError` 时优先使用此值作为退避延迟（覆盖指数退避计算）
+- `RateLimitedError` 定义：
+
+```python
+class RateLimitedError(ApiError):
+    """429/503 限流错误。"""
+    def __init__(self, message: str = "", retry_after: float | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+```
 
 **测试要求（32–42 个用例）：**
 - 每个异常类型可独立构造和捕获（参数化 + 继承关系验证）
@@ -217,6 +226,26 @@ def _cache_is_valid(cache_path: Path, cfg: Config) -> bool:
         return first_line == f"# config_hash={expected_hash}"
     except (OSError, IndexError):
         return False
+
+def _compute_config_hash(cfg: Config) -> str:
+    """计算影响 VLM 输出的配置参数的 SHA256 摘要（前 16 字符）。
+
+    参与哈希的参数：
+    - vlm_engine（SenseNova / PaddleOCR-VL-1.6）
+    - sensenova_model / sensenova_base_url
+    - vlm_host / vlm_port
+    - max_tokens（如果 Config 中存在）
+    """
+    import hashlib, json
+    params = {
+        "engine": cfg.vlm_engine,
+        "sensenova_model": getattr(cfg, "sensenova_model", ""),
+        "sensenova_base_url": getattr(cfg, "sensenova_base_url", ""),
+        "vlm_host": getattr(cfg, "vlm_host", "127.0.0.1"),
+        "vlm_port": getattr(cfg, "vlm_port", 18080),
+    }
+    raw = json.dumps(params, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 ```
 
 ### D3.3 —— 缓存生命周期
@@ -312,4 +341,4 @@ def check_hierarchy_anomaly(
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | v0.5-rc1 | 2026-07-10 | 初始方案，D1-D4 完整 |
-| **v0.5-rc3** | **2026-07-10** | **吸收 round7 软件工程再评审：** `RetryPolicy` 简化直接接受 `ExponentialBackoff` 实例；`retry_with_policy` 签名修正（Raises `RetryExhaustedError` + `__cause__`）；D2 `on_exhausted` 闭包捕获 `page_num` 修正；`_run_vlm` 提取 `_process_vlm_page` 子函数建议；`RateLimitedError` Retry-After 降级文档注明 |
+| **v0.5-rc4** | **2026-07-10** | **吸收 round8 测试评审 B1/B2：** `RateLimitedError` 新增 `retry_after` 构造函数参数；D3 补充 `_compute_config_hash()` 定义；测试用例估算修正为 38-52（新增）+ 47（已有）= 85-99 |
