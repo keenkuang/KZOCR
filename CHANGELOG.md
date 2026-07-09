@@ -1,7 +1,62 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-07T23:30+08
-> 最后更新：2026-07-07 23:30 CST
+> 文档版本：v2026-07-10T19:52+08
+> 最后更新：2026-07-10 19:52 CST
+
+---
+
+## v2026-07-10 — v0.5 AMEND 异常处理体系改进实施完成
+
+### 日期：2026-07-10 19:52 CST
+
+实施提交（自 d6e4845 起，HEAD `1f52052`）：
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `c4120cd` | D0+D1 | Config扩展 (`kzocr_output_dir`, `cache_ttl_seconds`) + errors.py (5异常类 + retry_with_policy) |
+| `dd9b76f` | D2 | VLM主循环重试 (_process_vlm_page, 降DPI重试, failed_pages追踪) |
+| `cc6f52a` | D4 | 层级异常检测 (HierarchyAnomaly + check_hierarchy_anomaly) |
+| `1f52052` | D3 | VLM断点续跑缓存 (config_hash + TTL + KZOCR_CLEAR_CACHE=1) |
+| — | 冲突-2 | 移除leakage.py L3日志标记（由D2取代） |
+
+### 评审历程
+
+| 轮次 | 时间 | 角色数 | 结果 |
+|------|------|--------|------|
+| round6 | 2026-07-10 | 5角色（架构/软件工程/测试/安全/领域） | APPROVED |
+| round7 | 2026-07-10 | 5角色再评审 | APPROVED |
+| round8 | 2026-07-10 | 6角色（+性能工程师） | APPROVED |
+| round9 | 2026-07-10 | 7角色（+运维+产品经理） | APPROVED |
+| round10 | 2026-07-10 | 7角色终签 | 全部APPROVED ✅ |
+
+评审报告存档：`docs/reviews/2026-07-10-round{6,7,8,9,10}/`
+
+### 新增测试
+
+| 文件 | 用例数 | 覆盖内容 |
+|------|--------|----------|
+| `tests/test_config.py` | 6 | D0: 默认值、环境变量覆盖、类型校验 |
+| `tests/test_errors.py` | 24 | D1: 异常继承、retry_with_policy、回调、backoff配置 |
+| `tests/test_hierarchy.py` | 17 | D4: 邻居窗口、异常检测、严重度缩放 |
+| `tests/test_vlm.py` | +16 | D2: 8重试测试 + D3: 8缓存测试 |
+
+**总计：177 测试全通过 ✅（0.94s）**
+
+### 新增/修改文件
+
+| 文件 | 状态 | 行数 |
+|------|------|------|
+| `kzocr/config.py` | 修改 | +7 |
+| `kzocr/engine/run.py` | 修改 | +199 |
+| `kzocr/engine/types.py` | 修改 | +1 |
+| `kzocr/engines/errors.py` | 新增 | 109 |
+| `kzocr/engines/hierarchy.py` | 新增 | 134 |
+| `kzocr/engines/leakage.py` | 修改 | -7（L3移除）|
+| `kzocr/engines/__init__.py` | 修改 | +22 |
+| `tests/test_config.py` | 新增 | 51 |
+| `tests/test_errors.py` | 新增 | 217 |
+| `tests/test_hierarchy.py` | 新增 | 125 |
+| `tests/test_vlm.py` | 修改 | +535 |
 
 ---
 

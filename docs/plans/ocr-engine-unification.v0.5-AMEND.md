@@ -3,8 +3,16 @@
 > 本文件是 `ocr-engine-unification.v0.3-FREEZE.md` 的**增量修订**。v0.3 FREEZE (B1–B8) 和 v0.4 AMEND (C1–C5) 维持有效，此处仅追加 D1–D4 共 4 项从 TOC OCR 项目（970 页实战验证）吸收的异常处理体系改进。
 > 来源项目：`/home/keen/Documents/trae_projects/traedocu/docs/`
 >
-> **多角色评审（6 角色）：** `docs/reviews/2026-07-10-round6/`
-> 本次修订吸收了架构师、软件工程、测试、安全、领域 5 项评审意见（裁决：**有条件通过 / 需修订**）。
+> **实施状态：** ✅ 已全部实施并合并到 `main`（HEAD `1f52052`，2026-07-10 19:52 CST）
+> **提交：** `c4120cd` (D0+D1), `dd9b76f` (D2), `cc6f52a` (D4), `1f52052` (D3)
+> **测试：** 177 全通过（0.94s）
+> 
+> **多角色评审历程：**
+> - round6 (5角色): APPROVED → `docs/reviews/2026-07-10-round6/`
+> - round7 (5角色): APPROVED → `docs/reviews/2026-07-10-round7/`
+> - round8 (6角色): APPROVED → `docs/reviews/2026-07-10-round8/`
+> - round9 (7角色): APPROVED → `docs/reviews/2026-07-10-round9/`
+> - round10 (7角色终签): 全部 APPROVED ✅ → `docs/reviews/2026-07-10-round10/`
 
 ---
 

@@ -1,19 +1,27 @@
 # KZOCR 测试报告
 
-> 生成日期：2026-07-09
-> 版本：main@d94ec0e + round4 残留修复
+> 生成日期：2026-07-10
+> 版本：main@1f52052（v0.5 AMEND 实施完成）
 
 ## 测试结果
 
-**41/41 全部通过** ✅
+**177/177 全部通过** ✅
 
 | 测试文件 | 用例数 | 状态 |
 |----------|--------|------|
-| `tests/test_cloudllm_env.py` | 5 | ✅ CloudLLM 环境变量映射（full mapping, no-overwrite, no-op, partial, mixed） |
-| `tests/test_common.py` | 7 | ✅ `adapter_to_line_result` 转换函数（basic, char_conf->json, crop_img, mismatch truncation, None, engine_result, engine_name） |
+| `tests/test_atomic.py` | 10 | ✅ 原子写入（含路径穿越防御） |
+| `tests/test_cloudllm_env.py` | 5 | ✅ CloudLLM 环境变量映射 |
+| `tests/test_common.py` | 7 | ✅ `adapter_to_line_result` 转换 |
+| `tests/test_config.py` | 6 | ✅ D0 Config 扩展（kzocr_output_dir / cache_ttl_seconds） |
+| `tests/test_egress.py` | 14 | ✅ 出站安全校验 |
+| `tests/test_errors.py` | 24 | ✅ D1 异常分类 + retry_with_policy |
+| `tests/test_hierarchy.py` | 17 | ✅ D4 层级异常检测 |
+| `tests/test_leakage.py` | 14 | ✅ C1 泄漏防御（含冲突-2 L3移除） |
 | `tests/test_pipeline.py` | 5 | ✅ 全链路回归（mock→zai→导出, isMock 阻断） |
-| `tests/test_types.py` | 13 | ✅ 契约冻结类型（GlyphStatus×6, ProbeResult×2, AdapterMeta×3, AdapterPageResult×2） |
-| `tests/test_vlm.py` | 11 | ✅ VLM 直接集成（路由/降级/PDF渲染/空处理/回归） |
+| `tests/test_ratelimit.py` | 17 | ✅ C3 限流器 |
+| `tests/test_resources.py` | 10 | ✅ B5 内置资源 |
+| `tests/test_types.py` | 13 | ✅ 契约冻结类型 |
+| `tests/test_vlm.py` | 27 | ✅ VLM 集成（路由/降级/D2重试/D3缓存） |
 
 ## 覆盖率
 

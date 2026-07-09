@@ -1,8 +1,8 @@
 # KZOCR 工作状态快照（crash-safe）
 
-> 最后更新：2026-07-10
+> 最后更新：2026-07-10 19:52 CST
 > 用途：CodeBuddy 当机/重启后，从这里恢复上下文。本文件随代码一起提交并推送到 GitHub。
-> 当前焦点：**v0.5 AMEND — 异常处理体系改进**（D1-D4 方案已发布待评审）
+> 当前焦点：**v0.5 AMEND — 异常处理体系改进**（D0-D4 已实施并合并，HEAD `1f52052`）
 
 ## 1. 最近已落地并推送 GitHub 的提交（origin/main，用 id_ed25519_kzocr key）
 
@@ -36,9 +36,21 @@
 7. **v0.3 定稿冻结（B1–B8）**：写入 `docs/plans/ocr-engine-unification.v0.3-FREEZE.md`，8 项 blocker 全部拍板。
 8. **v0.4 AMEND 落地**：C1-C5 全部实现，114 测试通过。C2+C3 安全加固（Security C2/C3）。B5/B6/B7 内建种子资源、MAX_PAGES、crop_img 瞬态修复。
 9. **kimi_agent_ocr C4 修复**：INSERT OR REPLACE → ON CONFLICT DO UPDATE（本地 `d833cb4`，远程仓库未创建）。
-10. **v0.5 AMEND 方案**：D1-D4 异常处理体系改进方案已写入并推送到 GitHub，准备多角色评审。
+10. **v0.5 AMEND 方案**：D1-D4 异常处理体系改进方案已多次评审并实施。
 
-## 3. 环境关键事实（重启后先读这个）
+## 3. v0.5 AMEND 实施记录（2026-07-10）
+
+实施详情和测试结果见 `CHANGELOG.md` v2026-07-10 章节。
+
+| 模块 | 提交 | 状态 |
+|------|------|------|
+| D0: Config扩展 | `c4120cd` | ✅ |
+| D1: errors.py | `c4120cd` | ✅ |
+| D2: VLM重试 | `dd9b76f` | ✅ |
+| D3: VLM断点续跑 | `1f52052` | ✅ |
+| D4: 层级异常检测 | `cc6f52a` | ✅ |
+
+## 4. 环境关键事实
 
 - KZOCR 仓库：`/home/keen/KZOCR`，分支 `main`，远程 `git@github.com:keenkuang/KZOCR.git`（SSH）。
 - kimi 真实引擎：`/home/keen/kimi_agent_ocr/tcm_ocr_system_v1.1`（经 `KIMI_ENGINE_DIR` 注入 sys.path），现已可导入。
@@ -62,7 +74,7 @@
 - B6 MAX_PAGES/TOTAL_TIMEOUT — ✅ 已落地
 - B7 crop_img 瞬态 — ✅ 已落地
 - C2+C3 安全加固 — ✅ 已落地
-- **v0.5 AMEND D1-D4 — 🔄 方案已发布，待多角色评审**
+- **v0.5 AMEND D1-D4 — ✅ 已实施**（HEAD `1f52052`，177 测试通过）
 
 ## 6. v0.3 定稿冻结 B1–B8（全部裁决，无悬决）
 
