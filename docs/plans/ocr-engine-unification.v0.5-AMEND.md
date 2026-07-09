@@ -25,6 +25,9 @@ class Config:
     kzocr_output_dir: str = field(
         default_factory=lambda: os.environ.get("KZOCR_OUTPUT_DIR", "/tmp/kzocr/output")
     )
+    cache_ttl_seconds: int = field(
+        default_factory=lambda: int(os.environ.get("KZOCR_CACHE_TTL", "86400"))
+    )
 ```
 
 **测试要求：** Config 默认值测试 + 环境变量覆盖测试。
@@ -213,13 +216,23 @@ def _get_vlm_cache_path(cfg, engine_tag: str, book_code: str, page_num: int) -> 
 - 缓存文件包含**参数签名（config_hash）** 作为首行元数据
 - 写入时：`# config_hash={sha256(VLM_PARAMS_JSON)[:16]}\n{page_text}`
 - 读取时：校验元数据匹配当前配置，不匹配则视为无效缓存
+- 额外校验：**文件 mtime 不超过 cache_ttl_seconds（默认 86400s=24h）**，超期视为无效
 - `VLM_PARAMS_JSON` 包含当前使用的引擎标识、max_tokens、VLM prompt 等影响输出的参数
 
 ```python
 def _cache_is_valid(cache_path: Path, cfg: Config) -> bool:
-    """验证缓存文件是否由当前配置生成。"""
+    """验证缓存文件是否由当前配置生成且未超 TTL。"""
     if not is_complete(cache_path):
         return False
+    # TTL 校验：文件 mtime 超过 cache_ttl_seconds 则失效
+    try:
+        age = time.time() - cache_path.stat().st_mtime
+        if age > cfg.cache_ttl_seconds:
+            logger.info("[cache] P%d 缓存超期（%.1fh > %.1fh），失效", _extract_page_num(cache_path), age / 3600, cfg.cache_ttl_seconds / 3600)
+            return False
+    except OSError:
+        return False
+    # config_hash 校验
     try:
         first_line = cache_path.read_text(encoding="utf-8").split("\n")[0]
         expected_hash = _compute_config_hash(cfg)
@@ -251,14 +264,16 @@ def _compute_config_hash(cfg: Config) -> str:
 ### D3.3 —— 缓存生命周期
 
 - 安全评审建议：缓存文件含 PDF 明文，需 TTL 策略
-- 默认 TTL：24 小时（可通过 `KZOCR_CACHE_TTL` 环境变量覆盖，单位秒）
+- 默认 TTL：24 小时（通过 `cache_ttl_seconds` Config 字段 / `KZOCR_CACHE_TTL` 环境变量控制，默认 86400）
+- TTL 检查在 `_cache_is_valid()` 中强制实施：文件 mtime 超过 TTL 即视为无效
 - `KZOCR_CLEAR_CACHE=1` 清除所有缓存
-- `KZOCR_OUTPUT_DIR` 应指向可清理的临时目录
+- `KZOCR_OUTPUT_DIR` **生产部署必须覆盖**为持久化路径（如 `/var/lib/kzocr/output`），默认 `/tmp` 在 tmpfs / systemd-tmpfiles 场景下不适合
 
-**测试要求（约 6 个用例）：**
+**测试要求（约 12 个用例）：**
 - 中断+恢复 → 跳过缓存页（config_hash 匹配）
 - 参数变化 → 缓存不匹配 → 不跳过
 - config_hash 不匹配 → 重新 OCR
+- **缓存超 TTL → 失效（mtime 检查 + KZOCR_CACHE_TTL 覆盖）**
 - `KZOCR_CLEAR_CACHE=1` 全量重跑
 - `is_complete` 检查后再读取（TOCTOU 防护，security O1）
 
@@ -341,4 +356,4 @@ def check_hierarchy_anomaly(
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | v0.5-rc1 | 2026-07-10 | 初始方案，D1-D4 完整 |
-| **v0.5-rc4** | **2026-07-10** | **吸收 round8 评审（含性能）：** `RateLimitedError` 新增 `retry_after` 构造函数参数（测试 B1）；D3 补充 `_compute_config_hash()` 完整定义（测试 B2）；base_delay 2.0→1.0s（性能建议）；新增累积重试时间跟踪建议（批量场景） |
+| **v0.5-rc5** | **2026-07-10** | **吸收 round9 运维 FAIL + PM 条件：** D3 `_cache_is_valid` 加入 TTL 强制检查（mtime 超 `cache_ttl_seconds` 失效）；Config 新增 `cache_ttl_seconds` 字段；`from_env()`/`load_config()` 须更新以读取环境变量；文档注明生产部署必须覆盖 `KZOCR_OUTPUT_DIR` 为持久化路径 |
