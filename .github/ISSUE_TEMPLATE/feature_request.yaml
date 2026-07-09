@@ -1,0 +1,32 @@
+name: 功能请求
+description: 为 KZOCR 提出新功能建议
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你的建议！请描述你想要的功能和使用场景。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解决的问题
+      description: 这个功能解决什么痛点？描述使用场景。
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: 期望方案
+      description: 你期望的实现方式或行为
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 你考虑过的其他实现方式
+  - type: textarea
+    id: context
+    attributes:
+      label: 额外上下文
+      description: 相关代码、文档链接等

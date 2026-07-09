@@ -1,0 +1,53 @@
+name: Bug 报告
+description: 报告 KZOCR 中的异常行为
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提交 Bug 报告！请填写以下信息帮助我们定位问题。
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 运行 `python -c "from kzocr import __version__; print(__version__)"`
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 清晰简明地描述这个 Bug
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 如何复现该行为
+      placeholder: |
+        1. 运行 `kzocr pipeline sample.pdf`
+        2. 看到错误输出 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 你预期会发生什么？
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: |
+        操作系统、Python 版本、依赖版本
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志/错误输出
+      description: 粘贴相关日志或错误堆栈
+      render: shell
