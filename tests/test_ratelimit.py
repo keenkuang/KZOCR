@@ -1,12 +1,17 @@
 """C3: ratelimit.py 测试。"""
 from __future__ import annotations
 
+import os
+import tempfile
 import time
+
+import pytest
 
 from kzocr.engines.ratelimit import (
     AdaptiveRateLimiter,
     ExponentialBackoff,
     MultiTokenRateLimiter,
+    RateLimitStore,
 )
 
 
@@ -92,3 +97,50 @@ class TestMultiTokenRateLimiter:
         for _ in range(3):
             lim.acquire()
         assert lim.remaining == 0
+
+    def test_max_tokens_upper_bound(self):
+        with pytest.raises(ValueError, match="tokens must be between 1 and 100000"):
+            MultiTokenRateLimiter(tokens=100001, window_seconds=60)
+
+
+class TestRateLimitStore:
+    def test_save_load(self):
+        store = RateLimitStore()
+        store.save("k1", 3.0, 100.0, 2)
+        row = store.load("k1")
+        assert row is not None
+        _, interval, last_ts, streak = row
+        assert interval == 3.0
+        assert last_ts == 100.0
+        assert streak == 2
+        store.close()
+
+    def test_load_missing(self):
+        store = RateLimitStore()
+        assert store.load("nonexistent") is None
+        store.close()
+
+    def test_persistence_across_instances(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            store1 = RateLimitStore(db_path)
+            store1.save("k2", 5.0, 200.0, 3)
+            store1.close()
+
+            store2 = RateLimitStore(db_path)
+            row = store2.load("k2")
+            assert row is not None
+            _, interval, last_ts, streak = row
+            assert interval == 5.0
+            assert last_ts == 200.0
+            assert streak == 3
+            store2.close()
+        finally:
+            os.unlink(db_path)
+
+    def test_close(self):
+        store = RateLimitStore()
+        store.close()
+        # close 后操作不抛异常
+        store.close()

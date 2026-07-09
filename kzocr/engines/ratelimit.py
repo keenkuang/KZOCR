@@ -1,5 +1,6 @@
 """
 C3 自适应限流器模块 — 生产级限流/重试原语。
+# B3 兼容：通信目标（sensenova.cn, api.deepseek.com, modelscope.cn）已在 B3 egress allowlist 中。
 
 继承 TOC 项目经过 7000+ 次调用验证（<1% 失败率）的设计。
 
@@ -88,13 +89,54 @@ class AdaptiveRateLimiter:
     v0.4 AMEND H1 修复：base_interval 从 6.0s 降至 3.0s。
     """
 
-    def __init__(self, base_interval: float = 3.0, max_interval: float = 60.0):
+    def __init__(
+        self,
+        base_interval: float = 3.0,
+        max_interval: float = 60.0,
+        max_entries: int = 10000,
+        store: Optional[RateLimitStore] = None,
+    ):
         self._base = base_interval
         self._max = max_interval
         self._current = base_interval
         self._success_streak = 0
-        self._last_ts = 0.0  # 上次放行时间戳
+        self._last_ts = 0.0  # 上次放行时间戳（monotonic）
         self._lock = threading.Lock()
+        self._max_entries = max_entries
+        self._registered_count = 0
+        self._store = store
+        if store is not None:
+            state = store.load("adaptive_default")
+            if state is not None:
+                _, interval, last_ts, success_streak = state
+                self._current = interval
+                self._last_ts = last_ts
+                self._success_streak = success_streak
+                logger.info(
+                    "[ratelimit] 从持久存储恢复状态: interval=%.2f streak=%d",
+                    self._current, self._success_streak,
+                )
+
+    def _register(self, key: str) -> bool:
+        """注册一个 key；返回 False 表示达到上限、拒绝注册。"""
+        if self._registered_count >= self._max_entries:
+            logger.warning(
+                "[ratelimit] 注册数 %d 已达上限 %d，拒绝注册 key=%s",
+                self._registered_count, self._max_entries, key,
+            )
+            return False
+        self._registered_count += 1
+        return True
+
+    def _persist(self) -> None:
+        """将当前状态写入持久存储（如有）。"""
+        if self._store is not None:
+            try:
+                self._store.save(
+                    "adaptive_default", self._current, self._last_ts, self._success_streak,
+                )
+            except Exception:
+                logger.exception("[ratelimit] 持久化状态失败")
 
     def wait(self) -> float:
         """阻塞直到允许下一次请求。返回实际等待秒数。"""
@@ -111,6 +153,7 @@ class AdaptiveRateLimiter:
             else:
                 actual = 0.0
             self._last_ts = time.monotonic()
+        self._persist()
         return actual
 
     def report_success(self) -> None:
@@ -121,6 +164,7 @@ class AdaptiveRateLimiter:
                 self._current = max(self._base, self._current * 0.9)
                 self._success_streak = 0
                 logger.debug("[ratelimit] 连续5次成功，间隔降至 %.2fs", self._current)
+        self._persist()
 
     def report_error(self, status_code: int = 503) -> None:
         """报告一次限流/错误。429/503 使间隔翻倍。"""
@@ -131,6 +175,7 @@ class AdaptiveRateLimiter:
                 logger.debug(
                     "[ratelimit] 收到 %d，间隔升至 %.2fs", status_code, self._current
                 )
+        self._persist()
 
     @property
     def current_interval(self) -> float:
@@ -157,8 +202,8 @@ class MultiTokenRateLimiter:
     """
 
     def __init__(self, tokens: int, window_seconds: float, key: str = "default"):
-        if tokens < 1:
-            raise ValueError("tokens must be >= 1")
+        if tokens < 1 or tokens > 100000:
+            raise ValueError("tokens must be between 1 and 100000")
         if window_seconds <= 0:
             raise ValueError("window_seconds must be > 0")
         self._max_tokens = tokens
@@ -225,3 +270,54 @@ class MultiTokenRateLimiter:
         if elapsed >= self._window:
             self._available = self._max_tokens
             self._window_start = now
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# RateLimitStore — SQLite 持久化后端
+# ───────────────────────────────────────────────────────────────────────────
+
+class RateLimitStore:
+    """SQLite 持久化后端，存储限流器状态。
+
+    可选依赖：Python sqlite3（标准库）。
+    重启后配额不丢失（除非使用 :memory:）。
+    """
+
+    def __init__(self, db_path: str = ":memory:"):
+        import sqlite3
+
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS rate_limit_state ("
+            "  key TEXT PRIMARY KEY,"
+            "  interval REAL,"
+            "  last_ts REAL,"
+            "  success_streak INTEGER"
+            ")"
+        )
+        self._conn.commit()
+
+    def save(self, key: str, interval: float, last_ts: float, success_streak: int) -> None:
+        """持久化限流器状态。"""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO rate_limit_state (key, interval, last_ts, success_streak)"
+            "  VALUES (?, ?, ?, ?)",
+            (key, interval, last_ts, success_streak),
+        )
+        self._conn.commit()
+
+    def load(self, key: str) -> Optional[tuple]:
+        """加载限流器状态；key 不存在时返回 None。"""
+        cur = self._conn.execute(
+            "SELECT key, interval, last_ts, success_streak FROM rate_limit_state WHERE key = ?",
+            (key,),
+        )
+        row = cur.fetchone()
+        return row if row is not None else None
+
+    def close(self) -> None:
+        """关闭数据库连接。"""
+        try:
+            self._conn.close()
+        except Exception:
+            pass
