@@ -126,6 +126,14 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    """启动 Web 管理面板。"""
+    import uvicorn
+    log.info("Web 面板启动于 http://%s:%d", args.host, args.port)
+    uvicorn.run("kzocr.web.app:app", host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="kzocr", description="KZOCR 编排：kimi 引擎 + zai 校对台 + kHUB")
     p.add_argument("--version", action="version", version=f"kzocr {__version__}")
@@ -156,6 +164,11 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--skip-push", action="store_true")
     ps.add_argument("--verify", action="store_true")
     ps.set_defaults(func=cmd_smoke)
+
+    pw = sub.add_parser("web", help="启动 Web 管理面板")
+    pw.add_argument("--host", default="127.0.0.1")
+    pw.add_argument("--port", type=int, default=8080)
+    pw.set_defaults(func=cmd_web)
 
     from kzocr.cli_review import build_review_parser
     build_review_parser(sub)

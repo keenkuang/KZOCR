@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block breadcrumb %}核心业务 / {{ book_code }} / 方剂列表{% endblock %}
+{% block title %}方剂列表 · {{ book_code }}{% endblock %}
+{% block content %}
+
+<div class="mb-4">
+    <a href="/book/{{ book_code }}" class="text-sm text-blue-600 hover:underline">← 返回书籍</a>
+</div>
+
+<div class="bg-white rounded-lg border">
+    <div class="px-4 py-3 border-b border-gray-100">
+        <h3 class="text-sm font-medium">方剂（{{ recipes|length }} 条）</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <th class="px-4 py-3">编号</th>
+                    <th class="px-4 py-3">方名</th>
+                    <th class="px-4 py-3">组成</th>
+                    <th class="px-4 py-3">主治</th>
+                    <th class="px-4 py-3">页号</th>
+                    <th class="px-4 py-3">药材</th>
+                    <th class="px-4 py-3">状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in recipes %}
+                <tr class="border-t border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3 font-mono text-xs">{{ r.recipe_no }}</td>
+                    <td class="px-4 py-3 font-medium">{{ r.title[:30] }}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{{ r.fields.get('组成','')[:50] }}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{{ r.fields.get('主治','')[:50] }}</td>
+                    <td class="px-4 py-3">{{ r.start_page }}</td>
+                    <td class="px-4 py-3">{{ r.herbs|length }}</td>
+                    <td class="px-4 py-3">
+                        {% if r.parse_status == 'parsed' %}<span class="badge-green">已解析</span>
+                        {% elif r.parse_status == 'pending' %}<span class="badge-yellow">待解析</span>
+                        {% else %}<span class="badge-gray">{{ r.parse_status }}</span>{% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无方剂数据（需先执行方剂解析）</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

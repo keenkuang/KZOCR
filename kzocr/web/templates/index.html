@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block breadcrumb %}运营中心 / 总览{% endblock %}
+{% block title %}书籍总览{% endblock %}
+{% block content %}
+
+<div class="grid grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">书籍总数</p>
+        <p class="text-2xl font-bold mt-1">{{ total_books }}</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">总页数</p>
+        <p class="text-2xl font-bold mt-1">{{ total_pages }}</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">成功页</p>
+        <p class="text-2xl font-bold mt-1 text-green-600">{{ total_success }}</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">待处理异常</p>
+        <p class="text-2xl font-bold mt-1 {% if total_anomalies > 0 %}text-red-600{% endif %}">{{ total_anomalies }}</p>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg border">
+    <div class="px-4 py-3 border-b border-gray-100">
+        <h3 class="text-sm font-medium">已处理书籍</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <th class="px-4 py-3">书籍编号</th>
+                    <th class="px-4 py-3">总页</th>
+                    <th class="px-4 py-3">成功</th>
+                    <th class="px-4 py-3">失败</th>
+                    <th class="px-4 py-3">异常</th>
+                    <th class="px-4 py-3">引擎</th>
+                    <th class="px-4 py-3">吞吐</th>
+                    <th class="px-4 py-3">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in books %}
+                <tr class="border-t border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3 font-medium">{{ b.code }}</td>
+                    <td class="px-4 py-3">{{ b.total_pages }}</td>
+                    <td class="px-4 py-3 text-green-600">{{ b.success_pages }}</td>
+                    <td class="px-4 py-3 {% if b.fail_pages > 0 %}text-red-600{% endif %}">{{ b.fail_pages }}</td>
+                    <td class="px-4 py-3">
+                        {% if b.anomaly_count > 0 %}
+                        <span class="badge-red">{{ b.anomaly_count }}</span>
+                        {% else %}
+                        <span class="badge-gray">0</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-500">{{ b.engine[:20] if b.engine else '-' }}</td>
+                    <td class="px-4 py-3">{{ '%.1f'|format(b.pages_per_min) if b.pages_per_min else '-' }}</td>
+                    <td class="px-4 py-3">
+                        <a href="/book/{{ b.code }}" class="text-blue-600 hover:underline text-xs">详情</a>
+                        {% if b.anomaly_count > 0 %}
+                        <a href="/book/{{ b.code }}/anomalies" class="text-red-600 hover:underline text-xs ml-2">异常</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="px-4 py-8 text-center text-gray-400">暂无已处理的书籍</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

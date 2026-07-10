@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block breadcrumb %}核心业务 / {{ book_code }}{% endblock %}
+{% block title %}书籍详情 · {{ book_code }}{% endblock %}
+{% block content %}
+
+<div class="flex gap-2 mb-4">
+    <a href="/" class="text-sm text-blue-600 hover:underline">← 返回</a>
+    <a href="/book/{{ book_code }}/recipes" class="text-sm text-blue-600 hover:underline ml-4">方剂列表</a>
+    <a href="/book/{{ book_code }}/anomalies" class="text-sm text-red-600 hover:underline ml-4">校对异常</a>
+</div>
+
+{% if benchmark %}
+<div class="grid grid-cols-5 gap-4 mb-6">
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">引擎</p>
+        <p class="text-sm font-medium mt-1">{{ benchmark.engine }}</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">总页数</p>
+        <p class="text-lg font-bold mt-1">{{ benchmark.total_pages }}</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">成功</p>
+        <p class="text-lg font-bold mt-1 text-green-600">{{ benchmark.success_pages }}</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">错误率</p>
+        <p class="text-lg font-bold mt-1 {% if benchmark.error_rate > 0.1 %}text-red-600{% endif %}">{{ '%.1f'|format(benchmark.error_rate * 100) }}%</p>
+    </div>
+    <div class="bg-white rounded-lg border p-4">
+        <p class="text-xs text-gray-400">吞吐</p>
+        <p class="text-lg font-bold mt-1">{{ '%.1f'|format(benchmark.pages_per_min) }}页/分</p>
+    </div>
+</div>
+{% endif %}
+
+<div class="bg-white rounded-lg border">
+    <div class="px-4 py-3 border-b border-gray-100">
+        <h3 class="text-sm font-medium">逐页进度（{{ progress|length }} 页）</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <th class="px-4 py-3">页号</th>
+                    <th class="px-4 py-3">字符数</th>
+                    <th class="px-4 py-3">OCR</th>
+                    <th class="px-4 py-3">验证</th>
+                    <th class="px-4 py-3">导入</th>
+                    <th class="px-4 py-3">引擎</th>
+                    <th class="px-4 py-3">耗时</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in progress %}
+                <tr class="border-t border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3">{{ p.page_num }}</td>
+                    <td class="px-4 py-3">{{ p.char_count }}</td>
+                    <td class="px-4 py-3">
+                        {% if p.ocr_status == 'success' %}<span class="badge-green">成功</span>
+                        {% elif p.ocr_status == 'failed' %}<span class="badge-red">失败</span>
+                        {% elif p.ocr_status == 'skipped' %}<span class="badge-yellow">跳过</span>
+                        {% else %}<span class="badge-gray">{{ p.ocr_status }}</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if p.verify_status == 'PASS' %}<span class="badge-green">通过</span>
+                        {% elif p.verify_status == 'RARE' %}<span class="badge-green">异体</span>
+                        {% elif p.verify_status in ('FAIL','UNKNOWN') %}<span class="badge-red">{{ p.verify_status }}</span>
+                        {% elif p.verify_status == 'UNCERTAIN' %}<span class="badge-yellow">存疑</span>
+                        {% else %}<span class="badge-gray">{{ p.verify_status }}</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if p.import_status == 'imported' %}<span class="badge-green">已入库</span>
+                        {% elif p.import_status == 'failed' %}<span class="badge-red">失败</span>
+                        {% else %}<span class="badge-gray">{{ p.import_status }}</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-500">{{ p.engine_label }}</td>
+                    <td class="px-4 py-3">{{ p.ocr_elapsed_ms }}ms</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无进度记录</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

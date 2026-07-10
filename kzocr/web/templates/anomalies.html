@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block breadcrumb %}核心业务 / {{ book_code }} / 校对异常{% endblock %}
+{% block title %}校对异常 · {{ book_code }}{% endblock %}
+{% block content %}
+
+<div class="flex gap-2 mb-4">
+    <a href="/book/{{ book_code }}" class="text-sm text-blue-600 hover:underline">← 返回书籍</a>
+    <div class="flex gap-1 ml-4">
+        <a href="?status=pending" class="text-xs px-3 py-1 rounded-full {% if current_status == 'pending' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">待处理</a>
+        <a href="?status=fixed" class="text-xs px-3 py-1 rounded-full {% if current_status == 'fixed' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">已修正</a>
+        <a href="?status=confirmed" class="text-xs px-3 py-1 rounded-full {% if current_status == 'confirmed' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">已确认</a>
+        <a href="?status=wontfix" class="text-xs px-3 py-1 rounded-full {% if current_status == 'wontfix' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">不处理</a>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg border">
+    <div class="px-4 py-3 border-b border-gray-100">
+        <h3 class="text-sm font-medium">异常记录（{{ anomalies|length }} 条）</h3>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <th class="px-4 py-3">ID</th>
+                    <th class="px-4 py-3">页号</th>
+                    <th class="px-4 py-3">裁决</th>
+                    <th class="px-4 py-3">检测器</th>
+                    <th class="px-4 py-3">详情</th>
+                    <th class="px-4 py-3">状态</th>
+                    <th class="px-4 py-3">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in anomalies %}
+                <tr class="border-t border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3">{{ a.id }}</td>
+                    <td class="px-4 py-3">{{ a.page_num }}</td>
+                    <td class="px-4 py-3">
+                        {% if a.verdict_status in ('FAIL','UNKNOWN') %}<span class="badge-red">{{ a.verdict_status }}</span>
+                        {% elif a.verdict_status == 'UNCERTAIN' %}<span class="badge-yellow">存疑</span>
+                        {% else %}<span class="badge-gray">{{ a.verdict_status }}</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-500">{{ a.detector_chain[:30] }}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{{ a.details[:60] }}</td>
+                    <td class="px-4 py-3">
+                        {% if a.resolution == 'pending' %}<span class="badge-yellow">待处理</span>
+                        {% elif a.resolution == 'fixed' %}<span class="badge-green">已修正</span>
+                        {% elif a.resolution == 'confirmed' %}<span class="badge-green">已确认</span>
+                        {% elif a.resolution == 'wontfix' %}<span class="badge-gray">不处理</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if a.resolution == 'pending' %}
+                        <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=fixed" class="text-xs text-green-600 hover:underline">修正</a>
+                        <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=confirmed" class="text-xs text-blue-600 hover:underline ml-2">确认</a>
+                        <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=wontfix" class="text-xs text-gray-500 hover:underline ml-2">忽略</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="px-4 py-8 text-center text-gray-400">暂无异常记录</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
