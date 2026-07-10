@@ -27,6 +27,9 @@
                 <a href="/" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if request.url.path == '/' %}bg-gray-100 font-medium{% endif %}">
                     <span>📚</span> 书籍列表
                 </a>
+                <a href="/register" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/register' in request.url.path %}bg-gray-100 font-medium{% endif %}">
+                    <span>📝</span> 书籍登记
+                </a>
                 <a href="/search" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/search' in request.url.path %}bg-gray-100 font-medium{% endif %}">
                     <span>🔍</span> 搜索
                 </a>

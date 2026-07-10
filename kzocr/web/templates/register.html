@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block breadcrumb %}运营中心 / 书籍登记{% endblock %}
+{% block title %}书籍登记{% endblock %}
+{% block content %}
+
+<div class="bg-white rounded-lg border p-6 max-w-2xl">
+    <form method="post" action="/register" id="regForm">
+        <h3 class="text-lg font-semibold mb-4">书籍信息</h3>
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">书籍编号 *</label>
+                <input type="text" name="book_code" required class="w-full px-3 py-2 border rounded-md text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">书名</label>
+                <input type="text" name="title" class="w-full px-3 py-2 border rounded-md text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">作者</label>
+                <input type="text" name="author" class="w-full px-3 py-2 border rounded-md text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">出版社</label>
+                <input type="text" name="publisher" class="w-full px-3 py-2 border rounded-md text-sm">
+            </div>
+        </div>
+
+        <h3 class="text-lg font-semibold mb-2">目录层级</h3>
+        <p class="text-xs text-gray-400 mb-3">逐行填写目录条目。支持 1-5 层嵌套，通过"级别"字段区分层级。</p>
+
+        <table class="w-full text-sm mb-4" id="tocTable">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <th class="px-3 py-2 w-16">级别</th>
+                    <th class="px-3 py-2">标题</th>
+                    <th class="px-3 py-2 w-20">页码</th>
+                    <th class="px-3 py-2 w-16">操作</th>
+                </tr>
+            </thead>
+            <tbody id="tocBody">
+                <tr>
+                    <td class="px-3 py-1">
+                        <select name="level" class="w-full border rounded px-2 py-1 text-xs">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                        </select>
+                    </td>
+                    <td class="px-3 py-1"><input type="text" name="title" class="w-full border rounded px-2 py-1 text-xs" placeholder="内科秘验方"></td>
+                    <td class="px-3 py-1"><input type="number" name="page" class="w-full border rounded px-2 py-1 text-xs" value="1"></td>
+                    <td class="px-3 py-1"><button type="button" onclick="this.closest('tr').remove()" class="text-red-500 text-xs">删除</button></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <button type="button" onclick="addTocRow()" class="text-sm text-blue-600 hover:underline mb-4">+ 添加一行</button>
+
+        <div class="mt-6 flex gap-2">
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">保存登记</button>
+            <a href="/" class="px-4 py-2 border rounded-md text-sm text-gray-600 hover:bg-gray-50">取消</a>
+        </div>
+    </form>
+</div>
+
+<script>
+function addTocRow() {
+    var tbody = document.getElementById('tocBody');
+    var tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td class="px-3 py-1"><select name="level" class="w-full border rounded px-2 py-1 text-xs">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option>
+        </select></td>
+        <td class="px-3 py-1"><input type="text" name="title" class="w-full border rounded px-2 py-1 text-xs" placeholder="章节标题"></td>
+        <td class="px-3 py-1"><input type="number" name="page" class="w-full border rounded px-2 py-1 text-xs" value="1"></td>
+        <td class="px-3 py-1"><button type="button" onclick="this.closest('tr').remove()" class="text-red-500 text-xs">删除</button></td>`;
+    tbody.appendChild(tr);
+}
+
+document.getElementById('regForm').addEventListener('submit', function(e) {
+    // 按下 submit 前将多行数据序列化为隐藏字段
+    var rows = document.querySelectorAll('#tocBody tr');
+    var entries = [];
+    rows.forEach(function(row) {
+        var level = row.querySelector('select[name="level"]').value;
+        var title = row.querySelector('input[name="title"]').value;
+        var page = row.querySelector('input[name="page"]').value;
+        if (title.trim()) {
+            entries.push({level: parseInt(level), title: title.trim(), page: parseInt(page) || 0});
+        }
+    });
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'toc_json';
+    input.value = JSON.stringify(entries);
+    this.appendChild(input);
+});
+</script>
+
+{% endblock %}

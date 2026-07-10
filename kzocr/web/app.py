@@ -358,3 +358,33 @@ async def workspace(request: Request, book_code: str, resolved: str = "no"):
 
 
 app.include_router(api)
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_form(request: Request):
+    """书籍登记表单。"""
+    return templates.TemplateResponse(request, "register.html", {})
+
+
+@app.post("/register")
+async def register_submit(request: Request):
+    """提交书籍登记。"""
+    from kzocr.engine.registration import save_registration
+    import json
+    form = await request.form()
+    book_code = form.get("book_code", "")
+    if not book_code:
+        return RedirectResponse(url="/register", status_code=303)
+    toc_json = form.get("toc_json", "[]")
+    try:
+        toc_entries = json.loads(toc_json)
+    except (json.JSONDecodeError, TypeError):
+        toc_entries = []
+    save_registration(
+        book_code=book_code,
+        title=form.get("title", ""),
+        author=form.get("author", ""),
+        publisher=form.get("publisher", ""),
+        toc_entries=toc_entries,
+    )
+    return RedirectResponse(url=f"/book/{book_code}", status_code=303)

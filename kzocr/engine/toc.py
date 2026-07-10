@@ -432,10 +432,25 @@ def build_toc(pages_text: list[str]) -> Optional[TocTree]:
 def enrich_book_result(result: BookResult) -> BookResult:
     """B3 修正：就地修改 result.toc 后返回同一引用（非深拷贝）。
 
-    R2 交叉验证预留：可扩展为接受 heading_map 做对齐校验。
+    优先使用预登记的目录（registration），否则自动从文本抽取。
     """
     if not result.pages:
         return result
+    # 检查是否有预登记的目录
+    try:
+        from kzocr.engine.registration import load_registration, registration_to_toc
+        reg = load_registration(result.book_code)
+        if reg:
+            toc = registration_to_toc(reg)
+            if toc:
+                result.toc = toc
+                return result
+    except Exception:
+        pass
+    # 否则自动抽取
     texts = [p.text for p in result.pages]
-    result.toc = build_toc(texts)
+    try:
+        result.toc = build_toc(texts)
+    except Exception:
+        pass
     return result
