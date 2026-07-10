@@ -72,8 +72,7 @@ async def index(request: Request):
     total_pages = sum(b["total_pages"] for b in books)
     total_success = sum(b["success_pages"] for b in books)
     total_anomalies = sum(b["anomaly_count"] for b in books)
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "books": books,
         "total_books": total_books,
         "total_pages": total_pages,
@@ -98,8 +97,7 @@ async def book_detail(request: Request, book_code: str):
         bench = None
     finally:
         db.close()
-    return templates.TemplateResponse("book.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "book.html", {
         "book_code": book_code,
         "progress": progress,
         "anomalies": anomalies,
@@ -117,8 +115,7 @@ async def book_anomalies(request: Request, book_code: str, status: str = "pendin
         items = []
     finally:
         db.close()
-    return templates.TemplateResponse("anomalies.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "anomalies.html", {
         "book_code": book_code,
         "anomalies": items,
         "current_status": status,
@@ -151,8 +148,7 @@ async def book_recipes(request: Request, book_code: str):
         recipes = []
     finally:
         db.close()
-    return templates.TemplateResponse("recipes.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "recipes.html", {
         "book_code": book_code,
         "recipes": recipes,
     })
