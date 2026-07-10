@@ -201,3 +201,49 @@ def test_benchmark_load_missing_dir_is_noop():
     reg.register_adapter(_meta("x", 1), EngineConfig())
     reg.load_benchmarks()
     assert reg.get("x").stats.total_pages == 0
+
+
+def test_mark_unavailable_excludes_from_candidates():
+    """UNAVAILABLE 引擎默认从候选中排除（§4.1 资源过滤）。"""
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("a", 1), EngineConfig())
+    reg.register_adapter(_meta("b", 1), EngineConfig())
+    reg.mark_unavailable("a")
+    cands = select_candidates(reg, tier=1)
+    assert [c.meta.name for c in cands] == ["b"]
+
+
+def test_mark_unavailable_unknown_raises():
+    reg = EngineRegistry()
+    try:
+        reg.mark_unavailable("nope")
+    except SchedulerError:
+        pass
+    else:
+        raise AssertionError("未注册引擎 mark 应抛 SchedulerError")
+
+
+def test_mark_degraded_still_selectable():
+    """DEGRADED 仍可选（仅 UNAVAILABLE 被排除）。"""
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("a", 1), EngineConfig())
+    reg.mark_degraded("a")
+    cands = select_candidates(reg, tier=1)
+    assert [c.meta.name for c in cands] == ["a"]
+
+
+def test_include_unavailable_keeps_unavailable():
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("a", 1), EngineConfig())
+    reg.mark_unavailable("a")
+    cands = select_candidates(reg, tier=1, include_unavailable=True)
+    assert [c.meta.name for c in cands] == ["a"]
+
+
+def test_mark_healthy_restores():
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("a", 1), EngineConfig())
+    reg.mark_unavailable("a")
+    assert reg.get("a").status == "UNAVAILABLE"
+    reg.mark_healthy("a")
+    assert reg.get("a").status == "HEALTHY"

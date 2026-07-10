@@ -144,8 +144,34 @@ class EngineRegistry:
     def list(self) -> list[EngineRegistration]:
         return list(self._regs.values())
 
-    def list_by_tier(self, tier: int) -> list[EngineRegistration]:
-        return [r for r in self._regs.values() if r.meta.tier == tier]
+    def list_by_tier(
+        self, tier: int, include_unavailable: bool = False
+    ) -> list[EngineRegistration]:
+        """返回指定 tier 的已注册引擎；默认排除 UNAVAILABLE（§4.1 资源过滤）。"""
+        return [
+            r
+            for r in self._regs.values()
+            if r.meta.tier == tier
+            and (include_unavailable or r.status != "UNAVAILABLE")
+        ]
+
+    def mark_unavailable(self, name: str) -> None:
+        """将引擎标记为 UNAVAILABLE，资源过滤时从候选排除（§4.1 状态位缓存）。"""
+        self._set_status(name, "UNAVAILABLE")
+
+    def mark_degraded(self, name: str) -> None:
+        """将引擎标记为 DEGRADED（仍可选，但评分应低于 HEALTHY）。"""
+        self._set_status(name, "DEGRADED")
+
+    def mark_healthy(self, name: str) -> None:
+        """将引擎恢复为 HEALTHY。"""
+        self._set_status(name, "HEALTHY")
+
+    def _set_status(self, name: str, status: EngineStatus) -> None:
+        reg = self._regs.get(name)
+        if reg is None:
+            raise SchedulerError(f"未注册的引擎: {name}")
+        reg.status = status
 
     def record(
         self,
@@ -284,15 +310,18 @@ def select_candidates(
     registry: EngineRegistry,
     tier: int,
     prefer: Optional[Literal["speed", "accuracy"]] = None,
+    include_unavailable: bool = False,
 ) -> list[EngineRegistration]:
     """按 tier 过滤候选并按评分排序（v0.7 §4.3 / §4.5 的聚焦版）。
 
+    - 默认排除 `UNAVAILABLE` 引擎（§4.1 资源过滤：状态位缓存）；
+      `include_unavailable=True` 强制包含所有（如手动 pinned 引擎）。
     - `prefer="speed"`：按平均单页延迟升序（最快优先）
     - `prefer="accuracy"`：按字形通过率降序（最准优先）
     - 默认：贝叶斯评分降序（§3.5）
     同分时保持稳定排序（保留注册顺序）。
     """
-    candidates = registry.list_by_tier(tier)
+    candidates = registry.list_by_tier(tier, include_unavailable=include_unavailable)
     if prefer == "speed":
         candidates = sorted(candidates, key=lambda e: e.avg_latency_per_page_ms)
     elif prefer == "accuracy":
