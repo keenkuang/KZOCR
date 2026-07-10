@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block breadcrumb %}运营中心 / Prompt / {{ name }}{% endblock %}
+{% block title %}编辑 Prompt · {{ name }}{% endblock %}
+{% block content %}
+<div class="max-w-3xl">
+    <div class="bg-white rounded-lg border p-4 mb-4">
+        <h3 class="text-sm font-medium mb-3">编辑 Prompt：{{ name }}</h3>
+        <form method="post" action="/prompts/{{ name }}">
+            <textarea name="text" rows="20" class="w-full border rounded-md px-3 py-2 text-sm font-mono">{{ text }}</textarea>
+            <div class="flex gap-2 mt-3">
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">保存</button>
+                <a href="/prompts" class="px-4 py-2 border rounded-md text-sm text-gray-600 hover:bg-gray-50">返回</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

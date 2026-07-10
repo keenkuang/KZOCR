@@ -36,6 +36,12 @@
                 <a href="/pipeline" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/pipeline' in request.url.path %}bg-gray-100 font-medium{% endif %}">
                     <span>⚡</span> OCR 处理
                 </a>
+                <a href="/engines" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/engines' in request.url.path %}bg-gray-100 font-medium{% endif %}">
+                    <span>🔧</span> 引擎
+                </a>
+                <a href="/prompts" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/prompts' in request.url.path %}bg-gray-100 font-medium{% endif %}">
+                    <span>📝</span> Prompt
+                </a>
                 <a href="/search" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/search' in request.url.path %}bg-gray-100 font-medium{% endif %}">
                     <span>🔍</span> 搜索
                 </a>

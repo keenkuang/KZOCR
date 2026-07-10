@@ -16,6 +16,7 @@
             <td class="px-4 py-3">{{ r.toc.max_depth if r.toc else 0 }} 层 / {{ (r.toc.entries|length) if r.toc else 0 }} 条</td>
             <td class="px-4 py-3">
                 <a href="/register/{{ r.book_code }}" class="text-blue-600 hover:underline text-xs">编辑</a>
+                <a href="/register/{{ r.book_code }}/delete" class="text-red-500 hover:underline text-xs ml-2" onclick="return confirm('确认删除登记？')">删除</a>
                 <a href="/book/{{ r.book_code }}" class="text-gray-600 hover:underline text-xs ml-2">查看</a>
             </td>
         </tr>{% else %}<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">暂无已登记书籍</td></tr>{% endfor %}</tbody>

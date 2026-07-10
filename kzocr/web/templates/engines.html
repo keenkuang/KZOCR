@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block breadcrumb %}运营中心 / 引擎状态{% endblock %}
+{% block title %}引擎状态{% endblock %}
+{% block content %}
+<div class="grid grid-cols-1 gap-4">
+    <div class="bg-white rounded-lg border p-4">
+        <h3 class="text-sm font-medium mb-3">引擎概览（{{ engines|length }} 个）</h3>
+        {% if engines %}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for e in engines %}
+            <div class="border rounded-lg p-4 {% if e.error_rate and e.error_rate > 0.1 %}border-red-200 bg-red-50{% else %}border-gray-200{% endif %}">
+                <div class="flex items-center justify-between mb-2">
+                    <h4 class="font-medium text-sm">{{ e.name }}</h4>
+                    <span class="text-xs px-2 py-0.5 rounded-full {% if e.error_rate and e.error_rate > 0.1 %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {% if e.error_rate and e.error_rate > 0.1 %}异常{% else %}正常{% endif %}
+                    </span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                    <div>总页: <span class="font-medium">{{ e.total_pages }}</span></div>
+                    <div>成功: <span class="font-medium text-green-600">{{ e.success_pages }}</span></div>
+                    <div>失败: <span class="font-medium {% if e.fail_pages > 0 %}text-red-600{% endif %}">{{ e.fail_pages }}</span></div>
+                    <div>错误率: <span class="font-medium {% if e.error_rate and e.error_rate > 0.1 %}text-red-600{% endif %}">{{ '%.1f'|format(e.error_rate * 100) if e.error_rate else 0 }}%</span></div>
+                    <div>平均延迟: <span class="font-medium">{{ e.latency_avg_ms }}ms</span></div>
+                    <div>吞吐: <span class="font-medium">{{ '%.1f'|format(e.pages_per_min) if e.pages_per_min else '-' }}页/分</span></div>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">最后记录: {{ e.last_seen or '-' }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400 py-4 text-center">暂无引擎数据（运行 OCR 后自动生成）</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

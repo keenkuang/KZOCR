@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block breadcrumb %}运营中心 / Prompt 管理{% endblock %}
+{% block title %}Prompt 管理{% endblock %}
+{% block content %}
+<div class="bg-white rounded-lg border">
+    <div class="px-4 py-3 border-b"><h3 class="text-sm font-medium">质检 Prompt 模板（{{ prompts|length }} 个）</h3></div>
+    <table class="w-full text-sm">
+        <thead><tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase"><th class="px-4 py-3">名称</th><th class="px-4 py-3">预览</th><th class="px-4 py-3">操作</th></tr></thead>
+        <tbody>{% for p in prompts %}<tr class="border-t hover:bg-gray-50">
+            <td class="px-4 py-3 font-medium">{{ p.name }}</td>
+            <td class="px-4 py-3 text-xs text-gray-500 max-w-md truncate">{{ p.text[:80] }}</td>
+            <td class="px-4 py-3">
+                <a href="/prompts/{{ p.name }}" class="text-blue-600 hover:underline text-xs">编辑</a>
+                <a href="/prompts/{{ p.name }}/delete" class="text-red-500 hover:underline text-xs ml-2">删除</a>
+            </td>
+        </tr>{% else %}<tr><td colspan="3" class="px-4 py-8 text-center text-gray-400">暂无 prompt 模板</td></tr>{% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

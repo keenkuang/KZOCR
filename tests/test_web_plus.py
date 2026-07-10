@@ -32,3 +32,15 @@ def test_completion_bash():
     parser = build_parser()
     script = shtab.complete(parser, shell="bash")
     assert "kzocr" in script
+
+
+def test_engines_page():
+    resp = client.get("/engines")
+    assert resp.status_code == 200
+
+
+def test_api_engines():
+    resp = client.get("/api/engines")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)

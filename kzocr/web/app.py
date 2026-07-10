@@ -89,6 +89,147 @@ async def index(request: Request):
     })
 
 
+@app.get("/engines", response_class=HTMLResponse)
+async def engines_page(request: Request):
+    """引擎状态页面。"""
+    dbd = _db_dir()
+    engine_list: list[dict] = []
+    for f in sorted(os.listdir(dbd)):
+        if not f.endswith(".db"):
+            continue
+        code = f[:-3]
+        db = BookDB(code, db_dir=dbd)
+        try:
+            rows = db._conn.execute(
+                "SELECT engine, total_pages, success_pages, fail_pages, "
+                "error_rate, total_latency_ms, pages_per_min, total_elapsed_s, created_at "
+                "FROM benchmark_results ORDER BY id DESC"
+            ).fetchall()
+            for r in rows:
+                eng_name = r["engine"]
+                if eng_name and eng_name != "none":
+                    existing = next((e for e in engine_list if e["name"] == eng_name), None)
+                    if not existing:
+                        engine_list.append({
+                            "name": eng_name,
+                            "total_pages": r["total_pages"],
+                            "success_pages": r["success_pages"],
+                            "fail_pages": r["fail_pages"],
+                            "error_rate": r["error_rate"],
+                            "latency_avg_ms": round(r["total_latency_ms"] / max(r["total_pages"], 1), 1),
+                            "pages_per_min": r["pages_per_min"],
+                            "last_seen": r["created_at"],
+                        })
+        except Exception:
+            pass
+        finally:
+            db.close()
+    return templates.TemplateResponse(request, "engines.html", {"engines": engine_list})
+
+
+@app.get("/engines/config", response_class=HTMLResponse)
+async def engines_config_page(request: Request):
+    """引擎配置管理页面。"""
+    from kzocr.engine.engine_config import list_engine_configs
+    configs = list_engine_configs()
+    return templates.TemplateResponse(request, "engine_config.html", {
+        "configs": configs,
+        "tiers": [1, 2, 3],
+        "statuses": ["HEALTHY", "DEGRADED", "UNAVAILABLE"],
+    })
+
+
+@app.post("/engines/config/{name}")
+async def engines_config_save(request: Request, name: str):
+    """保存引擎配置。新增时 name='new'，从表单读取实际名称。"""
+    from kzocr.engine.engine_config import save_engine_config
+    form = await request.form()
+    actual_name = form.get("name", name) if name == "new" else name
+    save_engine_config(actual_name, {
+        "label": form.get("label", actual_name),
+        "tier": int(form.get("tier", 1)),
+        "requires_network": form.get("requires_network") == "true",
+        "batch_capable": form.get("batch_capable") == "true",
+        "enabled": form.get("enabled") == "true",
+        "backoff_threshold_ms": int(form.get("backoff_threshold_ms", 30000)),
+        "backoff_fail_rate": float(form.get("backoff_fail_rate", 0.5)),
+        "max_workers": int(form.get("max_workers", 3)),
+    })
+    return RedirectResponse(url="/engines/config", status_code=303)
+
+
+@app.get("/engines/config/{name}/delete")
+async def engines_config_delete(name: str):
+    """删除引擎配置。"""
+    from kzocr.engine.engine_config import delete_engine_config
+    delete_engine_config(name)
+    return RedirectResponse(url="/engines/config", status_code=303)
+
+
+@app.get("/prompts", response_class=HTMLResponse)
+async def prompts_page(request: Request):
+    """Prompt 管理页面。"""
+    from kzocr.engine.prompt_manager import list_prompts
+    prompts = list_prompts()
+    return templates.TemplateResponse(request, "prompts.html", {"prompts": prompts})
+
+
+@app.get("/prompts/{name}", response_class=HTMLResponse)
+async def prompt_edit(request: Request, name: str):
+    """编辑 prompt。"""
+    from kzocr.engine.prompt_manager import load_prompt
+    text = load_prompt(name) or ""
+    return templates.TemplateResponse(request, "prompt_edit.html", {"name": name, "text": text})
+
+
+@app.post("/prompts/{name}")
+async def prompt_save(request: Request, name: str):
+    """保存 prompt。"""
+    from kzocr.engine.prompt_manager import save_prompt
+    form = await request.form()
+    save_prompt(name, form.get("text", ""))
+    return RedirectResponse(url="/prompts", status_code=303)
+
+
+@app.get("/prompts/{name}/delete")
+async def prompt_delete(name: str):
+    """删除 prompt。"""
+    from kzocr.engine.prompt_manager import delete_prompt
+    delete_prompt(name)
+    return RedirectResponse(url="/prompts", status_code=303)
+
+
+@app.post("/register/{book_code}")
+async def register_update(request: Request, book_code: str):
+    """更新已有登记。"""
+    from kzocr.engine.registration import save_registration
+    import json
+    form = await request.form()
+    toc_json = form.get("toc_json", "[]")
+    try:
+        toc_entries = json.loads(toc_json)
+    except (json.JSONDecodeError, TypeError):
+        toc_entries = []
+    save_registration(
+        book_code=book_code,
+        title=form.get("title", ""),
+        author=form.get("author", ""),
+        publisher=form.get("publisher", ""),
+        toc_entries=toc_entries,
+    )
+    return RedirectResponse(url="/registrations", status_code=303)
+
+
+@app.get("/register/{book_code}/delete")
+async def register_delete(book_code: str):
+    """删除登记。"""
+    from kzocr.engine.registration import _reg_path
+    import os
+    path = _reg_path(book_code)
+    if os.path.isfile(path):
+        os.remove(path)
+    return RedirectResponse(url="/registrations", status_code=303)
+
 @app.get("/book/{book_code}", response_class=HTMLResponse)
 async def book_detail(request: Request, book_code: str):
     dbd = _db_dir()
@@ -270,6 +411,33 @@ async def book_quality(request: Request, book_code: str):
 # =============================================================================
 
 api = APIRouter(prefix="/api")
+
+
+@api.get("/engines")
+async def api_engines():
+    """返回所有引擎状态（基于 benchmark_results 和历史数据）。"""
+    dbd = _db_dir()
+    engines = {}
+    for f in sorted(os.listdir(dbd)):
+        if not f.endswith(".db"):
+            continue
+        code = f[:-3]
+        db = BookDB(code, db_dir=dbd)
+        try:
+            rows = db._conn.execute(
+                "SELECT engine, total_pages, success_pages, fail_pages, "
+                "error_rate, total_latency_ms, pages_per_min, total_elapsed_s, created_at "
+                "FROM benchmark_results ORDER BY id DESC LIMIT 5"
+            ).fetchall()
+            for r in rows:
+                eng = r["engine"]
+                if eng and eng != "none" and eng not in engines:
+                    engines[eng] = dict(r)
+        except Exception:
+            pass
+        finally:
+            db.close()
+    return list(engines.values())
 
 
 @api.get("/books")
