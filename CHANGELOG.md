@@ -1,7 +1,60 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-10T20:00+08
-> 最后更新：2026-07-10 20:00 CST
+> 文档版本：v2026-07-10T22:00+08
+> 最后更新：2026-07-10 22:00 CST
+
+---
+
+## v2026-07-10 — v0.8 五大方向全完成
+
+> **5 commits, 16 files changed, 1542 insertions, 441 tests passed**
+
+### 日期：2026-07-10
+
+### 阶段一：方剂结构化入库
+
+| Commit | 文件 | 说明 |
+|--------|------|------|
+| `6cdab80` | `kzocr/analysis/recipe_parser.py` | 九字段分割、药材解析（含"各X克"）、加减解析（规则，无需 LLM） |
+| `6cdab80` | `tests/test_recipe_parser.py` (15例) | 方剂编号、药材解析、加减、hash |
+
+### 阶段二：TOC 章节合并 + 三级编号校验
+
+| Commit | 文件 | 说明 |
+|--------|------|------|
+| `ccc6b33` | `kzocr/engine/section_merger.py` | `merge_by_toc` 按 TOC 树合并章节、`_validate_numbers` 防 33% 事故 |
+| `ccc6b33` | `tests/test_section_merger.py` (11例) | 无TOC/有TOC/子章节/编号跳号/节号切换/Markdown |
+
+### 阶段三：并发引擎调度
+
+| Commit | 文件 | 说明 |
+|--------|------|------|
+| `0fb0da7` | `kzocr/scheduler/concurrency.py` | `AdaptiveController`（滑动窗口20次错误率→并发调谐）、`run_engines_concurrent` |
+| `0fb0da7` | `tests/test_concurrency.py` (7例) | 控制器边界、错误率升/降、并发取最快 |
+
+### 阶段四：校对工单 CLI
+
+| Commit | 文件 | 说明 |
+|--------|------|------|
+| `fae6263` | `kzocr/cli_review.py` | `kzocr review list/show/resolve` 子命令 |
+| `fae6263` | `kzocr/storage/db.py` | `get_unresolved_anomalies` / `resolve_anomaly` |
+| `fae6263` | `tests/test_cli_review.py` (4例) | 列出、查看、标记决议 |
+
+### 阶段五：质量工程
+
+| Commit | 文件 | 说明 |
+|--------|------|------|
+| `a9d4fc9` | `tests/benchmarks/` | 性能基准 CI 门禁（<10ms/<50ms） |
+| `a9d4fc9` | `tests/test_chaos.py` | 混沌注入（API失败降级、全引擎失败→HumanGate） |
+| `a9d4fc9` | `.github/workflows/test.yml` | 新增 performance + chaos 步骤 |
+
+### 验证
+
+| 指标 | v0.7 | v0.8 |
+|------|------|------|
+| 测试总数 | 396 | 441 (+45) |
+| 覆盖方向 | 编排 | 编排 + 方剂 + 章节 + 并发 + 质控 |
+| CI 门禁 | ruff + test | + performance + chaos |
 
 ---
 
