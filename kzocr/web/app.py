@@ -132,6 +132,30 @@ async def engines_config_page(request: Request):
     """引擎配置管理页面。"""
     from kzocr.engine.engine_config import list_engine_configs
     configs = list_engine_configs()
+    # 补充来自 benchmark 的状态数据
+    dbd = _db_dir()
+    for c in configs:
+        c["status"] = "HEALTHY"
+        c["error_rate"] = 0.0
+        c["pages_count"] = 0
+        for f in sorted(os.listdir(dbd)):
+            if not f.endswith(".db"):
+                continue
+            code = f[:-3]
+            try:
+                db = BookDB(code, db_dir=dbd)
+                row = db._conn.execute(
+                    "SELECT error_rate, total_pages FROM benchmark_results "
+                    "WHERE engine=? AND error_rate IS NOT NULL ORDER BY id DESC LIMIT 1",
+                    (c["name"],),
+                ).fetchone()
+                if row:
+                    c["error_rate"] = row["error_rate"]
+                    c["pages_count"] = row["total_pages"]
+                    c["status"] = "DEGRADED" if row["error_rate"] > 0.1 else "HEALTHY"
+                db.close()
+            except Exception:
+                pass
     return templates.TemplateResponse(request, "engine_config.html", {
         "configs": configs,
         "tiers": [1, 2, 3],
@@ -438,6 +462,31 @@ async def api_engines():
         finally:
             db.close()
     return list(engines.values())
+
+
+@api.get("/engines/{name}/test")
+async def api_engine_test(name: str):
+    """测试引擎连通性。尝试 validate_url 校验。"""
+    from kzocr.engine.engine_config import load_engine_config
+    from kzocr.security.egress import validate_url
+    cfg = load_engine_config(name)
+    if not cfg:
+        return {"status": "error", "message": f"引擎 {name} 未配置"}
+    result = {"engine": name, "checks": []}
+    if cfg.get("requires_network"):
+        base_url = cfg.get("base_url", "")
+        if base_url:
+            try:
+                validate_url(base_url)
+                result["checks"].append({"name": "egress", "status": "ok", "detail": f"{base_url} 通过"})
+            except Exception as exc:
+                result["checks"].append({"name": "egress", "status": "fail", "detail": str(exc)})
+        else:
+            result["checks"].append({"name": "egress", "status": "skip", "detail": "无 base_url 配置"})
+    else:
+        result["checks"].append({"name": "egress", "status": "skip", "detail": "本地引擎，无需校验"})
+    result["status"] = "ok" if all(c["status"] == "ok" or c["status"] == "skip" for c in result["checks"]) else "degraded"
+    return result
 
 
 @api.get("/books")
