@@ -23,7 +23,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install PyMuPDF numpy pytest pillow fastapi uvicorn jinja2 httpx
+        run: pip install PyMuPDF numpy pytest pillow fastapi uvicorn jinja2 httpx python-multipart
 
       - name: Run tests with details
         run: python -m pytest tests/ -v --tb=short
