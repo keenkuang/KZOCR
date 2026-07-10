@@ -329,7 +329,7 @@ def domain_adjust(base_score: float, engine: EngineRegistration,
 `select_candidates()` 返回后，Orchestrator 在执行引擎调用前对 Tier 2 引擎执行：
 
 ```python
-from kzocr.engines.egress import validate_url
+from kzocr.security.egress import validate_url
 validate_url(engine.config.get("base_url", ""))  # 若失败抛 EgressBlockedError
 ```
 
@@ -701,9 +701,14 @@ class Budget:
     def check_time_budget(self, elapsed_s: float) -> bool:
         return elapsed_s * 1000 < self.max_wall_clock_ms
     
+    _exhausted: bool = False          # 由编排循环双闸设置
+
+    def exhaust(self) -> None:
+        self._exhausted = True
+
     @property
     def exhausted(self) -> bool:
-        return False  # 由外部循环管理
+        return self._exhausted
 ```
 
 ### 6.4 并行/串行策略（解决「R1 / 并行串行矛盾」）

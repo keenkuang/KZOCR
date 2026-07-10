@@ -14,6 +14,9 @@ import numpy as np
 # ── 字形校验状态（B1 裁决：枚举，不占用 glyph_verified 文本列）──
 GlyphStatus = Literal["PASS", "RARE", "UNKNOWN", "FAIL", "UNCERTAIN"]
 
+# ── 引擎健康状态(v0.7 设计 §3.1,EngineRegistration.status 引用)──
+EngineStatus = Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"]
+
 
 @dataclass
 class EngineResult:
@@ -179,7 +182,7 @@ class EngineRunner(Protocol):
 class PageInput:
     """引擎输入：渲染后的单页数据。"""
     page_num: int
-    image: np.ndarray            # rendered page image (H,W,3)
+    img: np.ndarray              # rendered page image (H,W,3);对齐 v0.7 设计 §6.1(ARCH-2)
     layout: "PageLayout | None" = None
     context: Optional[str] = None    # previous page bottom 15% text
 
@@ -200,7 +203,7 @@ class EngineCallRecord:
     tier: int
     engine: str
     latency_ms: float
-    glyph_status: Optional[str] = None
+    glyph_status: Optional[GlyphStatus] = None
     error: Optional[str] = None
 
 
