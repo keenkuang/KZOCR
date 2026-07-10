@@ -1,14 +1,9 @@
 """types.py 契约冻结测试 — round4 B1/B2/B7 裁决验证。"""
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from kzocr.engine.types import (
     AdapterMeta,
     AdapterPageResult,
-    GlyphStatus,
     LineResult,
     ProbeResult,
 )
@@ -69,14 +64,14 @@ class TestProbeResult:
             vram_gb=24.0,
             cpu_cores=16,
             ports={"18080": True, "18083": False},
-            keys={"sensenova": "sk-test"},
+            keys={"sensenova": True},
             allow_cloud_vision=True,
         )
         assert pr.gpu is True
         assert pr.vram_gb == 24.0
         assert pr.cpu_cores == 16
         assert pr.ports["18080"] is True
-        assert pr.keys["sensenova"] == "sk-test"
+        assert pr.keys["sensenova"] is True
         assert pr.allow_cloud_vision is True
 
 
