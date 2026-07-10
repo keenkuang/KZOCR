@@ -5,6 +5,43 @@
 
 ---
 
+## v2026-07-10 — v0.9 并发编排集成 + Web 管理面板
+
+> **3 commits, 11 files changed, 676 insertions, 447 tests passed**
+
+### 日期：2026-07-10
+
+### 方向 C：并发编排集成
+
+将 v0.8 阶段三的 `run_engines_concurrent` 集成到 E4 `orchestrate_book` 的 Tier2/Tier3 循环。
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `6b8ee08` | `orchestrator.py` | Tier2/Tier3 从顺序 for 循环改为 `run_engines_concurrent` 并发执行 |
+| `6b8ee08` | `orchestrator.py` | 加入 egress 预过滤（`validate_url` 检查） + `AdaptiveController` 动态并发调谐 |
+
+### 方向 E：Web 管理面板
+
+基于 FastAPI + Jinja2 的管理面板，设计借鉴 TCM-Modern-OCR 项目的 sidebar+content 布局。
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `7ac0f71` | `kzocr/web/app.py` | FastAPI 应用，5 路由：首页/书籍详情/方剂列表/异常管理/决议 |
+| `7ac0f71` | `web/templates/*.html` | 5 个 Jinja2 模板（base, index, book, anomalies, recipes） |
+| `7ac0f71` | `cli.py` | `kzocr web --host --port` 子命令 |
+| `7ac0f71` | `tests/test_web.py` | 6 例 Web 测试（FastAPI TestClient） |
+| `7ac0f71` | `.github/workflows/test.yml` | 补 fastapi/uvicorn/jinja2 依赖 |
+
+### 验证
+
+| 指标 | v0.8 | v0.9 |
+|------|------|------|
+| 测试总数 | 441 | 447 (+6) |
+| CI 门禁 | ruff + test + perf + chaos | + web test |
+| Web 面板 | 无 | FastAPI + 5 路由 |
+
+---
+
 ## v2026-07-10 — v0.8 五大方向全完成
 
 > **5 commits, 16 files changed, 1542 insertions, 441 tests passed**
