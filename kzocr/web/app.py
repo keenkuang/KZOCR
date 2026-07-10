@@ -122,7 +122,7 @@ async def book_anomalies(request: Request, book_code: str, status: str = "pendin
     })
 
 
-@app.get("/book/{book_code}/anomalies/{anomaly_id}/resolve")
+@app.post("/book/{book_code}/anomalies/{anomaly_id}/resolve")
 async def resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fixed", note: str = ""):
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)

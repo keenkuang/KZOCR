@@ -54,7 +54,7 @@ def test_book_anomalies():
 
 
 def test_resolve_anomaly():
-    resp = client.get("/book/test-book-a/anomalies/1/resolve?resolution=fixed", follow_redirects=False)
+    resp = client.post("/book/test-book-a/anomalies/1/resolve?resolution=fixed", follow_redirects=False)
     assert resp.status_code == 303
     # 确认已 resolved
     db = BookDB("test-book-a", db_dir=os.environ["KZOCR_DB_DIR"])

@@ -16,7 +16,11 @@
             <td class="px-4 py-3">{% if a.verdict_status in ('FAIL','UNKNOWN') %}<span class="badge-red">{{ a.verdict_status }}</span>{% elif a.verdict_status == 'UNCERTAIN' %}<span class="badge-yellow">存疑</span>{% else %}<span class="badge-gray">{{ a.verdict_status }}</span>{% endif %}</td>
             <td class="px-4 py-3 text-xs text-gray-500">{{ (a.detector_chain or '')[:30] }}</td>
             <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{{ (a.details or '')[:60] }}</td>
-            <td class="px-4 py-3">{% if a.resolution == 'pending' %}<a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=fixed" class="text-xs text-green-600 hover:underline">修正</a> <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=confirmed" class="text-xs text-blue-600 hover:underline ml-1">确认</a> <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=wontfix" class="text-xs text-gray-500 hover:underline ml-1">忽略</a>{% endif %}</td>
+            <td class="px-4 py-3">{% if a.resolution == 'pending' %}
+                <form method="post" action="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=fixed" style="display:inline"><button class="text-xs text-green-600 hover:underline bg-transparent border-none cursor-pointer">修正</button></form>
+                <form method="post" action="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=confirmed" style="display:inline"><button class="text-xs text-blue-600 hover:underline bg-transparent border-none cursor-pointer ml-1">确认</button></form>
+                <form method="post" action="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=wontfix" style="display:inline"><button class="text-xs text-gray-500 hover:underline bg-transparent border-none cursor-pointer ml-1">忽略</button></form>
+            {% endif %}</td>
         </tr>{% else %}<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">无待处理异常</td></tr>{% endfor %}</tbody>
     </table>
 </div>

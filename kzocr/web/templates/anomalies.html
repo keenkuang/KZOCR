@@ -50,9 +50,15 @@
                     </td>
                     <td class="px-4 py-3">
                         {% if a.resolution == 'pending' %}
-                        <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=fixed" class="text-xs text-green-600 hover:underline">修正</a>
-                        <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=confirmed" class="text-xs text-blue-600 hover:underline ml-2">确认</a>
-                        <a href="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=wontfix" class="text-xs text-gray-500 hover:underline ml-2">忽略</a>
+                        <form method="post" action="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=fixed" style="display:inline">
+                            <button class="text-xs text-green-600 hover:underline bg-transparent border-none cursor-pointer">修正</button>
+                        </form>
+                        <form method="post" action="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=confirmed" style="display:inline">
+                            <button class="text-xs text-blue-600 hover:underline bg-transparent border-none cursor-pointer ml-2">确认</button>
+                        </form>
+                        <form method="post" action="/book/{{ book_code }}/anomalies/{{ a.id }}/resolve?resolution=wontfix" style="display:inline">
+                            <button class="text-xs text-gray-500 hover:underline bg-transparent border-none cursor-pointer ml-2">忽略</button>
+                        </form>
                         {% endif %}
                     </td>
                 </tr>
