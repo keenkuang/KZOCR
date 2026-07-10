@@ -530,6 +530,43 @@ class TestCmdSmoke:
 
 
 # =============================================================================
+# TestCmdQuality: quality 子命令
+# =============================================================================
+
+
+@patch("kzocr.cli.load_config")
+def test_quality_list_no_results(mock_cfg):
+    """空 book 时 quality list 返回 0。"""
+    from kzocr.cli import cmd_quality_list
+    from argparse import Namespace
+    args = Namespace(book_code="nonexistent", status=None)
+    rc = cmd_quality_list(args)
+    assert rc == 0
+
+
+@patch("kzocr.cli.load_config")
+def test_quality_check(mock_cfg):
+    """quality check 应返回 0。"""
+    from kzocr.cli import cmd_quality_check
+    from argparse import Namespace
+    import os
+    import tempfile
+    td = tempfile.mkdtemp()
+    from kzocr.storage.db import BookDB
+    db = BookDB("qc-test", db_dir=td)
+    db.init_page(0)
+    db.update_verify(0, verdict="PASS", details="test")
+    db.close()
+    os.environ["KZOCR_DB_DIR"] = td
+    args = Namespace(book_code="qc-test")
+    rc = cmd_quality_check(args)
+    assert rc == 0
+    for f in os.listdir(td):
+        os.remove(os.path.join(td, f))
+    os.rmdir(td)
+
+
+# =============================================================================
 # TestMain: 入口函数错误处理
 # =============================================================================
 

@@ -141,6 +141,53 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_quality_check(args: argparse.Namespace) -> int:
+    """运行质检并写入 DB。"""
+    from kzocr.analysis.quality import QualityChecker
+    from kzocr.analysis.recipe_parser import parse_recipes
+    from kzocr.storage.db import BookDB
+    import json
+    import os
+    dbd = os.environ.get("KZOCR_DB_DIR", "db")
+    db = BookDB(args.book_code, db_dir=dbd)
+    try:
+        progress = db.get_all_progress()
+        pages_text = [p["verify_details"] or "" for p in progress if p.get("verify_details")]
+        if not pages_text:
+            pages_text = [""] * len(progress)
+        recipes = parse_recipes(pages_text)
+        checker = QualityChecker()
+        count = 0
+        for r in recipes:
+            result = checker.check(r)
+            issues_json = json.dumps([
+                {"field": i.field, "type": i.issue_type, "severity": i.severity, "detail": i.detail}
+                for i in result.issues
+            ], ensure_ascii=False)
+            db.save_quality_result(r.recipe_no, result.status, result.confidence, issues_json)
+            count += 1
+        log.info("质检完成：%d 条已写入", count)
+    finally:
+        db.close()
+    return 0
+
+
+def cmd_quality_list(args: argparse.Namespace) -> int:
+    """列出质检结果。"""
+    from kzocr.storage.db import BookDB
+    import os
+    dbd = os.environ.get("KZOCR_DB_DIR", "db")
+    db = BookDB(args.book_code, db_dir=dbd)
+    try:
+        results = db.get_quality_results(status_filter=args.status)
+        print(f"质检结果：{args.book_code}（{len(results)} 条）")
+        for r in results:
+            print(f"  {r['recipe_no']}: {r['status']} (confidence={r['confidence']})")
+    finally:
+        db.close()
+    return 0
+
+
 def cmd_batch(args: argparse.Namespace) -> int:
     """批量处理目录内的所有 PDF。"""
     from pathlib import Path
@@ -215,6 +262,17 @@ def build_parser() -> argparse.ArgumentParser:
     pw.add_argument("--host", default="127.0.0.1")
     pw.add_argument("--port", type=int, default=8080)
     pw.set_defaults(func=cmd_web)
+
+    # quality 子命令
+    pq = sub.add_parser("quality", help="方剂质量质检")
+    qsub = pq.add_subparsers(dest="quality_cmd", required=True)
+    qc = qsub.add_parser("check", help="运行质检并写入 DB")
+    qc.add_argument("book_code")
+    qc.set_defaults(func=cmd_quality_check)
+    ql = qsub.add_parser("list", help="列出质检结果")
+    ql.add_argument("book_code")
+    ql.add_argument("--status", choices=["verified", "corrected"], default=None)
+    ql.set_defaults(func=cmd_quality_list)
 
     from kzocr.cli_review import build_review_parser
     build_review_parser(sub)

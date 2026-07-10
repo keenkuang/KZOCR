@@ -106,6 +106,8 @@ class QualityChecker:
 def _build_prompt(recipe: ParsedRecipe, issues: list[RecipeIssue]) -> str:
     """构建 LLM 质检 prompt。"""
     fields_str = "\n".join(f"{k}：{v}" for k, v in recipe.fields.items())
+    if not fields_str:
+        fields_str = "（该方剂无提取字段）"  # R3: 空字段占位
     issues_str = "\n".join(f"- [{i.severity}] {i.field}: {i.detail}" for i in issues)
     return (
         f"请审核下方中医方剂的解析结果。方剂编号：{recipe.recipe_no}，标题：{recipe.title}\n\n"

@@ -5,6 +5,21 @@
 
 ---
 
+## v2026-07-10 — v0.16 LLM 质检增强 + API 文档
+
+> **475 tests**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| *(current)* | `quality.py` | R3: LLM prompt 空字段占位符 |
+| *(current)* | `db.py` | `quality_result` 表 + save/get 方法 |
+| *(current)* | `cli.py` | `kzocr quality check/list` 子命令 |
+| *(current)* | `web/app.py` | FastAPI 元数据（title/version/contact） |
+| *(current)* | `tests/test_db.py` | 2 例 quality_result 测试 |
+| *(current)* | `tests/test_cli.py` | 2 例 quality CLI 测试 |
+
+---
+
 ## v2026-07-10 — v0.15 文档体系完善
 
 > README/CONTRIBUTING 全面重写，468 tests

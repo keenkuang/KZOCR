@@ -16,7 +16,12 @@ from fastapi.templating import Jinja2Templates
 
 from kzocr.storage.db import BookDB
 
-app = FastAPI(title="KZOCR Web Panel")
+app = FastAPI(
+    title="KZOCR REST API",
+    description="中医古籍 OCR 编排系统 API。管理书籍、方剂、校对异常、质检结果。",
+    version="0.16.0",
+    contact={"name": "KZOCR Team", "url": "https://github.com/keenkuang/KZOCR"},
+)
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))

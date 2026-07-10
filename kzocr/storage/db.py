@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
     total_elapsed_s REAL DEFAULT 0.0,
     created_at      TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS quality_result (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipe_no       TEXT NOT NULL UNIQUE,
+    status          TEXT NOT NULL,
+    confidence      REAL DEFAULT 1.0,
+    issues_json     TEXT DEFAULT '[]',
+    created_at      TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -282,3 +291,32 @@ class BookDB:
     def vacuum(self) -> None:
         self._conn.execute("VACUUM")
         self._conn.commit()
+
+    # ── quality_result ──
+
+    def save_quality_result(
+        self, recipe_no: str, status: str, confidence: float = 1.0,
+        issues_json: str = "[]",
+    ) -> None:
+        """写入单条质检结果。UPSERT (recipe_no)。"""
+        self._conn.execute(
+            """INSERT OR REPLACE INTO quality_result
+               (recipe_no, status, confidence, issues_json)
+               VALUES (?, ?, ?, ?)""",
+            (recipe_no, status, confidence, issues_json),
+        )
+        self._conn.commit()
+
+    def get_quality_results(
+        self, *, status_filter: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        if status_filter:
+            rows = self._conn.execute(
+                "SELECT * FROM quality_result WHERE status=? ORDER BY recipe_no",
+                (status_filter,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM quality_result ORDER BY recipe_no"
+            ).fetchall()
+        return [dict(r) for r in rows]

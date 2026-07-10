@@ -124,3 +124,25 @@ def test_update_import(tmp_db):
 def test_get_page_progress_nonexistent(tmp_db):
     """不存在的页号返回 None。"""
     assert tmp_db.get_page_progress(999) is None
+
+
+# ── quality_result ──
+
+def test_quality_result_save_and_query(tmp_db):
+    """save_quality_result 后 get_quality_results 返回。"""
+    tmp_db.save_quality_result("1.1", "verified", 1.0, "[]")
+    tmp_db.save_quality_result("1.2", "corrected", 0.6, '[{"field":"组成","type":"missing_field"}]')
+    all_r = tmp_db.get_quality_results()
+    assert len(all_r) == 2
+    verified = tmp_db.get_quality_results(status_filter="verified")
+    assert len(verified) == 1
+    assert verified[0]["recipe_no"] == "1.1"
+
+
+def test_quality_result_upsert(tmp_db):
+    """同 recipe_no 写入两次 → 覆盖。"""
+    tmp_db.save_quality_result("1.1", "verified", 1.0, "[]")
+    tmp_db.save_quality_result("1.1", "corrected", 0.5, '[{"field":"test"}]')
+    results = tmp_db.get_quality_results()
+    assert len(results) == 1
+    assert results[0]["confidence"] == 0.5
