@@ -26,7 +26,10 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None  # 可选依赖：未安装 openai 时，依赖它的 provider 在初始化时自动禁用
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +178,11 @@ class _ProviderPool:
         self.vision = spec.vision
         api_key = os.environ.get(spec.api_key_env, "") or spec.api_key_fallback
         self.enabled = bool(api_key)
+        if self.enabled and OpenAI is None:
+            self.enabled = False
+            logger.warning(
+                "[pool] provider '%s' 未安装 openai 依赖，已禁用", spec.name
+            )
         self._models = list(spec.models)
         self._idx = 0
         self._client = (
