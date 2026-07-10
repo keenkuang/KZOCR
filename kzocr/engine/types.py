@@ -18,6 +18,17 @@ GlyphStatus = Literal["PASS", "RARE", "UNKNOWN", "FAIL", "UNCERTAIN"]
 EngineStatus = Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"]
 
 
+# ── 字形验证裁决（v0.7 §5.2，E3 GlyphVerifier 产出）──
+@dataclass
+class GlyphVerdict:
+    """字形验证裁决。"""
+
+    status: GlyphStatus
+    confidence: float
+    details: Optional[str] = None      # 结构化格式：`key=val;key=val`
+    detector_name: str = ""
+
+
 @dataclass
 class EngineResult:
     engine: str            # mineru / ppocr / unirec / doctr / tesseract / paddle_vl / dots_ocr
@@ -71,6 +82,7 @@ class PageResult:
     page_num: int
     layout_type: str = "text"   # text/table/multi_column/formula_list
     paragraphs: list[ParagraphResult] = field(default_factory=list)
+    text: str = ""              # 整页文本（段落聚合结果；v0.7 E4 _build_pages_result 填充）
 
 
 @dataclass
@@ -205,6 +217,7 @@ class EngineCallRecord:
     latency_ms: float
     glyph_status: Optional[GlyphStatus] = None
     error: Optional[str] = None
+    detector_chain: list[str] = field(default_factory=list)  # 本次 verify 按序触发的 detector（v0.7 §6.2）
 
 
 @dataclass
@@ -243,6 +256,8 @@ class BookResult:
     terms: list[TermEntry] = field(default_factory=list)
     formulas: list[FormulaEntry] = field(default_factory=list)
     failed_pages: dict[int, str] = field(default_factory=dict)  # D2: 失败页记录 {page_num: reason}
+    uncertain_pages: dict[int, GlyphVerdict] = field(default_factory=dict)  # v0.7 E4：UNCERTAIN 页留查
+    engine_trace: list[EngineCallRecord] = field(default_factory=list)  # v0.7 E4：逐引擎调用 trace
     final_markdown: str = ""        # 导出文档（人工终校后填充）
 
     # 元信息：本次结果来自哪个引擎 / 是否 mock
