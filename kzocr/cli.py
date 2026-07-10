@@ -156,6 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--skip-push", action="store_true")
     ps.add_argument("--verify", action="store_true")
     ps.set_defaults(func=cmd_smoke)
+
+    from kzocr.cli_review import build_review_parser
+    build_review_parser(sub)
     return p
 
 

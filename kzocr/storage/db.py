@@ -214,6 +214,33 @@ class BookDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_unresolved_anomalies(
+        self, book_code: str = "", *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """获取待处理异常（resolution='pending'），可联表 page_progress 获取上下文。"""
+        rows = self._conn.execute(
+            """SELECT a.*, p.char_count, p.engine_label
+               FROM hierarchy_anomaly a
+               LEFT JOIN page_progress p ON a.page_num = p.page_num
+               WHERE a.resolution = 'pending'
+               ORDER BY a.page_num
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def resolve_anomaly(
+        self, anomaly_id: int, resolution: str, note: str = ""
+    ) -> None:
+        """标记异常决议。resolution: confirmed / fixed / wontfix。"""
+        self._conn.execute(
+            """UPDATE hierarchy_anomaly SET
+               resolution=?, note=?, updated_at=datetime('now')
+               WHERE id=?""",
+            (resolution, note, anomaly_id),
+        )
+        self._conn.commit()
+
     # ── benchmark ──
 
     def write_benchmark(
