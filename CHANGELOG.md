@@ -1,11 +1,88 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-10T19:52+08
-> 最后更新：2026-07-10 19:52 CST
+> 文档版本：v2026-07-10T20:00+08
+> 最后更新：2026-07-10 20:00 CST
 
 ---
 
-## v2026-07-10（补）— v0.6.1 CI 修复与文档一致性
+## v2026-07-10 — v0.7 自适应引擎编排系统（大版本）
+
+> **44 commits, 36 files changed, 4801 insertions, 396 tests passed**
+
+### 日期：2026-07-10
+
+### 架构概览
+
+v0.7 引入完整的自适应引擎编排层，涵盖引擎注册/调度/字形验证/编排主循环（E1-E5）
+和增强功能 TOC 抽取/结构化入库/断点续跑/即时 Benchmark（F1-F3）。
+
+```
+run_engine(pdf) → EngineRegistry → EngineScheduler → GlyphVerifier
+                → OrchestrateBook(Tier1→Tier2→Tier3→HumanGate)
+                → BookDB 写入 + TOC enrich + 即时 Benchmark 更新
+```
+
+### 新增/修改
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `beea3eb` | E1 E2 | EngineRegistry + EngineScheduler + 贝叶斯评分 + prob_engines |
+| `0d71278` | CLI | `--use-v07` 参数，`KZOCR_USE_V07` 环境变量 |
+| `a3d2da1` | E5 | run_engine 委派模式集成 + 适配器（BookPipeline/VLM/Mock） |
+| `38526e2` | E4 | OrchestrateBook 主循环（Tier1→T2→T3，双闸截断，超时包裹，trace） |
+| `9c60c3b` | E3 | GlyphVerifier + 5 检测器（ToxinDose/Leakage/CharSpike/Confusion/TermKB） |
+| `1435519` | F1 | TOC 抽取（文本方案，OCR 容错模糊匹配，5 层章节树） |
+| `61b769e` | F2 | BookDB（SQLite WAL，`page_progress` 三态机 + `hierarchy_anomaly`） |
+| `e595aae` | F3 | 滚动窗口 Benchmark + 混合评分 + 自适应 Backoff 调度 |
+| `ed99d88` | types | `BookResult` 补 `uncertain_pages`/`engine_trace`/`toc`；`TocEntry`/`TocTree`/`GlyphVerdict` |
+| `57d5f34` | 评审 | F1 TOC 多角色评审（架构/安全/领域/测试，5 B 类 + 10 R 类建议） |
+| `12bc44f` | 冒烟 | MockAdapter tier+text 修复，手动冒烟验证通过 |
+| `2c64db4` | 文档 | `docs/deploy-v07.md` 部署文档与用户指南 |
+
+### 新文件统计
+
+| 文件 | 行数 | 说明 |
+|------|------|------|
+| `kzocr/scheduler/registry.py` | 360 | E1 EngineRegistry + EngineStats + benchmark |
+| `kzocr/scheduler/scheduler.py` | 230 | E2 EngineScheduler + Budget + 九步候选选择 |
+| `kzocr/scheduler/verifier.py` | 360 | E3 GlyphVerifier + 5 检测器 |
+| `kzocr/scheduler/orchestrator.py` | 440 | E4 OrchestrateBook + timeout + resume + DB |
+| `kzocr/engine/toc.py` | 300 | F1 TOC 抽取（discover/parse/build/enrich） |
+| `kzocr/storage/db.py` | 140 | F2 BookDB SQLite 管理器 |
+| `kzocr/adapters/engine_runners.py` | 100 | E5 引擎适配器（Mock/BookPipeline/VLM） |
+| `tests/test_scheduler.py` | 186 | E2 调度器测试 |
+| `tests/test_scheduler_integration.py` | 133 | E1+E2 集成 |
+| `tests/test_verifier.py` | 208 | E3 验证器测试 |
+| `tests/test_orchestrator.py` | 310 | E4 编排 10 种路径 |
+| `tests/test_toc.py` | 217 | F1 19 例测试 |
+| `tests/test_db.py` | 130 | F2 9 例测试 |
+| `tests/test_resume.py` | 120 | F3 6 例测试 |
+| `tests/test_engine_runners.py` | 140 | E5 适配器测试 |
+| `docs/deploy-v07.md` | 247 | 部署文档 |
+| `docs/reviews/toc_plan_review_r1.md` | 202 | F1 多角色评审报告 |
+| `docs/plans/f1-toc-plan-revised.md` | 190 | F1 修订版计划 |
+
+### 投产方式
+
+```bash
+# 启用 v0.7 编排（旧签名保留，--use-v07 开关）
+kzocr pipeline book.pdf --book-code TCM-001 --use-v07
+
+# 环境变量模式
+export KZOCR_USE_V07=1
+kzocr pipeline book.pdf --book-code TCM-001
+```
+
+默认 `use_v07=False`，旧管道完全不受影响。
+
+### 验证
+
+| 测试组 | 用例数 | 覆盖内容 |
+|--------|--------|----------|
+| 全量 pytest | 396 | ruff clean，~15s |
+| 手动冒烟 | ✅ | 2页 PDF → E4 编排 → E3 验证 → F2 DB 全链路通过 |
+
+---
 
 ### 说明
 修复 GitHub Actions CI 持续失败的根因（两层问题叠加），并同步文档一致性。
