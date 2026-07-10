@@ -5,6 +5,32 @@
 
 ---
 
+## v2026-07-10 — v0.13 LLM 质检管道
+
+> **1 commit, 4 files changed, 240 insertions, 462 tests passed**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| *(current)* | `analysis/quality.py` | QualityChecker（rule-only + LLM-assisted）、RecipeIssue、QualityResult |
+| *(current)* | `analysis/recipe_parser.py` | ParsedRecipe 补 `issues` 字段 |
+| *(current)* | `tests/test_quality.py` | 7 例（字段缺失/剂量异常/单字药名/完整/LLM集成/LLMOK/LLM降级） |
+
+### 质检项目
+
+| 检查项 | 规则 | LLM 兜底 |
+|--------|------|----------|
+| 字段完整性 | 组成/主治必填 | 缺失时判断真实原因 |
+| 剂量合理性 | 单味 > 100g 告警 | 确认是否合理 |
+| 药名可疑 | 单字药名告警 | 判断是否为真实误识别 |
+
+---
+
+## v2026-07-10 — v0.12 仓库清理
+
+> 38 个误提交的 `trace/*.jsonl` 运行时产物从 git 移除，`.gitignore` 补 `trace/`。
+
+---
+
 ## v2026-07-10 — v0.11 REST API + Docker 化
 
 > **1 commit, 8 files changed, 270 insertions, 455 tests passed**

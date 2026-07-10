@@ -69,6 +69,7 @@ class ParsedRecipe:
     raw_text: str = ""
     raw_hash: str = ""
     parse_status: str = "pending"  # pending / parsed / verified / corrected
+    issues: list[dict] = field(default_factory=list)  # 质检问题列表（由 quality.py 填充）
 
 
 def strip_meta(content: str) -> str:
