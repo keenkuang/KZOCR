@@ -137,7 +137,7 @@ class ProbeResult:
     vram_gb: float = 0.0
     cpu_cores: int = 1
     ports: dict[str, bool] = field(default_factory=dict)     # {"18080": True, ...}
-    keys: dict[str, str] = field(default_factory=dict)        # {"sensenova": "sk-xxx", ...}
+    keys: dict[str, bool] = field(default_factory=dict)      # {"sensenova": True, ...} 仅存 key 是否存在,不存明文值(对齐 v0.7 §3.3)
     allow_cloud_vision: bool = False
 
 
