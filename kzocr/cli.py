@@ -33,7 +33,11 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
     else:
         # 未指定 --db 时落到本地隔离库，避免污染/误读真实 zai 控制台库
         cfg.zai_db = "kzocr.db"
+    if args.use_v07:
+        cfg.use_v07 = True
     log.info("运行引擎：%s", args.pdf)
+    if cfg.use_v07:
+        log.info("v0.7 编排调度已启用")
     book = engine_run.run_engine(args.pdf, book_code=args.book_code, config=cfg)
     result = push_book_to_zai(book, db_path=cfg.zai_db, skip_prisma_marker=True)
     log.info("书籍 %s 已写入 zai 库（%s 行/页/段落）", result["book_code"], result["counts"])
@@ -93,8 +97,12 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     else:
         # 冒烟用隔离库，避免污染真实 zai 控制台库（schema 由适配器自管理）
         cfg.zai_db = "smoke.db"
+    if args.use_v07:
+        cfg.use_v07 = True
     cfg.use_mock = True
     log.info("==> [1/4] mock 引擎产出")
+    if cfg.use_v07:
+        log.info("     v0.7 编排调度已启用")
     book = engine_run.run_engine("mock.pdf", book_code="TCM-SMOKE-001", config=cfg)
     assert book.is_mock, "smoke 应使用 mock 引擎"
     log.info("==> [2/4] 写入 zai 库")
@@ -135,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("pdf")
     pp.add_argument("--book-code")
     pp.add_argument("--db", help="zai 的 SQLite 路径（覆盖配置）")
+    pp.add_argument("--use-v07", action="store_true", help="启用 v0.7 编排调度系统")
     pp.set_defaults(func=cmd_pipeline)
 
     pe = sub.add_parser("export", help="从 zai 库导出最终校正 Markdown")
@@ -155,6 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--khub-url", default=None)
     ps.add_argument("--skip-push", action="store_true")
     ps.add_argument("--verify", action="store_true")
+    ps.add_argument("--use-v07", action="store_true", help="启用 v0.7 编排调度系统")
     ps.set_defaults(func=cmd_smoke)
     return p
 

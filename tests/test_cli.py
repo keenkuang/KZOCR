@@ -171,10 +171,11 @@ class TestCmdPipeline:
 
         mock_push_zai.return_value = {"book_code": "TCM-001", "counts": "5 页 / 12 行"}
 
-        args = MagicMock(spec=["pdf", "book_code", "db"])
+        args = MagicMock(spec=["pdf", "book_code", "db", "use_v07"])
         args.pdf = "/tmp/test.pdf"
         args.book_code = None
         args.db = None
+        args.use_v07 = False
 
         rc = cmd_pipeline(args)
 
@@ -195,10 +196,11 @@ class TestCmdPipeline:
         mock_run_engine.return_value = mock_book
         mock_push_zai.return_value = {"book_code": "TCM-002", "counts": "3 页"}
 
-        args = MagicMock(spec=["pdf", "book_code", "db"])
+        args = MagicMock(spec=["pdf", "book_code", "db", "use_v07"])
         args.pdf = "/tmp/test.pdf"
         args.book_code = "TCM-002"
         args.db = "/custom/zai.db"
+        args.use_v07 = False
 
         rc = cmd_pipeline(args)
 
@@ -221,10 +223,11 @@ class TestCmdPipeline:
         mock_run_engine.return_value = mock_book
         mock_push_zai.return_value = {"book_code": "TCM-003", "counts": "1 页"}
 
-        args = MagicMock(spec=["pdf", "book_code", "db"])
+        args = MagicMock(spec=["pdf", "book_code", "db", "use_v07"])
         args.pdf = "/tmp/test.pdf"
         args.book_code = None
         args.db = None
+        args.use_v07 = False
 
         rc = cmd_pipeline(args)
 
@@ -411,11 +414,12 @@ class TestCmdSmoke:
         mock_export_md.return_value = "# Smoke Test"
         mock_push_doc.return_value = {"doc_id": "smoke-doc-001"}
 
-        args = MagicMock(spec=["db", "khub_url", "skip_push", "verify"])
+        args = MagicMock(spec=["db", "khub_url", "skip_push", "verify", "use_v07"])
         args.db = None
         args.khub_url = None
         args.skip_push = False
         args.verify = False
+        args.use_v07 = False
 
         cwd = Path.cwd()
         os.chdir(str(tmp_path))
@@ -465,11 +469,12 @@ class TestCmdSmoke:
         mock_push_zai.return_value = {"book_code": "TCM-SMOKE-002", "counts": "1 页"}
         mock_export_md.return_value = "# Smoke Test"
 
-        args = MagicMock(spec=["db", "khub_url", "skip_push", "verify"])
+        args = MagicMock(spec=["db", "khub_url", "skip_push", "verify", "use_v07"])
         args.db = None
         args.khub_url = None
         args.skip_push = True
         args.verify = False
+        args.use_v07 = False
 
         cwd = Path.cwd()
         os.chdir(str(tmp_path))
@@ -511,7 +516,7 @@ class TestCmdSmoke:
         mock_push_doc.return_value = {"doc_id": "verify-doc-001"}
         mock_verify.return_value = [{"id": "verify-doc-001", "title": "Smoke Test With Verify"}]
 
-        args = MagicMock(spec=["db", "khub_url", "skip_push", "verify"])
+        args = MagicMock(spec=["db", "khub_url", "skip_push", "verify", "use_v07"])
         args.db = None
         args.khub_url = None
         args.skip_push = False
