@@ -263,3 +263,22 @@ class BookResult:
     # 元信息：本次结果来自哪个引擎 / 是否 mock
     engine_label: str = "unknown"
     is_mock: bool = False
+    toc: Optional["TocTree"] = None    # F1: 目录树（后处理填充，默认 None）
+
+
+# ── F1: 目录树类型（TOC 抽取）──
+@dataclass
+class TocEntry:
+    """目录条目。支持 1-5 层嵌套。"""
+    level: int                                               # 1-5（1=卷/科，5=子条）
+    title: str
+    page: int                                                # 起始页码，0=无页码
+    sub_entries: list["TocEntry"] = field(default_factory=list)
+    section_no: str = ""                                     # 编号如 "§3" / "1.2"
+
+
+@dataclass
+class TocTree:
+    """整书目录树。"""
+    max_depth: int = 0              # 实际层级数（0=无 TOC）；2-5
+    entries: list[TocEntry] = field(default_factory=list)
