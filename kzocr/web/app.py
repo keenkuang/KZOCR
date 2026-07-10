@@ -192,8 +192,9 @@ async def engines_config_delete(name: str):
 
 @app.get("/prompts", response_class=HTMLResponse)
 async def prompts_page(request: Request):
-    """Prompt 管理页面。"""
-    from kzocr.engine.prompt_manager import list_prompts
+    """Prompt 管理页面。首次访问时自动创建默认提示词。"""
+    from kzocr.engine.prompt_manager import list_prompts, init_defaults
+    init_defaults()
     prompts = list_prompts()
     return templates.TemplateResponse(request, "prompts.html", {"prompts": prompts})
 
@@ -466,9 +467,11 @@ async def api_engines():
 
 @api.get("/engines/{name}/test")
 async def api_engine_test(name: str):
-    """测试引擎连通性。尝试 validate_url 校验。"""
+    """测试引擎连通性。云端引擎检查 egress；本地引擎检查端口/进程。"""
     from kzocr.engine.engine_config import load_engine_config
     from kzocr.security.egress import validate_url
+    import socket
+    import os
     cfg = load_engine_config(name)
     if not cfg:
         return {"status": "error", "message": f"引擎 {name} 未配置"}
@@ -478,14 +481,28 @@ async def api_engine_test(name: str):
         if base_url:
             try:
                 validate_url(base_url)
-                result["checks"].append({"name": "egress", "status": "ok", "detail": f"{base_url} 通过"})
+                result["checks"].append({"name": "egress", "status": "ok", "detail": f"域名校验通过: {base_url}"})
             except Exception as exc:
-                result["checks"].append({"name": "egress", "status": "fail", "detail": str(exc)})
+                result["checks"].append({"name": "egress", "status": "fail", "detail": str(exc)[:100]})
         else:
-            result["checks"].append({"name": "egress", "status": "skip", "detail": "无 base_url 配置"})
+            result["checks"].append({"name": "egress", "status": "skip", "detail": "未配置 base_url"})
     else:
-        result["checks"].append({"name": "egress", "status": "skip", "detail": "本地引擎，无需校验"})
-    result["status"] = "ok" if all(c["status"] == "ok" or c["status"] == "skip" for c in result["checks"]) else "degraded"
+        result["checks"].append({"name": "egress", "status": "skip", "detail": "本地引擎"})
+        # 本地引擎端口检查
+        host = cfg.get("host", "127.0.0.1")
+        port = cfg.get("port", 0)
+        if port:
+            try:
+                s = socket.create_connection((host, port), timeout=3)
+                s.close()
+                result["checks"].append({"name": "port", "status": "ok", "detail": f"{host}:{port} 可连接"})
+            except Exception as exc:
+                result["checks"].append({"name": "port", "status": "fail", "detail": f"{host}:{port} {str(exc)[:60]}"})
+        # 进程检查
+        pid_file = cfg.get("pid_file", "")
+        if pid_file and os.path.isfile(pid_file):
+            result["checks"].append({"name": "pid_file", "status": "ok", "detail": f"PID 文件存在: {pid_file}"})
+    result["status"] = "ok" if all(c["status"] in ("ok", "skip") for c in result["checks"]) else "degraded"
     return result
 
 

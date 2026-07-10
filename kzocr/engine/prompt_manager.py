@@ -83,3 +83,10 @@ def delete_prompt(name: str) -> None:
     p = _path(name)
     if os.path.isfile(p):
         os.remove(p)
+
+
+def init_defaults() -> None:
+    """初始化默认 prompt 模板（仅缺失时创建）。"""
+    for name, text in [("check_prompt", DEFAULT_CHECK_PROMPT), ("correct_prompt", DEFAULT_CORRECT_PROMPT)]:
+        if load_prompt(name) is None:
+            save_prompt(name, text)
