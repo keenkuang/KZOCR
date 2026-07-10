@@ -6,8 +6,6 @@ import time
 
 from kzocr.engine.toc import (
     TOC_HEADER_KEYWORDS,
-    TocEntry,
-    TocTree,
     build_toc,
     build_toc_tree,
     discover_toc_pages,

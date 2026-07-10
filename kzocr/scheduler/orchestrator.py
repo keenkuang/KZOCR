@@ -221,7 +221,29 @@ def orchestrate_book(
                 )
 
     # ── 第 2 步：逐页处理 ──
+    # F3: 提前查询 DB 进度用于 resume/retry-failed 跳过
+    skip_pages: set[int] = set()
+    if overrides and (overrides.resume or overrides.retry_failed):
+        try:
+            for p in db.get_all_progress():
+                if overrides.retry_failed:
+                    if p["ocr_status"] in ("success",):
+                        skip_pages.add(p["page_num"])
+                elif overrides.resume:
+                    if p["ocr_status"] == "success":
+                        skip_pages.add(p["page_num"])
+        except Exception:
+            _logger.warning("[orchestrator] resume query failed, falling back to full run")
+        _logger.info(
+            "[orchestrator] resume mode: skip_pages=%d",
+            len(skip_pages),
+        )
+
     for page_num, page_input in enumerate(render_pages(pdf_path, config)):
+        # F3: 跳过已处理页
+        if page_num in skip_pages:
+            _logger.debug("[orchestrator] page=%d 已处理，跳过（resume）", page_num)
+            continue
         # 进度日志（每 5 页）
         if page_num % 5 == 0:
             elapsed_m = int((time.monotonic() - start_time) / 60)

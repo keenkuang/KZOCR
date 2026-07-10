@@ -49,6 +49,23 @@ class EngineStats:
     glyph_uncertain_count: int = 0  # 追踪 UNCERTAIN（需人工复核）
     last_error: Optional[str] = None
     last_seen: float = 0.0  # time.time() 挂钟时间，支持跨进程持久化
+    # 滚动窗口（F3 Part B）：最近 100 次 latency 与 success/fail
+    rolling_latencies: list[float] = field(default_factory=list)
+    rolling_failures: list[bool] = field(default_factory=list)
+
+    @property
+    def recent_avg_latency_ms(self) -> float:
+        """最近 100 次调用的平均延迟。无样本时返回 0。"""
+        if not self.rolling_latencies:
+            return 0.0
+        return sum(self.rolling_latencies) / len(self.rolling_latencies)
+
+    @property
+    def recent_fail_rate(self) -> float:
+        """最近 100 次调用的失败率。"""
+        if not self.rolling_failures:
+            return 0.0
+        return sum(1 for f in self.rolling_failures if not f) / len(self.rolling_failures)
 
     def __repr__(self) -> str:
         """掩码 last_error（可能含凭证/路径），满足 §3.3 敏感字段掩码要求。"""
@@ -233,6 +250,15 @@ class EngineRegistry:
                     "success": success,
                 }
             )
+        # F3 Part B: 维护滚动窗口（最近 100 次）
+        if latency_ms is not None:
+            s.rolling_latencies.append(float(latency_ms))
+        else:
+            s.rolling_latencies.append(0.0)
+        s.rolling_failures.append(success)
+        if len(s.rolling_latencies) > 100:
+            s.rolling_latencies = s.rolling_latencies[-100:]
+            s.rolling_failures = s.rolling_failures[-100:]
 
     def persist_benchmarks(self) -> None:
         """将累计的增量事件以 NDJSON 逐行追加（O(1)）写入 benchmark 目录（§7.1）。

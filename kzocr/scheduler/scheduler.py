@@ -73,6 +73,10 @@ class EngineOverrides:
     tier_order: Optional[list[int]] = None  # --tier-order "1,3,2"
     tier_limit: Optional[int] = None  # --tier-limit N
     max_time_per_page: Optional[int] = None  # --max-time-per-page N
+    resume: bool = False  # --resume：断点续跑
+    retry_failed: bool = False  # --retry-failed：仅重跑失败页
+    backoff_threshold_ms: int = 30000  # 即时延迟 > 此阈值时，对该引擎暂停调度（冷却）
+    backoff_fail_rate: float = 0.5  # 即时失败率 > 此阈值时，对该引擎暂停调度
 
 
 # ── 评分与权重（§4.2 / §4.3）──
@@ -84,11 +88,24 @@ def _compute_bayesian_score(reg: EngineRegistration) -> float:
     - glyph_pass_rate 已含贝叶斯平均（§3.5）
     - latency 下限 1ms 防除零
     - decay(last_seen) 时效衰减（§4.2）
+    - F3 Part B: 混合近期滚动窗口（recent 30%）与长期全量（long 70%）
     """
     pass_rate = reg.glyph_pass_rate
     latency = max(reg.avg_latency_per_page_ms, 1.0)
     decay = reg.stats.decay(DECAY_HALF_LIFE_DAYS)
-    return pass_rate * (1000.0 / latency) * decay
+    long_score = pass_rate * (1000.0 / latency) * decay
+
+    # 近期滚动指标
+    recent_latency = max(reg.stats.recent_avg_latency_ms, 1.0)
+    recent_fail = reg.stats.recent_fail_rate
+    recent_pass = 1.0 - recent_fail
+    recent_score = recent_pass * (1000.0 / recent_latency)
+
+    # 混合：70% 长期 + 30% 近期（至少有滚动采样才混入近期）
+    scales = reg.stats.rolling_latencies
+    if len(scales) >= 5:
+        return long_score * 0.7 + recent_score * 0.3
+    return long_score
 
 
 def domain_adjust(
@@ -190,6 +207,30 @@ class EngineScheduler:
                     "[scheduler] filtered %d cloud engines (allow_cloud_vision=False)",
                     before - len(candidates),
                 )
+
+        # ── 第 4.5 步：F3 自适应调速（backoff）──
+        if overrides:
+            before = len(candidates)
+            filtered = []
+            for e in candidates:
+                s = e.stats
+                lat_ok = (
+                    not s.rolling_latencies
+                    or s.recent_avg_latency_ms <= overrides.backoff_threshold_ms
+                )
+                fail_ok = (
+                    not s.rolling_failures
+                    or s.recent_fail_rate <= overrides.backoff_fail_rate
+                )
+                if lat_ok and fail_ok:
+                    filtered.append(e)
+                else:
+                    _logger.info(
+                        "[scheduler] backoff engine=%s (lat=%.0f/%d, fail=%.2f/%.2f)",
+                        e.meta.name, s.recent_avg_latency_ms, overrides.backoff_threshold_ms,
+                        s.recent_fail_rate, overrides.backoff_fail_rate,
+                    )
+            candidates = filtered
 
         # ── 第 5 步：资源过滤（状态位缓存；list_by_tier 已排除，此处再保一层）──
         candidates = [e for e in candidates if e.status != "UNAVAILABLE"]
