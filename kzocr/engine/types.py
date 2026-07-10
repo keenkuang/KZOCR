@@ -282,3 +282,16 @@ class TocTree:
     """整书目录树。"""
     max_depth: int = 0              # 实际层级数（0=无 TOC）；2-5
     entries: list[TocEntry] = field(default_factory=list)
+
+
+@dataclass
+class ChapterResult:
+    """按 TOC 合并后的章节结果。"""
+    title: str
+    level: int                     # 1-5（对应 TOC 层级）
+    page_start: int
+    page_end: int
+    text: str = ""
+    recipe_count: int = 0
+    sub_chapters: list["ChapterResult"] = field(default_factory=list)
+    anomalies: list[str] = field(default_factory=list)  # 编号偏差记录
