@@ -70,11 +70,12 @@ CLI(kzocr/cli.py: main)
 - 测试：pytest，文件放 `tests/`，命名 `test_<module>.py`；网络/文件系统等外部依赖**必须 mock**；新功能须带测试，bugfix 须带回归测试。
 
 ## 已知跨文件不一致（2026-07-10，影响实现时需注意）
-1. **`ProbeResult.keys` 类型**：`types.py` 当前为 `dict[str, str]`（注释示例含明文 `sk-xxx`），但 v0.7 概览 §3.3 明文规定应改为 `dict[str, bool]`（仅存"是否存在"，不存密钥值）。两处尚未同步，且后者与 `EngineConfig`（只存环境变量名引用、不存明文凭证）的安全原则一致。落子前以 §3.3 为准。
-2. **egress 导入路径**：v0.7 概览 §4.5 写 `from kzocr.engines.egress import validate_url`，但真实模块位于 `kzocr/security/egress.py`（README 关键模块表亦如此）。以 `kzocr/security/egress.py` 为准。
-3. **功能代号**：代码/提交/文档中大量出现 `B1–B8`、`C1–C5`、`D0–D4`（以及评审角色标签 architect/security/ops/performance/testing/domain/pm/sweng）。它们分别对应 v0.3/v0.4/v0.5 的功能里程碑代号，阅读历史提交与评审报告时需对应（含义见 README「功能历史」）。
+1. **egress 导入路径**：v0.7 概览 §4.5 写 `from kzocr.engines.egress import validate_url`，但真实模块位于 `kzocr/security/egress.py`（README 关键模块表亦如此；`khub/client.py:16` 亦引用 `..security.egress`）。以 `kzocr/security/egress.py` 为准。
+2. **功能代号**：代码/提交/文档中大量出现 `B1–B8`、`C1–C5`、`D0–D4`（以及评审角色标签 architect/security/ops/performance/testing/domain/pm/sweng）。它们分别对应 v0.3/v0.4/v0.5 的功能里程碑代号，阅读历史提交与评审报告时需对应（含义见 README「功能历史」）。
+
+> 已解决：原 `#1 ProbeResult.keys 类型`（`dict[str, str]` 含明文 `sk-xxx`）已由 PR #1（`fix: v0.7 types.py 同步`，2026-07-10）同步为 `dict[str, bool]`，与设计 §3.3 对齐，无需再特殊处理。
 
 ## 设计文档索引
 - 方案：`docs/plans/ocr-engine-unification.{v0.3-FREEZE, v0.4-AMEND, v0.5-AMEND, v0.7, v0.7-DETAILED}.md`
-- 评审报告：`docs/reviews/<日期>-round<N>-v0.7/`（多角色）。v0.7 已历经多轮评审（round1→round8），仍处于设计评审阶段，未进入编码。
+- 评审报告：`docs/reviews/<日期>-round<N>-v0.7/`（多角色）。v0.7 已历经多轮评审（round1→round9），仍处于设计评审阶段，未进入编码。
 - 变更记录：`CHANGELOG.md`、`docs/TEST_REPORT.md`。
