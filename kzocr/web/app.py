@@ -72,13 +72,16 @@ def _list_books() -> list[dict]:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    from kzocr.engine.registration import list_registrations
     books = _list_books()
+    regs = list_registrations()
     total_books = len(books)
     total_pages = sum(b["total_pages"] for b in books)
     total_success = sum(b["success_pages"] for b in books)
     total_anomalies = sum(b["anomaly_count"] for b in books)
     return templates.TemplateResponse(request, "index.html", {
         "books": books,
+        "registrations": regs,
         "total_books": total_books,
         "total_pages": total_pages,
         "total_success": total_success,
@@ -157,6 +160,46 @@ async def book_recipes(request: Request, book_code: str):
         "book_code": book_code,
         "recipes": recipes,
     })
+
+
+@app.get("/pipeline", response_class=HTMLResponse)
+async def pipeline_form(request: Request, book_code: str = ""):
+    """OCR 处理表单。"""
+    from kzocr.engine.registration import list_registrations
+    regs = list_registrations()
+    return templates.TemplateResponse(request, "pipeline.html", {"registrations": regs, "book_code": book_code, "error": None})
+
+
+@app.post("/pipeline")
+async def pipeline_run(request: Request):
+    """执行 OCR 处理。"""
+    import os
+    import logging
+    from kzocr.config import load_config
+    from kzocr.engine.run import run_engine
+    form = await request.form()
+    book_code = form.get("book_code", "")
+    pdf_path = form.get("pdf_path", "")
+    if not book_code or not pdf_path:
+        return templates.TemplateResponse(request, "pipeline.html", {
+            "registrations": [],
+            "error": "请填写书籍编号和 PDF 路径",
+        })
+    if not os.path.isfile(pdf_path):
+        return templates.TemplateResponse(request, "pipeline.html", {
+            "registrations": [],
+            "error": f"PDF 文件不存在：{pdf_path}",
+        })
+    try:
+        cfg = load_config()
+        run_engine(pdf_path, book_code=book_code, config=cfg)
+        return RedirectResponse(url=f"/book/{book_code}", status_code=303)
+    except Exception as exc:
+        logging.getLogger("kzocr").error("Pipeline failed: %s", exc)
+        return templates.TemplateResponse(request, "pipeline.html", {
+            "registrations": [],
+            "error": f"处理失败：{exc}",
+        })
 
 
 # =============================================================================

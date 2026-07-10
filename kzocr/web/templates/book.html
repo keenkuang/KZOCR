@@ -5,6 +5,9 @@
 
 <div class="flex gap-2 mb-4">
     <a href="/" class="text-sm text-blue-600 hover:underline">← 返回</a>
+    {% if benchmark is none %}
+    <a href="/pipeline?book_code={{ book_code }}" class="text-sm text-green-600 hover:underline ml-4 font-medium">▶ 运行 OCR</a>
+    {% endif %}
     <a href="/book/{{ book_code }}/recipes" class="text-sm text-blue-600 hover:underline ml-4">方剂列表</a>
     <a href="/book/{{ book_code }}/anomalies" class="text-sm text-red-600 hover:underline ml-4">校对异常</a>
 </div>
