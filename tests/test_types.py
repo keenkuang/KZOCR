@@ -1,14 +1,9 @@
 """types.py 契约冻结测试 — round4 B1/B2/B7 裁决验证。"""
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from kzocr.engine.types import (
     AdapterMeta,
     AdapterPageResult,
-    GlyphStatus,
     LineResult,
     ProbeResult,
 )
