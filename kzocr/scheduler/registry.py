@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,9 +22,11 @@ from kzocr.engine.types import (
     EngineRunner,
     EngineStatus,
     GlyphStatus,
+    ProbeResult,
 )
 from kzocr.engines.errors import SchedulerError
 from kzocr.engines.atomic import _check_base
+from kzocr.security.egress import validate_url
 
 # ── 冷启动与贝叶斯评分常量（v0.7 §3.5）──
 GLYPH_PASS_RATE_DEFAULT = 0.5  # 中等置信度假设，非 0
@@ -329,3 +333,61 @@ def select_candidates(
     else:
         candidates = sorted(candidates, key=_bayesian_score, reverse=True)
     return candidates
+
+
+def probe_engines(
+    registry: EngineRegistry,
+    probe_result: Optional[ProbeResult] = None,
+) -> None:
+    """逐引擎探测可用性，刷新 EngineRegistration.status（v0.7 §3.4）。
+
+    基础探测（env/file/port）立即执行；api 类仅做 B3 egress 合法性校验
+    （validate_url），真实网络健康检查留待 E2 惰性执行。优先复用
+    `probe_result` 缓存的端口/key 状态，缺失时回退实时探测。无 probe 配置
+    （空 dict）的引擎保持 status 现状，不强制探测。
+    """
+    for reg in registry.list():
+        _probe_one(reg, probe_result)
+
+
+def _probe_one(reg: EngineRegistration, probe_result: Optional[ProbeResult]) -> None:
+    probe = reg.meta.probe or {}
+    method = probe.get("method")
+    if not method:
+        return  # 无探测配置：保持 status 现状
+    try:
+        if method == "env":
+            key = probe.get("key", "")
+            cached = probe_result.keys.get(key) if probe_result else None
+            ok = cached if cached is not None else (os.environ.get(key) is not None)
+        elif method == "file":
+            ok = Path(probe.get("path", "")).expanduser().exists()
+        elif method == "port":
+            port = int(probe.get("port", 0))
+            cached = probe_result.ports.get(str(port)) if probe_result else None
+            ok = cached if cached is not None else _tcp_reachable(
+                probe.get("host", "127.0.0.1"), port
+            )
+        elif method == "api":
+            url = probe.get("url") or reg.config.base_url or ""
+            if not url:
+                ok = True  # 无 URL 可校验，保守放行（E2 惰性网络检查）
+            else:
+                validate_url(url)  # B3：egress 合法性校验，非法抛 ValueError
+                ok = True
+        else:
+            ok = True  # 未知 method 保守放行
+    except (OSError, ValueError):
+        # 含 validate_url 抛的 ValueError 与 _tcp_reachable 的 OSError；
+        # 未来若 validate_url 改抛 EgressBlockedError，需在此扩展。
+        ok = False
+    reg.status = "HEALTHY" if ok else "UNAVAILABLE"
+
+
+def _tcp_reachable(host: str, port: int, timeout: float = 0.5) -> bool:
+    """TCP 连通性探测（单次短超时）。"""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False

@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
-from kzocr.engine.types import AdapterMeta, EngineConfig
+from kzocr.engine.types import AdapterMeta, EngineConfig, ProbeResult
 from kzocr.engines.errors import SchedulerError
 from kzocr.scheduler.registry import (
     AVG_LATENCY_DEFAULT_MS,
     GLYPH_PASS_RATE_DEFAULT,
     EngineRegistry,
     select_candidates,
+    probe_engines,
 )
 
 
-def _meta(name: str, tier: int = 1, requires_network: bool = False) -> AdapterMeta:
+def _meta(
+    name: str,
+    tier: int = 1,
+    requires_network: bool = False,
+    probe: dict | None = None,
+) -> AdapterMeta:
     return AdapterMeta(
         name=name,
         label=name,
         tier=tier,
         requires_network=requires_network,
+        probe=probe or {},
     )
 
 
@@ -247,3 +254,82 @@ def test_mark_healthy_restores():
     assert reg.get("a").status == "UNAVAILABLE"
     reg.mark_healthy("a")
     assert reg.get("a").status == "HEALTHY"
+
+
+def test_probe_env_missing_marks_unavailable():
+    reg = EngineRegistry()
+    reg.register_adapter(
+        _meta("sensenova", 2, probe={"method": "env", "key": "KZOCR_NO_SUCH_KEY_XYZ"}),
+        EngineConfig(),
+    )
+    probe_engines(reg)
+    assert reg.get("sensenova").status == "UNAVAILABLE"
+
+
+def test_probe_env_present_marks_healthy(monkeypatch):
+    reg = EngineRegistry()
+    reg.register_adapter(
+        _meta("sensenova", 2, probe={"method": "env", "key": "KZOCR_PROBE_KEY"}),
+        EngineConfig(),
+    )
+    monkeypatch.setenv("KZOCR_PROBE_KEY", "xyz")
+    probe_engines(reg)
+    assert reg.get("sensenova").status == "HEALTHY"
+
+
+def test_probe_file_present_and_missing(tmp_path):
+    f = tmp_path / "model.bin"
+    reg = EngineRegistry()
+    reg.register_adapter(
+        _meta("shizhengpt", 3, probe={"method": "file", "path": str(f)}),
+        EngineConfig(),
+    )
+    probe_engines(reg)
+    assert reg.get("shizhengpt").status == "UNAVAILABLE"  # 文件尚不存在
+    f.write_text("x")
+    probe_engines(reg)
+    assert reg.get("shizhengpt").status == "HEALTHY"
+
+
+def test_probe_port_uses_tcp(monkeypatch):
+    reg = EngineRegistry()
+    reg.register_adapter(
+        _meta("paddleocr_vl16", 3, probe={"method": "port", "port": 18080}),
+        EngineConfig(),
+    )
+    monkeypatch.setattr("kzocr.scheduler.registry._tcp_reachable", lambda h, p: False)
+    probe_engines(reg)
+    assert reg.get("paddleocr_vl16").status == "UNAVAILABLE"
+    monkeypatch.setattr("kzocr.scheduler.registry._tcp_reachable", lambda h, p: True)
+    probe_engines(reg)
+    assert reg.get("paddleocr_vl16").status == "HEALTHY"
+
+
+def test_probe_no_config_keeps_status():
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
+    probe_engines(reg)
+    assert reg.get("paddleocr").status == "HEALTHY"  # 空 probe，不强制探测
+
+
+def test_probe_api_validates_url(monkeypatch):
+    reg = EngineRegistry()
+    reg.register_adapter(
+        _meta("sensenova", 2, probe={"method": "api", "url": "https://api.sensenova.com/v1"}),
+        EngineConfig(),
+    )
+    monkeypatch.setattr("kzocr.scheduler.registry.validate_url", lambda url: url)
+    probe_engines(reg)
+    assert reg.get("sensenova").status == "HEALTHY"
+
+
+def test_probe_uses_probe_result_cache(monkeypatch):
+    reg = EngineRegistry()
+    reg.register_adapter(
+        _meta("paddleocr_vl16", 3, probe={"method": "port", "port": 18080}),
+        EngineConfig(),
+    )
+    # 端口实际不可达（TCP 探测 False），但 ProbeResult 缓存标记可达 → 应使用缓存
+    monkeypatch.setattr("kzocr.scheduler.registry._tcp_reachable", lambda h, p: False)
+    probe_engines(reg, probe_result=ProbeResult(ports={"18080": True}))
+    assert reg.get("paddleocr_vl16").status == "HEALTHY"
