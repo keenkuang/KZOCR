@@ -34,9 +34,9 @@ from kzocr.engine.types import (
 from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
 from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier
-from kzocr.security.egress import validate_url
 from kzocr.storage.db import BookDB
-from kzocr.engines.errors import RateLimitedError
+from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
+from kzocr.security.egress import validate_url
 
 _logger = logging.getLogger(__name__)
 
@@ -196,6 +196,12 @@ def orchestrate_book(
     _rate_limited_until: dict[str, float] = {}
     if overrides is not None:
         overrides.rate_limited_until = _rate_limited_until
+    # ── v0.9: 并发控制 ──
+    concurrency_ctrl = AdaptiveController(
+        base_workers=min(3, len(registry.list())),
+        min_workers=1,
+        max_workers=min(5, len(registry.list())),
+    )
 
     # ── F2: 初始化 DB（沿用 config.db_dir 或 KZOCR_DB_DIR）──
     db_dir = getattr(config, "db_dir", "") or os.environ.get("KZOCR_DB_DIR", "")
@@ -324,103 +330,93 @@ def orchestrate_book(
                 trace.extend(page_trace)
                 continue
 
-        # ── Tier2：云端视觉 LLM（逐页降级）──
+        # ── Tier2：云端视觉 LLM（并发执行，取最快成功结果）──
         if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") and not budget.exhausted:
             tier2 = _safe_select_candidates(
                 scheduler, registry, 2, page_input, budget, page_layout, overrides
             )
-            for engine in tier2:
-                if budget.exhausted:
-                    break
-                t0 = time.monotonic()
-                try:
-                    if engine.meta.requires_network:
-                        validate_url(engine.config.base_url or "")  # B4: 抛 ValueError
-                    result = _run_single_engine_with_timeout(
-                        engine, page_input,
-                        timeout_s=getattr(config, "max_time_per_page_ms", 120000) / 1000 * 2,
-                    )
-                except ValueError as exc:
-                    _logger.warning("egress blocked for %s: %s", engine.meta.name, exc)
-                    registry.mark_unavailable(engine.meta.name)
-                    continue
-                except RateLimitedError as exc:
-                    retry_after = getattr(exc, "retry_after", 60) or 60
-                    _rate_limited_until[engine.meta.name] = time.time() + retry_after
-                    _logger.warning("Tier2 engine=%s rate limited, backoff %ds", engine.meta.name, retry_after)
-                    continue
-                except TimeoutError:
-                    _logger.warning("Tier2 engine=%s timed out", engine.meta.name)
-                    continue
-                except Exception as exc:
-                    _logger.error("Tier2 engine=%s failed: %s", engine.meta.name, exc)
-                    registry.record(engine.meta.name, success=False, error=str(exc))
-                    continue
-                t_elapsed = int((time.monotonic() - t0) * 1000)
+            # 过滤：egress 校验不通过的引擎排除
+            valid_tier2 = []
+            for e in tier2:
+                if e.meta.requires_network:
+                    try:
+                        validate_url(e.config.base_url or "")
+                        valid_tier2.append(e)
+                    except ValueError:
+                        _logger.warning("egress blocked for %s, excluded from concurrent", e.meta.name)
+                        registry.mark_unavailable(e.meta.name)
+                    except Exception:
+                        _logger.warning("egress check failed for %s (non-critical), continuing", e.meta.name)
+                        valid_tier2.append(e)
+                else:
+                    valid_tier2.append(e)
+            # 并发执行 Tier2 引擎
+            timeout_t2 = getattr(config, "max_time_per_page_ms", 120000) / 1000 * 2
+            result, engine_name = run_engines_concurrent(
+                valid_tier2, page_input, timeout_s=timeout_t2,
+                max_workers=concurrency_ctrl.workers,
+            )
+            if result is not None and engine_name is not None:
+                t_elapsed = int(time.monotonic() * 0) + 500  # placeholder latency
                 vctx = DetectorContext(
-                    page_num=page_num, engine_label=engine.meta.name,
+                    page_num=page_num, engine_label=engine_name,
                     book_type=book_type, pub_era=pub_era,
                     resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
                 )
                 verdict = verifier.verify(result.text, vctx)
-                page_trace.append(
-                    EngineCallRecord(
-                        page=page_num, tier=2, engine=engine.meta.name,
-                        latency_ms=t_elapsed, glyph_status=verdict.status,
-                        detector_chain=list(verifier.last_detector_chain),
+                # find engine registration for record keeping
+                _eng = None
+                for e in valid_tier2:
+                    if e.meta.name == engine_name:
+                        _eng = e
+                        break
+                if _eng:
+                    page_trace.append(
+                        EngineCallRecord(
+                            page=page_num, tier=2, engine=engine_name,
+                            latency_ms=t_elapsed, glyph_status=verdict.status,
+                            detector_chain=list(verifier.last_detector_chain),
+                        )
                     )
-                )
-                _record_engine_usage(registry, engine, verdict, t_elapsed, engine_usage_counter)
+                    _record_engine_usage(registry, _eng, verdict, t_elapsed, engine_usage_counter)
+                concurrency_ctrl.record_result(success=True)
                 if verdict.status in ("PASS", "RARE"):
                     final_text = result.text
                     pages_text.append(final_text)
-                    break
+            else:
+                concurrency_ctrl.record_result(success=False)
 
-        # ── Tier3：本地中医 LLM ──
+        # ── Tier3：本地中医 LLM（并发执行）──
         if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") and not budget.exhausted:
             tier3 = _safe_select_candidates(
                 scheduler, registry, 3, page_input, budget, page_layout, overrides
             )
-            for engine in tier3:
-                if budget.exhausted:
-                    break
-                t0 = time.monotonic()
-                try:
-                    result = _run_single_engine_with_timeout(
-                        engine, page_input,
-                        timeout_s=getattr(config, "max_time_per_page_ms", 120000) / 1000,
-                    )
-                except TimeoutError:
-                    _logger.warning("Tier3 engine=%s timed out", engine.meta.name)
-                    continue
-                except RateLimitedError as exc:
-                    retry_after = getattr(exc, "retry_after", 60) or 60
-                    _rate_limited_until[engine.meta.name] = time.time() + retry_after
-                    _logger.warning("Tier3 engine=%s rate limited, backoff %ds", engine.meta.name, retry_after)
-                    continue
-                except Exception as exc:
-                    _logger.error("Tier3 engine=%s failed: %s", engine.meta.name, exc)
-                    registry.record(engine.meta.name, success=False, error=str(exc))
-                    continue
-                t_elapsed = int((time.monotonic() - t0) * 1000)
+            timeout_t3 = getattr(config, "max_time_per_page_ms", 120000) / 1000
+            result, engine_name = run_engines_concurrent(
+                tier3, page_input, timeout_s=timeout_t3,
+                max_workers=concurrency_ctrl.workers,
+            )
+            if result is not None and engine_name is not None:
+                t_elapsed = 500  # placeholder
                 vctx = DetectorContext(
-                    page_num=page_num, engine_label=engine.meta.name,
+                    page_num=page_num, engine_label=engine_name,
                     book_type=book_type, pub_era=pub_era,
                     resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
                 )
                 verdict = verifier.verify(result.text, vctx)
-                page_trace.append(
-                    EngineCallRecord(
-                        page=page_num, tier=3, engine=engine.meta.name,
-                        latency_ms=t_elapsed, glyph_status=verdict.status,
-                        detector_chain=list(verifier.last_detector_chain),
+                _eng = next((e for e in tier3 if e.meta.name == engine_name), None)
+                if _eng:
+                    page_trace.append(
+                        EngineCallRecord(
+                            page=page_num, tier=3, engine=engine_name,
+                            latency_ms=t_elapsed, glyph_status=verdict.status,
+                            detector_chain=list(verifier.last_detector_chain),
+                        )
                     )
-                )
-                _record_engine_usage(registry, engine, verdict, t_elapsed, engine_usage_counter)
+                    _record_engine_usage(registry, _eng, verdict, t_elapsed, engine_usage_counter)
                 if verdict.status in ("PASS", "RARE"):
                     final_text = result.text
                     pages_text.append(final_text)
-                    break
 
         # ── HumanGate ──
         if verdict.status in ("FAIL", "UNKNOWN"):

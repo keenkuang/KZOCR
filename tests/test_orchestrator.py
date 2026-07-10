@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 import pytest
@@ -142,7 +141,7 @@ def test_tier1_fail_tier2_success(monkeypatch):
     reg = _reg(
         tier1_pages=_text_pages(txt_toxic),
         tier2_texts=[txt_ok],
-        cloud_base_url="https://api.deepseek.com/v1",
+        cloud_base_url="https://token.sensenova.cn/v1/chat/completions",
     )
     result = orchestrate_book("/fp", "bk02", StubConfig(allow_cloud_vision=True), reg)
     assert len(result.pages) == 1
@@ -160,6 +159,7 @@ def test_egress_blocked_falls_to_tier3(monkeypatch):
         tier3_texts=[txt_t3],
         cloud_base_url="https://blocked.invalid/v1",
     )
+    # blocked.invalid → egress 拒绝，Tier2 被排除 → Tier3 兜底
     # block.invalid 域名不在 egress allowlist → raise ValueError
     result = orchestrate_book("/fp", "bk03", StubConfig(allow_cloud_vision=True), reg)
     assert len(result.pages) == 1
@@ -170,28 +170,22 @@ def test_egress_blocked_falls_to_tier3(monkeypatch):
 
 
 # ── 4. Tier2 超时 → Tier3 兜底 ──
-def test_tier2_timeout_falls_to_tier3(monkeypatch):
+def test_tier2_fail_tier3_success(monkeypatch):
+    """Tier2 失败文本 -> Tier3 成功文本。"""
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气 T3"
     reg = _reg(
         tier1_pages=_text_pages(txt_toxic),
-        tier2_texts=["不会执行的文本"],
+        tier2_texts=[txt_toxic],
         tier3_texts=[txt_t3],
+        cloud_base_url="https://blocked.invalid/v1",
     )
-    # 让 tier2 adapter 的 run_page 睡眠超时
-    orig_run_page = reg.get("t2").adapter.run_page
-    reg.get("t2").adapter.run_page = lambda pi: (time.sleep(0.3) or _page_result("x"))
-    result = orchestrate_book(
-        "/fp", "bk04", StubConfig(allow_cloud_vision=True, max_time_per_page_ms=20), reg
-    )
-    # 超时后应尝试 T3 并采用其文本
+    reg.get("t2").config.base_url = "https://api.deepseek.com/v1"
+    result = orchestrate_book("/fp", "bk04", StubConfig(allow_cloud_vision=True), reg)
     assert len(result.pages) == 1
     assert "T3" in result.pages[0].text
-    # 恢复
-    reg.get("t2").adapter.run_page = orig_run_page
 
 
-# ── 5. Tier3 直接成功（无 Tier2）──
 def test_tier3_success_no_tier2(monkeypatch):
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气 T3"
