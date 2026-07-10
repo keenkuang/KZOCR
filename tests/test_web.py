@@ -77,3 +77,60 @@ def test_no_books():
     for f in os.listdir(td2):
         os.remove(os.path.join(td2, f))
     os.rmdir(td2)
+
+
+# =============================================================================
+# REST API 测试
+# =============================================================================
+
+
+def test_api_books_list():
+    resp = client.get("/api/books")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert any(b["code"] == "test-book-a" for b in data)
+
+
+def test_api_book_detail():
+    resp = client.get("/api/books/test-book-a")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["book_code"] == "test-book-a"
+    assert data["total_pages"] >= 2
+    assert data["anomaly_count"] >= 1
+
+
+def test_api_book_pages():
+    resp = client.get("/api/books/test-book-a/pages")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 2
+    assert data[0]["page_num"] == 0
+
+
+def test_api_anomalies():
+    resp = client.get("/api/books/test-book-a/anomalies?status=pending")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert any(a["verdict_status"] == "FAIL" for a in data)
+
+
+def test_api_resolve():
+    resp = client.post("/api/books/test-book-a/anomalies/1/resolve?resolution=fixed")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    # verify resolved
+    db = BookDB("test-book-a", db_dir=os.environ["KZOCR_DB_DIR"])
+    pending = db.get_unresolved_anomalies("test-book-a")
+    db.close()
+    assert len(pending) == 0
+
+
+def test_api_recipes():
+    resp = client.get("/api/books/test-book-a/recipes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)

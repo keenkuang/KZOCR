@@ -5,6 +5,41 @@
 
 ---
 
+## v2026-07-10 — v0.11 REST API + Docker 化
+
+> **1 commit, 8 files changed, 270 insertions, 455 tests passed**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| *(current)* | `web/app.py` | 8 个 JSON REST API 端点（`/api/books`系列） |
+| *(current)* | `Dockerfile` | Python 3.12-slim 容器镜像 |
+| *(current)* | `docker-compose.yml` | kzocr 服务 + 持久化 volume |
+| *(current)* | `pyproject.toml` | version 0.6.0 → 0.11.0；新增 `[web]` 可选依赖 |
+| *(current)* | `tests/test_web.py` | 6 个 JSON API 测试 |
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/books` | 书籍列表 |
+| `GET` | `/api/books/{code}` | 书籍详情 |
+| `GET` | `/api/books/{code}/pages` | 逐页进度 |
+| `GET` | `/api/books/{code}/anomalies` | 异常列表（`?status=` 过滤） |
+| `POST` | `/api/books/{code}/anomalies/{id}/resolve` | 标记决议 |
+| `GET` | `/api/books/{code}/recipes` | 方剂列表 |
+
+### Docker
+
+```bash
+docker compose up -d     # 启动 Web 面板
+docker compose build     # 构建镜像
+docker compose down      # 停止
+```
+
+Web 面板可通过 `pip install kzocr[web]` 安装 Web 依赖。
+
+---
+
 ## v2026-07-10 — v0.10 性能深度优化
 
 > **1 commit, 5 files changed, 100 insertions, 449 tests passed**

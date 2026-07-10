@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  kzocr:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./db:/app/db
+      - ./trace:/app/trace
+    environment:
+      - KZOCR_DB_DIR=/app/db
+    restart: unless-stopped

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -152,3 +152,102 @@ async def book_recipes(request: Request, book_code: str):
         "book_code": book_code,
         "recipes": recipes,
     })
+
+
+# =============================================================================
+# REST API（JSON 端点）
+# =============================================================================
+
+api = APIRouter(prefix="/api")
+
+
+@api.get("/books")
+async def api_books():
+    """返回书籍列表（JSON）。"""
+    return _list_books()
+
+
+@api.get("/books/{book_code}")
+async def api_book_detail(book_code: str):
+    """返回单书详情（JSON）。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        progress = db.get_all_progress()
+        bench = db._conn.execute(
+            "SELECT * FROM benchmark_results ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        _ = db.get_unresolved_anomalies(book_code, limit=1)
+        return {
+            "book_code": book_code,
+            "total_pages": len(progress),
+            "success_pages": sum(1 for p in progress if p["ocr_status"] == "success"),
+            "fail_pages": sum(1 for p in progress if p["ocr_status"] == "failed"),
+            "anomaly_count": len(db.get_unresolved_anomalies(book_code, limit=999)),
+            "benchmark": dict(bench) if bench else None,
+        }
+    finally:
+        db.close()
+
+
+@api.get("/books/{book_code}/pages")
+async def api_book_pages(book_code: str):
+    """返回逐页进度（JSON）。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        return db.get_all_progress()
+    finally:
+        db.close()
+
+
+@api.get("/books/{book_code}/anomalies")
+async def api_anomalies(book_code: str, status: str = Query("pending", description="过滤状态")):
+    """返回异常记录列表（JSON）。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        return db.get_anomalies(status_filter=status)
+    finally:
+        db.close()
+
+
+@api.post("/books/{book_code}/anomalies/{anomaly_id}/resolve")
+async def api_resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fixed", note: str = ""):
+    """标记异常决议。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        db.resolve_anomaly(anomaly_id, resolution=resolution, note=note)
+        return {"status": "ok", "message": f"Anomaly #{anomaly_id} resolved as {resolution}"}
+    finally:
+        db.close()
+
+
+@api.get("/books/{book_code}/recipes")
+async def api_recipes(book_code: str):
+    """返回方剂列表（JSON）。"""
+    from kzocr.analysis.recipe_parser import parse_recipes
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        progress = db.get_all_progress()
+        pages_text = [p["verify_details"] for p in progress if p.get("verify_details")]
+        if not pages_text:
+            pages_text = [""] * len(progress)
+        recipes = parse_recipes(pages_text)
+        return [
+            {
+                "recipe_no": r.recipe_no,
+                "title": r.title,
+                "start_page": r.start_page,
+                "herbs": [{"name": h.herb_name, "dosage": h.dosage, "unit": h.unit} for h in r.herbs],
+                "fields": {k: v for k, v in r.fields.items()},
+            }
+            for r in recipes
+        ]
+    finally:
+        db.close()
+
+
+app.include_router(api)
