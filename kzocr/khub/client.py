@@ -13,7 +13,6 @@ import urllib.request
 from typing import Optional
 
 from .. import config
-from ..security.egress import validate_url as egress_validate_url
 
 logger = logging.getLogger(__name__)
 
