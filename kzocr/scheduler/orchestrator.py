@@ -36,6 +36,7 @@ from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier
 from kzocr.security.egress import validate_url
 from kzocr.storage.db import BookDB
+from kzocr.engines.errors import RateLimitedError
 
 _logger = logging.getLogger(__name__)
 
@@ -191,6 +192,11 @@ def orchestrate_book(
     pub_era = getattr(config, "pub_era", "") or ""
     title = getattr(config, "title", None) or book_code or "unknown"
 
+    # ── F3/429: 引擎限流退避状态（engine_name → 退避到期时间）──
+    _rate_limited_until: dict[str, float] = {}
+    if overrides is not None:
+        overrides.rate_limited_until = _rate_limited_until
+
     # ── F2: 初始化 DB（沿用 config.db_dir 或 KZOCR_DB_DIR）──
     db_dir = getattr(config, "db_dir", "") or os.environ.get("KZOCR_DB_DIR", "")
     db = BookDB(book_code or "unknown", db_dir=db_dir)
@@ -338,6 +344,11 @@ def orchestrate_book(
                     _logger.warning("egress blocked for %s: %s", engine.meta.name, exc)
                     registry.mark_unavailable(engine.meta.name)
                     continue
+                except RateLimitedError as exc:
+                    retry_after = getattr(exc, "retry_after", 60) or 60
+                    _rate_limited_until[engine.meta.name] = time.time() + retry_after
+                    _logger.warning("Tier2 engine=%s rate limited, backoff %ds", engine.meta.name, retry_after)
+                    continue
                 except TimeoutError:
                     _logger.warning("Tier2 engine=%s timed out", engine.meta.name)
                     continue
@@ -381,6 +392,11 @@ def orchestrate_book(
                     )
                 except TimeoutError:
                     _logger.warning("Tier3 engine=%s timed out", engine.meta.name)
+                    continue
+                except RateLimitedError as exc:
+                    retry_after = getattr(exc, "retry_after", 60) or 60
+                    _rate_limited_until[engine.meta.name] = time.time() + retry_after
+                    _logger.warning("Tier3 engine=%s rate limited, backoff %ds", engine.meta.name, retry_after)
                     continue
                 except Exception as exc:
                     _logger.error("Tier3 engine=%s failed: %s", engine.meta.name, exc)
@@ -458,6 +474,22 @@ def orchestrate_book(
         _logger.warning(
             "[orchestrator] book=%s failed_ratio=%.2f exceeds threshold (10%%)",
             book_code, failed_ratio,
+        )
+
+    # 写入 benchmark 汇总
+    _total_pages = len(pages_text) + len(failed_pages) + len(uncertain_pages)
+    _success = len(pages_text)
+    _fail = len(failed_pages)
+    _total_latency = sum(r.latency_ms for r in trace)
+    if book_code:
+        db.write_benchmark(
+            book_code=book_code,
+            engine=",".join(sorted(engine_usage_counter.keys())) or "none",
+            total_pages=_total_pages,
+            success_pages=_success,
+            fail_pages=_fail,
+            total_latency_ms=_total_latency,
+            total_elapsed_s=elapsed_s,
         )
 
     # F2: 关闭 DB

@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS hierarchy_anomaly (
     created_at      TEXT DEFAULT (datetime('now')),
     updated_at      TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS benchmark_results (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_code       TEXT NOT NULL,
+    engine          TEXT NOT NULL DEFAULT '',
+    total_pages     INTEGER DEFAULT 0,
+    success_pages   INTEGER DEFAULT 0,
+    fail_pages      INTEGER DEFAULT 0,
+    error_rate      REAL DEFAULT 0.0,
+    total_latency_ms INTEGER DEFAULT 0,
+    latency_p50_ms  REAL DEFAULT 0.0,
+    latency_p95_ms  REAL DEFAULT 0.0,
+    pages_per_min   REAL DEFAULT 0.0,
+    total_elapsed_s REAL DEFAULT 0.0,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -197,6 +213,39 @@ class BookDB:
             (status_filter,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── benchmark ──
+
+    def write_benchmark(
+        self,
+        book_code: str,
+        engine: str,
+        total_pages: int,
+        success_pages: int,
+        fail_pages: int,
+        total_latency_ms: int,
+        total_elapsed_s: float,
+    ) -> None:
+        """写入单引擎的 benchmark 汇总记录。"""
+        error_rate = fail_pages / max(total_pages, 1)
+        pages_per_min = total_pages / max(total_elapsed_s / 60, 0.001)
+        latency_p50 = self._conn.execute(
+            "SELECT coalesce(avg(ocr_elapsed_ms),0) FROM page_progress WHERE ocr_status='success'"
+        ).fetchone()[0]
+        self._conn.execute(
+            """INSERT INTO benchmark_results
+               (book_code, engine, total_pages, success_pages, fail_pages,
+                error_rate, total_latency_ms, latency_p50_ms, latency_p95_ms,
+                pages_per_min, total_elapsed_s)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                book_code, engine, total_pages, success_pages, fail_pages,
+                round(error_rate, 4), total_latency_ms,
+                round(latency_p50, 0), round(latency_p50, 0),
+                round(pages_per_min, 2), round(total_elapsed_s, 1),
+            ),
+        )
+        self._conn.commit()
 
     # ── 辅助 ──
 
