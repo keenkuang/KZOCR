@@ -2,31 +2,33 @@
 {% block breadcrumb %}运营中心 / 引擎配置{% endblock %}
 {% block title %}引擎配置{% endblock %}
 {% block content %}
+<style>
+.light { display:inline-block; width:16px; height:16px; border-radius:50%; vertical-align:middle; }
+.light-green { background:#22c55e; box-shadow:0 0 4px #22c55e; }
+.light-yellow { background:#eab308; box-shadow:0 0 4px #eab308; }
+.light-red { background:#ef4444; box-shadow:0 0 4px #ef4444; }
+.light-gray { background:#9ca3af; }
+.light-blink { animation: blink 0.6s infinite; }
+@keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.2; } }
+</style>
 <script>
 var engineNames = [{% for c in configs %}'{{ c.name }}'{% if not loop.last %},{% endif %}{% endfor %}];
 
 function testEngine(name) {
-    var btn = document.getElementById('test-' + name);
     var cell = document.getElementById('status-' + name);
-    if (btn) btn.disabled = true;
-    cell.innerHTML = '<span class="text-yellow-500">⏳</span>';
+    cell.innerHTML = '<span class="light light-gray light-blink"></span>';
     fetch('/api/engines/' + encodeURIComponent(name) + '/test')
         .then(r => r.json())
         .then(data => {
-            if (data.status === 'ok') {
-                cell.innerHTML = '<span class="text-green-600">✅ 正常</span>';
-            } else {
-                var msg = data.checks.map(c => c.detail).join('; ');
-                cell.innerHTML = '<span class="text-red-600">❌ ' + msg.substring(0, 40) + '</span>';
-            }
+            cell.innerHTML = data.status === 'ok'
+                ? '<span class="light light-green"></span>'
+                : '<span class="light light-red"></span>';
         })
-        .catch(err => {
-            cell.innerHTML = '<span class="text-red-600">❌ 请求失败</span>';
-        })
-        .finally(() => { if (btn) { btn.disabled = false; btn.textContent = '重测'; } });
+        .catch(function() {
+            cell.innerHTML = '<span class="light light-red"></span>';
+        });
 }
 
-// 页面加载后自动测试所有引擎
 window.addEventListener('DOMContentLoaded', function() {
     engineNames.forEach(function(name) { testEngine(name); });
 });
@@ -45,7 +47,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <table class="w-full text-sm">
         <thead><tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
             <th class="px-4 py-3">名称</th><th class="px-4 py-3">Tier</th><th class="px-4 py-3">网络</th>
-            <th class="px-4 py-3">运行状态</th><th class="px-4 py-3">错误率</th><th class="px-4 py-3">处理页</th>
+            <th class="px-4 py-3">状态</th><th class="px-4 py-3">错误率</th><th class="px-4 py-3">页数</th>
             <th class="px-4 py-3">操作</th>
         </tr></thead>
         <tbody>
@@ -64,16 +66,16 @@ window.addEventListener('DOMContentLoaded', function() {
             <td class="px-4 py-3">Tier {{ c.tier }}</td>
             <td class="px-4 py-3">{{ "🌐" if c.requires_network else "🖥" }}</td>
             <td class="px-4 py-3" id="status-{{ c.name }}">
-                {% if c.status == 'HEALTHY' %}<span class="text-green-600">🟢 正常</span>
-                {% elif c.status == 'DEGRADED' %}<span class="text-yellow-600">🟡 异常</span>
-                {% else %}<span class="text-gray-400">⚪ 未运行</span>{% endif %}
+                {% if c.status == 'HEALTHY' %}<span class="light light-green"></span>
+                {% elif c.status == 'DEGRADED' %}<span class="light light-yellow"></span>
+                {% else %}<span class="light light-gray"></span>{% endif %}
             </td>
             <td class="px-4 py-3 {% if c.error_rate and c.error_rate > 0.1 %}text-red-600{% endif %}">
                 {{ '%.1f'|format(c.error_rate * 100) if c.error_rate else 0 }}%
             </td>
             <td class="px-4 py-3">{{ c.pages_count or 0 }}</td>
             <td class="px-4 py-3">
-                <button id="test-{{ c.name }}" onclick="testEngine('{{ c.name }}')" class="text-blue-600 hover:underline text-xs bg-transparent border-none cursor-pointer">测试</button>
+                <button onclick="testEngine('{{ c.name }}')" class="text-blue-600 hover:underline text-xs bg-transparent border-none cursor-pointer">测试</button>
                 <a href="/engines/config/{{ c.name }}/delete" class="text-red-500 hover:underline text-xs ml-2">删除</a>
             </td>
         </tr>
