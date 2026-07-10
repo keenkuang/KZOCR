@@ -344,6 +344,7 @@ class GlyphVerifier:
         has_rare = False
         has_unknown = False
         has_fail = False
+        has_uncertain = False
         chain: list[str] = []
 
         for detector in self.detectors:
@@ -366,22 +367,31 @@ class GlyphVerifier:
                 has_rare = True
             elif verdict.status == "UNKNOWN":
                 has_unknown = True
+            elif verdict.status == "UNCERTAIN":
+                has_uncertain = True
 
         self.last_detector_chain = chain
 
-        # 聚合逻辑
-        if not has_fail and not has_unknown and not has_rare:
+        # 聚合逻辑（§5.4）
+        if not has_fail and not has_unknown and not has_rare and not has_uncertain:
             return GlyphVerdict(
                 status="PASS",
                 confidence=1.0,
                 details="all_detectors_passed",
                 detector_name="GlyphVerifier",
             )
-        if has_rare and not has_fail and not has_unknown:
+        if has_rare and not has_fail and not has_unknown and not has_uncertain:
             return GlyphVerdict(
                 status="RARE",
                 confidence=0.8,
                 details="rare_terms_detected",
+                detector_name="GlyphVerifier",
+            )
+        if has_uncertain and not has_fail and not has_unknown:
+            return GlyphVerdict(
+                status="UNCERTAIN",
+                confidence=0.5,
+                details=f"has_uncertain={has_uncertain},has_rare={has_rare}",
                 detector_name="GlyphVerifier",
             )
         # FAIL/UNKNOWN 不在此处做最终裁决，由编排循环判定是否降级
