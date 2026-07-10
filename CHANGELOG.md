@@ -5,6 +5,27 @@
 
 ---
 
+## v2026-07-10 — v0.10 性能深度优化
+
+> **1 commit, 5 files changed, 100 insertions, 449 tests passed**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| *(current)* | `verifier.py` | 资源缓存（`_RESOURCE_CACHE` 进程级，重复 I/O → 0.1ms） |
+| *(current)* | `concurrency.py` | 全局 `ThreadPoolExecutor` 单例（复用线程池，避免反复创建） |
+| *(current)* | `tests/benchmarks/test_e2e_book_perf.py` | 全书 100 页 / 10 页端到端 CI 基准 |
+| *(current)* | CI | 性能基准已含全书门禁 |
+
+### 性能预期
+
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| `GlyphVerifier()` 重复构造 | ~5ms（重复 I/O） | ~0.1ms（缓存命中） |
+| 全书 100 页 mock 编排 | 待测量 | <30s CI 门禁 |
+| 并发 executor 开销 | 每次新建线程 | 复用全局池 |
+
+---
+
 ## v2026-07-10 — v0.9 并发编排集成 + Web 管理面板
 
 > **3 commits, 11 files changed, 676 insertions, 447 tests passed**

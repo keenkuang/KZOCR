@@ -13,6 +13,9 @@ from typing import Any, Optional
 
 _logger = logging.getLogger(__name__)
 
+# ── 全局线程池（模块级单例，避免反复创建销毁）──
+_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix="kzocr")
+
 
 @dataclass
 class AdaptiveController:
@@ -75,25 +78,24 @@ def run_engines_concurrent(
     if not engines:
         return None, None
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {}
-        for engine in engines:
-            future = executor.submit(_run_one, engine, page_input, timeout_s)
-            future_map[future] = engine.meta.name
+    future_map = {}
+    for engine in engines:
+        future = _EXECUTOR.submit(_run_one, engine, page_input, timeout_s)
+        future_map[future] = engine.meta.name
 
-        for future in as_completed(future_map):
-            engine_name = future_map[future]
-            try:
-                result = future.result(timeout=timeout_s + 5)
-                if result is not None:
-                    # 取消其余未完成的任务
-                    for f in future_map:
-                        if not f.done():
-                            f.cancel()
-                    return result, engine_name
-            except Exception as exc:
-                _logger.warning("[concurrency] engine=%s failed: %s", engine_name, exc)
-                continue
+    for future in as_completed(future_map):
+        engine_name = future_map[future]
+        try:
+            result = future.result(timeout=timeout_s + 5)
+            if result is not None:
+                # 取消其余未完成的任务
+                for f in future_map:
+                    if not f.done():
+                        f.cancel()
+                return result, engine_name
+        except Exception as exc:
+            _logger.warning("[concurrency] engine=%s failed: %s", engine_name, exc)
+            continue
 
     return None, None
 

@@ -66,15 +66,25 @@ class HerbEntry:
     note: str = ""
 
 
+# ── 资源缓存（进程级，避免重复 I/O）──
+_RESOURCE_CACHE: dict = {}
+
+
 def _load_resource(name: str):
     """从 kzocr/resources 加载 JSON，返回解析后的对象。缺失时返回 None。"""
+    if name in _RESOURCE_CACHE:
+        return _RESOURCE_CACHE[name]
     path = _RES_DIR / name
     if not path.is_file():
+        _RESOURCE_CACHE[name] = None
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _RESOURCE_CACHE[name] = data
+        return data
     except (json.JSONDecodeError, OSError) as exc:
         _logger.warning("[verifier] 资源 %s 加载失败: %s", name, exc)
+        _RESOURCE_CACHE[name] = None
         return None
 
 
