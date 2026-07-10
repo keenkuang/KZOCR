@@ -27,7 +27,10 @@
                 <a href="/" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if request.url.path == '/' %}bg-gray-100 font-medium{% endif %}">
                     <span>📚</span> 书籍列表
                 </a>
-                <div class="text-xs text-gray-400 uppercase px-3 pt-4 pb-1">帮助</div>
+                <a href="/search" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/search' in request.url.path %}bg-gray-100 font-medium{% endif %}">
+                    <span>🔍</span> 搜索
+                </a>
+                <div class="text-xs text-gray-400 uppercase px-3 pt-4 pb-1">工具</div>
                 <a href="https://github.com/keenkuang/KZOCR" target="_blank" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 text-gray-500">
                     <span>📖</span> GitHub
                 </a>

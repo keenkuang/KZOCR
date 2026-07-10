@@ -250,4 +250,106 @@ async def api_recipes(book_code: str):
         db.close()
 
 
+# =============================================================================
+# Web 面板增强路由
+# =============================================================================
+
+
+@app.get("/book/{book_code}/dashboard", response_class=HTMLResponse)
+async def book_dashboard(request: Request, book_code: str):
+    """引擎性能看板。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        progress = db.get_all_progress()
+        bench = db._conn.execute(
+            "SELECT * FROM benchmark_results ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    except Exception:
+        progress = []
+        bench = None
+    finally:
+        db.close()
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "book_code": book_code,
+        "progress": progress,
+        "benchmark": dict(bench) if bench else None,
+    })
+
+
+@app.get("/book/{book_code}/recipe/{recipe_no}", response_class=HTMLResponse)
+async def book_recipe_detail(request: Request, book_code: str, recipe_no: str):
+    """方剂详情页。"""
+    from kzocr.analysis.recipe_parser import parse_recipes
+    from kzocr.analysis.quality import QualityChecker
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        progress = db.get_all_progress()
+        pages_text = [p["verify_details"] or "" for p in progress if p.get("verify_details")]
+        if not pages_text:
+            pages_text = [""] * len(progress)
+        recipes = parse_recipes(pages_text)
+        recipe = next((r for r in recipes if r.recipe_no == recipe_no), None)
+        qr = QualityChecker().check(recipe) if recipe else None
+    except Exception:
+        recipe = None
+        qr = None
+    finally:
+        db.close()
+    return templates.TemplateResponse(request, "recipe_detail.html", {
+        "book_code": book_code,
+        "recipe": recipe,
+        "quality": qr,
+    })
+
+
+@app.get("/search", response_class=HTMLResponse)
+async def search(request: Request, q: str = ""):
+    """全字段搜索。"""
+    results: list[dict] = []
+    if q:
+        dbd = _db_dir()
+        for f in sorted(os.listdir(dbd)):
+            if not f.endswith(".db"):
+                continue
+            code = f[:-3]
+            db = BookDB(code, db_dir=dbd)
+            try:
+                progress = db.get_all_progress()
+                pages_text = [p["verify_details"] or "" for p in progress if p.get("verify_details")]
+                if not pages_text:
+                    continue
+                from kzocr.analysis.recipe_parser import parse_recipes
+                for r in parse_recipes(pages_text):
+                    if q in r.title or any(q in h.herb_name for h in r.herbs) or any(q in v for v in r.fields.values()):
+                        results.append({"book_code": code, "recipe_no": r.recipe_no, "title": r.title})
+            except Exception:
+                pass
+            finally:
+                db.close()
+    return templates.TemplateResponse(request, "search.html", {
+        "query": q,
+        "results": results,
+    })
+
+
+@app.get("/workspace/{book_code}", response_class=HTMLResponse)
+async def workspace(request: Request, book_code: str, resolved: str = "no"):
+    """外包校对工作台。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        status_filter = "pending" if resolved == "no" else None
+        anomalies = db.get_anomalies(status_filter=status_filter) if status_filter else db.get_all_progress()
+    except Exception:
+        anomalies = []
+    finally:
+        db.close()
+    return templates.TemplateResponse(request, "workspace.html", {
+        "book_code": book_code,
+        "anomalies": anomalies,
+    })
+
+
 app.include_router(api)

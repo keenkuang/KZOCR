@@ -3,10 +3,13 @@
 读取 Book → Page → Line（优先 humanFinal，否则 final/consensus），并附三大永久范式库
 沉淀（统一 Pattern 表），生成 Markdown。表结构对齐 `adapter/to_zai_prisma.py` 的写入端。
 """
+
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
-from typing import Optional
+from typing import Any, Optional
 
 from kzocr.config import load_config
 
@@ -64,3 +67,59 @@ def export_book_markdown(book_code: str, db_path: Optional[str] = None) -> str:
         return "\n".join(lines_out)
     finally:
         conn.close()
+
+
+def export_json(book_code: str, db_path: Optional[str] = None) -> str:
+    """导出结构化 JSON，含 recipes/herbs/modifications/quality_issues。
+
+    从 BookDB（`$KZOCR_DB_DIR/{book_code}.db`）读取逐页进度和配方解析结果。
+    """
+    db_path = db_path or ""
+    from kzocr.analysis.recipe_parser import parse_recipes
+    from kzocr.analysis.quality import QualityChecker
+    from kzocr.storage.db import BookDB
+
+    dbd = db_path or os.environ.get("KZOCR_DB_DIR", "db")
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        progress = db.get_all_progress()
+        pages_text = [p["verify_details"] or "" for p in progress if p.get("verify_details")]
+        if not pages_text:
+            pages_text = [""] * len(progress)
+        recipes = parse_recipes(pages_text)
+        checker = QualityChecker()
+        export_data: dict[str, Any] = {
+            "book_code": book_code,
+            "total_pages": len(progress),
+            "success_pages": sum(1 for p in progress if p["ocr_status"] == "success"),
+            "fail_pages": sum(1 for p in progress if p["ocr_status"] == "failed"),
+            "recipes": [],
+        }
+        for r in recipes:
+            qr = checker.check(r)
+            export_data["recipes"].append({
+                "recipe_no": r.recipe_no,
+                "title": r.title,
+                "start_page": r.start_page,
+                "fields": r.fields,
+                "herbs": [
+                    {"name": h.herb_name, "dosage": h.dosage, "unit": h.unit,
+                     "preparation": h.preparation, "dosage_group": h.dosage_group}
+                    for h in r.herbs
+                ],
+                "modifications": [
+                    {"condition": m.condition, "action": m.action, "content": m.content}
+                    for m in r.modifications
+                ],
+                "quality": {
+                    "status": qr.status,
+                    "confidence": qr.confidence,
+                    "issues": [
+                        {"field": i.field, "type": i.issue_type, "severity": i.severity, "detail": i.detail}
+                        for i in qr.issues
+                    ],
+                },
+            })
+        return json.dumps(export_data, ensure_ascii=False, indent=2)
+    finally:
+        db.close()

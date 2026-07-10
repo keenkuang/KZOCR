@@ -56,13 +56,20 @@ def cmd_export(args: argparse.Namespace) -> int:
     if args.db:
         cfg.zai_db = args.db
     else:
-        # 与 pipeline 默认库一致，避免"写入 A、读出 B 报未找到书籍"
         cfg.zai_db = "kzocr.db"
-    md = export_book_markdown(args.book_code, db_path=cfg.zai_db)
-    out = _safe_out_path(args.out, args.book_code)
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(md)
-    log.info("已导出：%s (%d 字符)", out, len(md))
+    if args.format == "json":
+        from kzocr.export_zai import export_json
+        data = export_json(args.book_code, db_path=cfg.zai_db)
+        out = _safe_out_path(args.out or f"{args.book_code}.json", args.book_code)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(data)
+        log.info("已导出 JSON：%s", out)
+    else:
+        md = export_book_markdown(args.book_code, db_path=cfg.zai_db)
+        out = _safe_out_path(args.out, args.book_code)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(md)
+        log.info("已导出 Markdown：%s (%d 字符)", out, len(md))
     print(out)
     return 0
 
@@ -134,6 +141,39 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_batch(args: argparse.Namespace) -> int:
+    """批量处理目录内的所有 PDF。"""
+    from pathlib import Path
+    pdf_dir = Path(args.pdf_dir)
+    if not pdf_dir.is_dir():
+        log.error("目录不存在：%s", pdf_dir)
+        return 1
+    pdfs = sorted(pdf_dir.glob("*.pdf"))
+    if not pdfs:
+        log.warning("目录中无 PDF 文件：%s", pdf_dir)
+        return 0
+    log.info("批量处理 %d 个 PDF", len(pdfs))
+    success = 0
+    for i, pdf in enumerate(pdfs):
+        book_code = pdf.stem
+        log.info("[%d/%d] 处理：%s (%s)", i + 1, len(pdfs), book_code, pdf.name)
+        try:
+            from kzocr.engine.run import run_engine
+            cfg_override = load_config()
+            if args.db:
+                cfg_override.zai_db = args.db
+            result = run_engine(str(pdf), book_code=book_code, config=cfg_override)
+            if result and len(result.pages) > 0:
+                success += 1
+                log.info("  ✅ 完成：%d 页", len(result.pages))
+            else:
+                log.warning("  ⚠ 无输出页")
+        except Exception as exc:
+            log.error("  ❌ 失败：%s", exc)
+    log.info("批量处理完成：%d/%d 成功", success, len(pdfs))
+    return 0 if success == len(pdfs) else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="kzocr", description="KZOCR 编排：kimi 引擎 + zai 校对台 + kHUB")
     p.add_argument("--version", action="version", version=f"kzocr {__version__}")
@@ -145,10 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--db", help="zai 的 SQLite 路径（覆盖配置）")
     pp.set_defaults(func=cmd_pipeline)
 
-    pe = sub.add_parser("export", help="从 zai 库导出最终校正 Markdown")
+    pe = sub.add_parser("export", help="从 zai 库导出最终校正文档")
     pe.add_argument("book_code")
     pe.add_argument("--db")
     pe.add_argument("--out")
+    pe.add_argument("--format", choices=["md", "json"], default="md", help="导出格式（默认 md）")
     pe.set_defaults(func=cmd_export)
 
     ppush = sub.add_parser("push", help="把文档推送进 kHUB")
@@ -164,6 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--skip-push", action="store_true")
     ps.add_argument("--verify", action="store_true")
     ps.set_defaults(func=cmd_smoke)
+
+    pb = sub.add_parser("batch", help="批量处理目录内所有 PDF")
+    pb.add_argument("pdf_dir", help="PDF 目录路径")
+    pb.add_argument("--db")
+    pb.set_defaults(func=cmd_batch)
 
     pw = sub.add_parser("web", help="启动 Web 管理面板")
     pw.add_argument("--host", default="127.0.0.1")

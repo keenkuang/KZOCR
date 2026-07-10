@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block breadcrumb %}核心业务 / {{ book_code }} / {{ recipe.recipe_no if recipe else '未找到' }}{% endblock %}
+{% block title %}方剂详情 · {{ recipe.recipe_no if recipe else '未找到' }}{% endblock %}
+{% block content %}
+<div class="mb-4"><a href="/book/{{ book_code }}/recipes" class="text-sm text-blue-600 hover:underline">← 返回方剂列表</a></div>
+{% if recipe %}
+<div class="grid grid-cols-1 gap-4">
+    <div class="bg-white rounded-lg border p-4">
+        <h3 class="text-lg font-bold">{{ recipe.recipe_no }} {{ recipe.title }}</h3>
+        <p class="text-xs text-gray-400 mt-1">起始页：{{ recipe.start_page }}</p>
+    </div>
+    {% for fid, fval in recipe.fields.items() %}
+    <div class="bg-white rounded-lg border p-4">
+        <h4 class="text-sm font-medium text-gray-500 mb-1">{{ fid }}</h4>
+        <p class="text-sm">{{ fval }}</p>
+    </div>
+    {% endfor %}
+    {% if recipe.herbs %}
+    <div class="bg-white rounded-lg border p-4">
+        <h4 class="text-sm font-medium mb-2">药材（{{ recipe.herbs|length }} 味）</h4>
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase"><th class="px-3 py-2">药名</th><th class="px-3 py-2">剂量</th><th class="px-3 py-2">炮制</th><th class="px-3 py-2">组号</th></tr></thead>
+            <tbody>{% for h in recipe.herbs %}<tr class="border-t"><td class="px-3 py-2">{{ h.herb_name }}</td><td class="px-3 py-2">{{ h.dosage }}{{ h.unit }}</td><td class="px-3 py-2">{{ h.preparation }}</td><td class="px-3 py-2">{{ h.dosage_group if h.dosage_group > 0 else '' }}</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% if recipe.modifications %}
+    <div class="bg-white rounded-lg border p-4">
+        <h4 class="text-sm font-medium mb-2">加减（{{ recipe.modifications|length }} 条）</h4>
+        {% for m in recipe.modifications %}<div class="mb-2 text-sm"><span class="badge {% if m.action == 'add' %}badge-green{% elif m.action == 'remove' %}badge-red{% else %}badge-yellow{% endif %}">{{ m.action }}</span> {% if m.condition %}<em>{{ m.condition }}</em> {% endif %}{{ m.content }}</div>{% endfor %}
+    </div>
+    {% endif %}
+    {% if quality %}
+    <div class="bg-white rounded-lg border p-4">
+        <h4 class="text-sm font-medium mb-2">质检状态：{% if quality.status == 'verified' %}<span class="badge-green">通过</span>{% else %}<span class="badge-red">需复核</span>{% endif %}</h4>
+        {% if quality.issues %}<ul class="text-sm">{% for i in quality.issues %}<li class="mb-1">{% if i.severity == 'error' %}🔴{% elif i.severity == 'warning' %}🟡{% else %}🔵{% endif %} [{{ i.field }}] {{ i.detail }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<div class="bg-white rounded-lg border p-8 text-center text-gray-400">方剂未找到</div>
+{% endif %}
+{% endblock %}

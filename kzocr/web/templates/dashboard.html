@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block breadcrumb %}核心业务 / {{ book_code }} / 看板{% endblock %}
+{% block title %}引擎看板 · {{ book_code }}{% endblock %}
+{% block content %}
+<div class="mb-4"><a href="/book/{{ book_code }}" class="text-sm text-blue-600 hover:underline">← 返回书籍</a></div>
+{% if benchmark %}
+<div class="grid grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg border p-4"><p class="text-xs text-gray-400">引擎</p><p class="text-lg font-bold">{{ benchmark.engine }}</p></div>
+    <div class="bg-white rounded-lg border p-4"><p class="text-xs text-gray-400">吞吐</p><p class="text-lg font-bold">{{ '%.1f'|format(benchmark.pages_per_min) }}页/分</p></div>
+    <div class="bg-white rounded-lg border p-4"><p class="text-xs text-gray-400">错误率</p><p class="text-lg font-bold {% if benchmark.error_rate > 0.1 %}text-red-600{% endif %}">{{ '%.1f'|format(benchmark.error_rate * 100) }}%</p></div>
+    <div class="bg-white rounded-lg border p-4"><p class="text-xs text-gray-400">总耗时</p><p class="text-lg font-bold">{{ '%.1f'|format(benchmark.total_elapsed_s) }}s</p></div>
+</div>
+{% endif %}
+<div class="bg-white rounded-lg border p-4">
+    <h3 class="text-sm font-medium mb-3">逐页延迟分布（{{ progress|length }} 页）</h3>
+    <div style="height:200px;display:flex;align-items:end;gap:2px;">
+    {% for p in progress[:100] %}
+        {% set h = [1, (p.ocr_elapsed_ms / 100)|round|int]|max %}
+        {% set h = [h, 180]|min %}
+        <div style="width:8px;height:{{ h }}px;background:{% if p.ocr_status == 'success' %}#22c55e{% else %}#ef4444{% endif %};border-radius:2px 2px 0 0;" title="页{{ p.page_num }}: {{ p.ocr_elapsed_ms }}ms"></div>
+    {% endfor %}
+    </div>
+    <p class="text-xs text-gray-400 mt-2">绿色=成功, 红色=失败（最多显示100页）</p>
+</div>
+{% endblock %}

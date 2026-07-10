@@ -248,10 +248,11 @@ class TestCmdExport:
         mock_export_md.return_value = "# 校正后文档\n\n这是校正后的正文。"
         mock_export_md.return_value = "# 校正后文档"
 
-        args = MagicMock(spec=["book_code", "out", "db"])
+        args = MagicMock(spec=["book_code", "out", "db", "format"])
         args.book_code = "TCM-001"
         args.out = None
         args.db = None
+        args.format = "md"
 
         cwd = Path.cwd()
         os.chdir(str(tmp_path))
@@ -277,11 +278,12 @@ class TestCmdExport:
 
         mock_export_md.return_value = "# 自定义库导出"
 
-        args = MagicMock(spec=["book_code", "out", "db"])
+        args = MagicMock(spec=["book_code", "out", "db", "format"])
         args.book_code = "TCM-002"
         args.out = "custom.md"
         args.db = "/custom/zai.db"
-
+        args.format = "md"
+    
         cwd = Path.cwd()
         os.chdir(str(tmp_path))
         try:
