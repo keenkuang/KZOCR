@@ -25,6 +25,7 @@ def real_cfg():
     cfg.require_real = False
     cfg.kimi_engine_dir = "/fake/engine"
     cfg.khub_base_url = "http://127.0.0.1:8000"
+    cfg.use_v07 = False  # 显式关闭 v07 编排，保持旧路径
     return cfg
 
 

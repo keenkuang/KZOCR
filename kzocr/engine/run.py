@@ -33,6 +33,12 @@ from kzocr.engines.errors import (
     retry_with_policy,
 )
 from kzocr.engines.leakage import CharCountBaseline, apply_leakage_defense
+from kzocr.adapters.engine_runners import MockAdapter, BookPipelineAdapter
+from kzocr.scheduler.registry import EngineRegistry, probe_engines
+from kzocr.scheduler.scheduler import EngineOverrides
+from kzocr.scheduler.orchestrator import orchestrate_book
+from kzocr.engine.toc import enrich_book_result
+from kzocr.engine.types import AdapterMeta, EngineConfig as EC
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +46,54 @@ logger = logging.getLogger(__name__)
 VLM_ENGINE_LABEL = "PaddleOCR-VL-1.6"
 
 
+def _init_v07_registry(cfg) -> EngineRegistry:
+    """E5: 根据配置构建 v0.7 EngineRegistry，注册可用引擎适配器。"""
+    reg = EngineRegistry()
+    if cfg.use_mock:
+        reg.register_adapter(
+            AdapterMeta(name="mock", label="Mock", tier=0, kind="book"),
+            EC(),
+            adapter=MockAdapter(),
+        )
+        probe_engines(reg)
+        return reg
+    # Tier 1: book-level 引擎
+    if cfg.kimi_engine_dir:
+        reg.register_adapter(
+            AdapterMeta(name="kimi", label="Kimi Pipeline", tier=1, kind="book", batch_capable=True),
+            EC(),
+            adapter=BookPipelineAdapter("kimi"),
+        )
+    # Tier 2: 云端 VLM（SenseNova）
+    if cfg.sensenova_api_key:
+        from kzocr.adapters.engine_runners import VlmPageAdapter
+        reg.register_adapter(
+            AdapterMeta(name="sensenova", label="SenseNova", tier=2, requires_network=True),
+            EC(api_key_env="KZOCR_SENSENOVA_API_KEY", base_url=cfg.sensenova_base_url),
+            adapter=VlmPageAdapter("sensenova"),
+        )
+    probe_engines(reg)
+    return reg
+
+
 def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> BookResult:
     cfg = config if config is not None else app_config.config
+    if getattr(cfg, "use_v07", False):
+        logger.info("[engine] use_v07=True，使用 v0.7 编排调度系统")
+        registry = _init_v07_registry(cfg)
+        overrides = EngineOverrides()
+        book = orchestrate_book(
+            pdf_path=pdf_path,
+            book_code=book_code,
+            config=cfg,
+            registry=registry,
+            overrides=overrides,
+        )
+        try:
+            enrich_book_result(book)
+        except Exception:
+            logger.warning("[engine] TOC enrich 失败，跳过", exc_info=True)
+        return book
     if cfg.use_mock:
         logger.info("[engine] use_mock=True，使用桩数据")
         return build_mock_book(book_code=book_code or "TCM-MOCK-001")

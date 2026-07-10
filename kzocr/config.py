@@ -58,6 +58,8 @@ class Config:
     deepseek_rpm: int = 20
     # 是否允许把页面图像发往第三方云端 vision（数据出境许可，默认关闭）
     allow_cloud_vision: bool = False
+    # v0.7 是否启用新的编排调度系统（默认关闭，向后兼容）
+    use_v07: bool = False
     # v0.5 AMEND D0: VLM 缓存及中间产物输出目录
     kzocr_output_dir: str = ""  # will be set by from_env() / load_config()
     # v0.5 AMEND D0: 缓存 TTL（秒），默认 24h
