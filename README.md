@@ -293,6 +293,22 @@ kzocr smoke --skip-push
 | `tests/test_resources.py` | — | B5 种子数据 |
 | `tests/test_cloudllm_env.py` | — | LLM 环境变量映射 |
 
+### CI
+
+CI 工作流定义在 `.github/workflows/test.yml`，由两个相互独立的 job 组成：
+
+- `lint`：Python 3.12 上跑 `ruff check kzocr/ tests/`
+- `test`：在 Python 3.10 / 3.11 / 3.12 矩阵上跑 `python -m pytest tests/ -v`（`pip install PyMuPDF numpy pytest` 最小依赖）
+
+#### 已知 CI 修复（2026-07-10）
+
+CI 曾持续失败，根因为两层问题叠加，均已修复：
+
+1. **workflow YAML 非法** —— PR #5 修复。`test.yml` 中 `run: echo "Tests: ✅"` 在严格 YAML 解析下非法（值内 `Tests: ` 含冒号空格），GitHub 无法解析 workflow、job 为空。改为 `run: 'echo "Tests: passed"'`（单引号包裹含冒号命令）。
+2. **测试缺依赖崩溃** —— PR #6 修复。`kzocr/modelscope_pool.py` 顶层硬写 `from openai import OpenAI`，而 `openai` 属「运行环境另行安装」的 LLM 依赖，CI 最小环境未安装，致使 `tests/test_modelscope_pool.py` 在收集阶段 `ImportError: No module named 'openai'`、pytest 收集中断。改为可选导入（`try/except ImportError` → `OpenAI = None`），缺依赖时对应 provider 在初始化时自动禁用。
+
+修复后 CI 全绿：`lint` + `test`（3.10 / 3.11 / 3.12）均 `success`。
+
 ---
 
 ## 项目状态
