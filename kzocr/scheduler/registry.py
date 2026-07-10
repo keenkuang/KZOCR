@@ -10,9 +10,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Literal, Optional
 
-from kzocr.engine.types import AdapterMeta, EngineStatus, GlyphStatus
+from kzocr.engine.types import (
+    AdapterMeta,
+    EngineConfig,
+    EngineRunner,
+    EngineStatus,
+    GlyphStatus,
+)
+from kzocr.engines.errors import SchedulerError
 
 # ── 冷启动与贝叶斯评分常量（v0.7 §3.5）──
 GLYPH_PASS_RATE_DEFAULT = 0.5  # 中等置信度假设，非 0
@@ -36,16 +43,34 @@ class EngineStats:
     last_error: Optional[str] = None
     last_seen: float = 0.0  # time.time() 挂钟时间，支持跨进程持久化
 
+    def __repr__(self) -> str:
+        """掩码 last_error（可能含凭证/路径），满足 §3.3 敏感字段掩码要求。"""
+        return (
+            f"EngineStats(total_calls={self.total_calls}, total_pages={self.total_pages}, "
+            f"glyph_pass={self.glyph_pass_count}, glyph_fail={self.glyph_fail_count}, "
+            f"glyph_unknown={self.glyph_unknown_count}, glyph_rare={self.glyph_rare_count}, "
+            f"glyph_uncertain={self.glyph_uncertain_count}, "
+            f"last_error={'<redacted>' if self.last_error else None})"
+        )
+
 
 @dataclass
 class EngineRegistration:
     """引擎注册项。"""
 
     meta: AdapterMeta  # 见 types.py 扩展后的 AdapterMeta
-    config: dict  # 仅存环境变量名引用，无明文凭证
+    config: EngineConfig  # 仅存环境变量名引用，无明文凭证（§3.3）
     status: EngineStatus = "HEALTHY"
     stats: EngineStats = field(default_factory=EngineStats)
-    adapter: Optional[Callable] = None  # EngineRunner 实例引用（v0.7 §2.2）
+    adapter: Optional[EngineRunner] = None  # EngineRunner 实例引用（v0.7 §2.2）
+
+    def __repr__(self) -> str:
+        """掩码 config 与 adapter 引用（避免泄露凭证名/对象），满足 §3.3 要求。"""
+        return (
+            f"EngineRegistration(meta={self.meta.name!r}, tier={self.meta.tier}, "
+            f"status={self.status}, config=<EngineConfig>, "
+            f"adapter={'<set>' if self.adapter else None})"
+        )
 
     @property
     def glyph_pass_rate(self) -> float:
@@ -91,8 +116,8 @@ class EngineRegistry:
     def register_adapter(
         self,
         meta: AdapterMeta,
-        config: dict,
-        adapter: Optional[Callable] = None,
+        config: EngineConfig,
+        adapter: Optional[EngineRunner] = None,
         status: EngineStatus = "HEALTHY",
     ) -> EngineRegistration:
         """便捷注册：由 AdapterMeta + config 构造并注册。
@@ -129,7 +154,7 @@ class EngineRegistry:
         """
         reg = self._regs.get(name)
         if reg is None:
-            raise KeyError(f"未注册的引擎: {name}")
+            raise SchedulerError(f"未注册的引擎: {name}")
         s = reg.stats
         s.total_calls += 1
         s.total_pages += pages
@@ -165,7 +190,7 @@ def _bayesian_score(reg: EngineRegistration) -> float:
 def select_candidates(
     registry: EngineRegistry,
     tier: int,
-    prefer: Optional[str] = None,
+    prefer: Optional[Literal["speed", "accuracy"]] = None,
 ) -> list[EngineRegistration]:
     """按 tier 过滤候选并按评分排序（v0.7 §4.3 / §4.5 的聚焦版）。
 

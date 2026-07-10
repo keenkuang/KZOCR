@@ -25,6 +25,10 @@ class OcrError(Exception):
     """KZOCR 所有的 OCR 相关异常基类。"""
 
 
+class SchedulerError(OcrError):
+    """v0.7 调度层异常：未注册引擎、调度策略失败等（设计 §7）。"""
+
+
 class ApiError(OcrError):
     """API 调用失败（HTTP 错误/超时）。"""
 
