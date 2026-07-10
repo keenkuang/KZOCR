@@ -3,11 +3,12 @@
 {% block title %}引擎配置{% endblock %}
 {% block content %}
 <script>
+var engineNames = [{% for c in configs %}'{{ c.name }}'{% if not loop.last %},{% endif %}{% endfor %}];
+
 function testEngine(name) {
     var btn = document.getElementById('test-' + name);
     var cell = document.getElementById('status-' + name);
-    btn.disabled = true;
-    btn.textContent = '测试中...';
+    if (btn) btn.disabled = true;
     cell.innerHTML = '<span class="text-yellow-500">⏳</span>';
     fetch('/api/engines/' + encodeURIComponent(name) + '/test')
         .then(r => r.json())
@@ -22,8 +23,13 @@ function testEngine(name) {
         .catch(err => {
             cell.innerHTML = '<span class="text-red-600">❌ 请求失败</span>';
         })
-        .finally(() => { btn.disabled = false; btn.textContent = '测试'; });
+        .finally(() => { if (btn) { btn.disabled = false; btn.textContent = '重测'; } });
 }
+
+// 页面加载后自动测试所有引擎
+window.addEventListener('DOMContentLoaded', function() {
+    engineNames.forEach(function(name) { testEngine(name); });
+});
 </script>
 
 <div class="mb-4 flex gap-2">
