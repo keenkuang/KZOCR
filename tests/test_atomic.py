@@ -1,7 +1,6 @@
 """atomic.py 测试 — C2 原子写入 + 断点续传。"""
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest

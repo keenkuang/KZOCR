@@ -11,7 +11,6 @@ import logging
 from typing import Optional
 
 from kzocr.engine.types import (
-    AdapterMeta,
     AdapterPageResult,
     EngineResult,
     LineResult,

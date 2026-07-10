@@ -1,7 +1,6 @@
 """D4: 层级异常检测测试。"""
 from __future__ import annotations
 
-import pytest
 
 from kzocr.engines.hierarchy import (
     HierarchyAnomaly,

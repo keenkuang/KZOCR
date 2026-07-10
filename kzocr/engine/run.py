@@ -503,29 +503,29 @@ def _merge_cross_page_breaks(pages_text: list[str]) -> list[str]:
         cont_lines = []
         remaining_lines = []
         nxt_in_cont = True  # 是否仍在续接段落中
-        for l in nxt_lines:
-            stripped = l.strip()
+        for raw_line in nxt_lines:
+            stripped = raw_line.strip()
             if not stripped:
-                remaining_lines.append(l)
+                remaining_lines.append(raw_line)
                 continue
             if nxt_in_cont:
                 # 跳过页装饰行
                 if re.match(r"[【\-]", stripped):
-                    remaining_lines.append(l)
+                    remaining_lines.append(raw_line)
                     continue
                 # 遇到独立标题标记 → 续接结束
                 if _PAGE_BREAK_HEADER.match(stripped):
                     nxt_in_cont = False
-                    remaining_lines.append(l)
+                    remaining_lines.append(raw_line)
                     continue
                 # 遇到字段标识 → 续接结束（除非行首以"翘"类续接字开头）
                 if re.match(r"^来源|^组成|^用法|^功用|^方解|^主治|^加减|^疗效|^附记", stripped):
                     nxt_in_cont = False
-                    remaining_lines.append(l)
+                    remaining_lines.append(raw_line)
                     continue
                 cont_lines.append(stripped)
             else:
-                remaining_lines.append(l)
+                remaining_lines.append(raw_line)
 
         if not cont_lines:
             continue
@@ -617,7 +617,7 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
                     h = next_full.shape[0]
                     next_ctx = next_full[:int(h * 0.15), :, :]
                 processed_text = _process_vlm_page(vlm, img, supports_two_page, next_ctx)
-            except (ApiError, RateLimitedError) as exc:
+            except (ApiError, RateLimitedError):
                 # D2: transient API error → retry with exponential backoff
                 def _retry_fn():
                     retry_img = _crop_to_body(_pdf_page_to_numpy(page))

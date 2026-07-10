@@ -5,9 +5,8 @@ import os
 import json
 from pathlib import Path
 
-import pytest
 
-from kzocr.resources import ResourceStore, load, get
+from kzocr.resources import ResourceStore, get
 
 
 class TestResourceStore:

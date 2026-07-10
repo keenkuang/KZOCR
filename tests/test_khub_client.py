@@ -14,7 +14,6 @@ import pytest
 
 from kzocr.khub.client import (
     KHUBError,
-    _is_private_host,
     _validate_url,
     push_document,
     verify_in_khub,

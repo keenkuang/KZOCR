@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
 from unittest.mock import patch
 
 from kzocr.config import Config, load_config, _safe_int
