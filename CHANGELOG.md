@@ -5,6 +5,23 @@
 
 ---
 
+## v2026-07-10（补）— v0.6.1 CI 修复与文档一致性
+
+### 说明
+修复 GitHub Actions CI 持续失败的根因（两层问题叠加），并同步文档一致性。
+
+| PR | 模块 | 说明 |
+|----|------|------|
+| #5 | CI | `test.yml` 第 35 行 `run: echo "Tests: ✅"` 在严格 YAML 下非法，改为单引号包裹含冒号命令，使 workflow 可被 GitHub 解析并创建 job |
+| #6 | `kzocr/modelscope_pool.py` | `openai` 由顶层硬 `import` 改为可选导入（`try/except ImportError` → `OpenAI = None`），缺依赖时对应 provider 在初始化时自动禁用，消除 CI 最小环境下 `ImportError: No module named 'openai'` |
+| #4 | 文档 | 修正 egress 路径过时记录（概览 §4.5 已于 PR #1 更正，SEC-2 标记已修复） |
+| #3 | 文档 | 修正 CODEBUDDY.md 过时条目（`ProbeResult.keys` 已同步为 `dict[str, bool]`；round 计数 round1→round9） |
+| #7 | 文档 | README 新增 CI 小节，记录上述修复与根因 |
+
+修复后 CI 全绿：`lint` + `test`（Python 3.10 / 3.11 / 3.12）均 `success`，本地 268 测试通过。
+
+---
+
 ## v2026-07-10 — v0.6 测试覆盖与项目基础设施
 
 ### 日期：2026-07-10
