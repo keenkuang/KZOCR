@@ -5,8 +5,8 @@
 ![Test Status](https://img.shields.io/github/actions/workflow/status/keenkuang/KZOCR/test.yml?branch=main)
 ![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.14.0-orange)
-![Tests](https://img.shields.io/badge/tests-468-success)
+![Version](https://img.shields.io/badge/version-0.17.0-orange)
+![Tests](https://img.shields.io/badge/tests-479-success)
 
 ---
 
@@ -18,7 +18,9 @@
 | **字形验证** | 5 检测器链（毒性剂量/跨页泄漏/字符尖峰/形似混淆/术语库） |
 | **TOC 抽取** | 纯文本方案，自动识别目录页并构建 1-5 层章节树 |
 | **方剂解析** | 9 字段分割 + 药材解析（含"各X克"句式）+ 加减解析 |
-| **LLM 质检** | 字段完整性/剂量合理性/药名可疑自动检查 |
+| **质量检测** | 字段完整性/剂量合理性/药名可疑自动检查 |
+| **Web 登记** | OCR 前填入书籍元数据和 1-5 层目录层级 |
+| **批量处理** | `kzocr batch` 扫描目录批量处理 PDF |
 | **SQLite 持久化** | 逐页进度三态机 + benchmark 汇总 + 异常校对工单 |
 | **并发调度** | 多引擎并发执行 + 自适应并发控制 + 429 退避 |
 | **自适应调速** | 滚动窗口混合评分 + backoff 过滤 + AdaptiveController |
@@ -108,11 +110,13 @@ PDF → run_engine()
 |------|------|
 | `kzocr pipeline <pdf>` | 处理单本书 |
 | `kzocr batch <pdf_dir>` | 批量处理目录内所有 PDF |
-| `kzocr export <code>` | 导出 Markdown 或 JSON（`--format json`） |
+| `kzocr export <code>` | 导出 Markdown（默认）或 JSON（`--format json`） |
 | `kzocr smoke` | 端到端冒烟测试 |
 | `kzocr web` | 启动 Web 管理面板 |
 | `kzocr review list <code>` | 查看校对异常 |
 | `kzocr review resolve <id>` | 标记异常决议 |
+| `kzocr quality check <code>` | 运行方剂质检并写入 DB |
+| `kzocr quality list <code>` | 列出质检结果 |
 | `kzocr push <file>` | 推送文档到 kHUB |
 
 ---
@@ -161,7 +165,10 @@ FastAPI 自动生成 Swagger 文档：启动后访问 `http://localhost:8080/doc
 | v0.11 | REST API/Docker | 455 |
 | v0.12 | 仓库清理 | 455 |
 | v0.13 | LLM 质检管道 | 462 |
-| v0.14 | 产品化/可视化/批量 | **468** |
+| v0.14 | 产品化/可视化/批量 | 468 |
+| v0.15 | 文档体系 + 评审修复 | 471 |
+| v0.16 | LLM 质检增强 + API 文档 | 475 |
+| v0.17 | Web 书籍登记 + 目录表单 | **479** |
 
 ---
 

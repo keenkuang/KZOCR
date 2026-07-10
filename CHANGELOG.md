@@ -5,6 +5,33 @@
 
 ---
 
+## v2026-07-10 — v0.18 文档代码一致性修复
+
+> 多角色审计修复：版本同步、功能列表补全、CHANGELOG 补 v0.14/v0.17
+
+| 文件 | 修复 |
+|------|------|
+| `pyproject.toml` | version `0.11.0` → `0.17.0` |
+| `README.md` | 版本徽章 `0.14.0`→`0.17.0`；状态表补 v0.14–v0.17；功能/命令补全 |
+| `CHANGELOG.md` | 补 v0.14（产品化）、v0.17（书籍登记）条目 |
+| `docs/reviews/doc-code-audit.md` | 文档代码一致性审计报告 |
+
+---
+
+## v2026-07-10 — v0.17 Web UI 书籍登记 + 完整目录层级表单
+
+> **6 files changed, 331 insertions, 479 tests**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `5fbb2f4` | `engine/registration.py` | 登记管理（save/load/list + registration_to_toc） |
+| `5fbb2f4` | `web/templates/register.html` | 表单页面（元数据 + 1-5 层动态 TOC 行） |
+| `5fbb2f4` | `web/app.py` | GET/POST /register 路由 |
+| `5fbb2f4` | `engine/toc.py` | enrich_book_result 优先使用预登记 TOC |
+| `5fbb2f4` | `tests/test_web_registration.py` | 4 例 |
+
+---
+
 ## v2026-07-10 — v0.16 LLM 质检增强 + API 文档
 
 > **475 tests**
@@ -17,6 +44,20 @@
 | *(current)* | `web/app.py` | FastAPI 元数据（title/version/contact） |
 | *(current)* | `tests/test_db.py` | 2 例 quality_result 测试 |
 | *(current)* | `tests/test_cli.py` | 2 例 quality CLI 测试 |
+
+---
+
+## v2026-07-10 — v0.14 产品化（JSON导出/Web可视化/批量处理/校对工作台）
+
+> **10 files changed, 418 insertions, 468 tests**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `f1f45af` | `export_zai.py` | `export_json` 结构化导出（recipes/herbs/quality_issues） |
+| `f1f45af` | `cli.py` | `--format json` + `batch` 子命令 |
+| `f1f45af` | `web/app.py` | dashboard/recipe_detail/search/workspace 4 路由 |
+| `f1f45af` | `web/templates/` | 4 个新页面模板 |
+| `f1f45af` | `test_web_enhanced.py` | 6 例 |
 
 ---
 
