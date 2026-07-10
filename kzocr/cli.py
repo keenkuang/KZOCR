@@ -172,6 +172,14 @@ def cmd_quality_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_completion(args: argparse.Namespace) -> int:
+    """输出 shell 自动补全脚本。"""
+    import shtab
+    parser = build_parser()
+    print(shtab.complete(parser, shell=args.shell))
+    return 0
+
+
 def cmd_quality_list(args: argparse.Namespace) -> int:
     """列出质检结果。"""
     from kzocr.storage.db import BookDB
@@ -273,6 +281,11 @@ def build_parser() -> argparse.ArgumentParser:
     ql.add_argument("book_code")
     ql.add_argument("--status", choices=["verified", "corrected"], default=None)
     ql.set_defaults(func=cmd_quality_list)
+
+    # completion 子命令
+    pc = sub.add_parser("completion", help="输出 shell 自动补全脚本")
+    pc.add_argument("shell", choices=["bash", "zsh", "fish"], help="shell 类型")
+    pc.set_defaults(func=cmd_completion)
 
     from kzocr.cli_review import build_review_parser
     build_review_parser(sub)

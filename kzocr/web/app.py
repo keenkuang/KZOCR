@@ -160,6 +160,69 @@ async def book_recipes(request: Request, book_code: str):
 
 
 # =============================================================================
+# 健康检查 + 系统信息
+# =============================================================================
+
+
+@app.get("/health")
+async def health():
+    """系统健康检查。"""
+    dbd = _db_dir()
+    db_ok = os.path.isdir(dbd)
+    try:
+        if db_ok:
+            db = BookDB("_health_check", db_dir=dbd)
+            db.close()
+    except Exception:
+        db_ok = False
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "version": "0.19.0",
+        "db_dir": dbd,
+        "db_accessible": db_ok,
+    }
+
+
+# =============================================================================
+# Web 增强路由
+# =============================================================================
+
+
+@app.get("/registrations", response_class=HTMLResponse)
+async def registrations_list(request: Request):
+    """已登记书籍列表。"""
+    from kzocr.engine.registration import list_registrations
+    regs = list_registrations()
+    return templates.TemplateResponse(request, "registrations.html", {"registrations": regs})
+
+
+@app.get("/register/{book_code}", response_class=HTMLResponse)
+async def register_edit(request: Request, book_code: str):
+    """编辑已有登记。"""
+    from kzocr.engine.registration import load_registration
+    reg = load_registration(book_code) or {}
+    return templates.TemplateResponse(request, "register.html", {"registration": reg, "edit": True})
+
+
+@app.get("/book/{book_code}/quality", response_class=HTMLResponse)
+async def book_quality(request: Request, book_code: str):
+    """质检结果页面。"""
+    from kzocr.storage.db import BookDB
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        results = db.get_quality_results()
+    except Exception:
+        results = []
+    finally:
+        db.close()
+    return templates.TemplateResponse(request, "quality.html", {
+        "book_code": book_code,
+        "results": results,
+    })
+
+
+# =============================================================================
 # REST API（JSON 端点）
 # =============================================================================
 

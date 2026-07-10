@@ -11,7 +11,10 @@ RUN pip install --no-cache-dir "PyMuPDF>=1.23" "numpy>=1.24" "pillow>=10" \
 COPY kzocr/ kzocr/
 
 # 数据目录
-RUN mkdir -p /app/db /app/trace
+RUN mkdir -p /app/db /app/trace && chown -R 1000:1000 /app/db /app/trace
+
+# 非 root 运行
+USER 1000:1000
 
 EXPOSE 8080
 

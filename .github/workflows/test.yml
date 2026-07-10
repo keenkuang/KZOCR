@@ -57,6 +57,16 @@ jobs:
       - name: Run ruff check
         run: ruff check kzocr/ tests/
 
+  security:
+    runs-on: ubuntu-latest
+    name: security
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret scan with truffleHog
+        uses: trufflesecurity/trufflehog@v3
+        with:
+          extra_args: --results=verified,unknown
+
   docker:
     runs-on: ubuntu-latest
     name: docker
