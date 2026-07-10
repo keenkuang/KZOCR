@@ -1,3 +1,0 @@
-{"page": 0, "tier": 1, "engine": "t1", "latency_ms": 0, "glyph_status": "PASS", "error": null, "detector_chain": []}
-{"page": 1, "tier": 1, "engine": "t1", "latency_ms": 0, "glyph_status": "UNCERTAIN", "error": null, "detector_chain": ["CharCountSpikeDetector"]}
-{"page": 2, "tier": 1, "engine": "t1", "latency_ms": 0, "glyph_status": "PASS", "error": null, "detector_chain": []}

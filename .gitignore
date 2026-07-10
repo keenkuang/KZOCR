@@ -16,3 +16,4 @@ console/
 
 # 运行时数据库产物
 *.db
+trace/
