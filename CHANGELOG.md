@@ -5,6 +5,19 @@
 
 ---
 
+## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
+
+> **483 tests**
+
+| Commits | 模块 | 说明 |
+|---------|------|------|
+| `b8793a4` + `9f80e92` + `6a711a2` | Web | `/registrations` 已登记列表、`/book/{code}/quality` 质检页面、`/health` 端点 |
+| `b8793a4` | 安全 | Docker `USER 1000:1000`、`.dockerignore` 补 `*.key` |
+| `b8793a4` | CLI | `kzocr completion bash\|zsh\|fish`（shtab） |
+| `9f80e92` | CI | `test.yml` 补 shtab 依赖 |
+
+---
+
 ## v2026-07-10 — v0.18 文档代码一致性修复
 
 > 多角色审计修复：版本同步、功能列表补全、CHANGELOG 补 v0.14/v0.17

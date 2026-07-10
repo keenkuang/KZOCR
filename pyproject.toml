@@ -1,6 +1,6 @@
 [project]
 name = "kzocr"
-version = "0.17.0"
+version = "0.19.0"
 description = "KZOCR — 中医古籍 OCR 编排系统"
 requires-python = ">=3.10"
 dependencies = [

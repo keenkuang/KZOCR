@@ -5,8 +5,8 @@
 ![Test Status](https://img.shields.io/github/actions/workflow/status/keenkuang/KZOCR/test.yml?branch=main)
 ![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.17.0-orange)
-![Tests](https://img.shields.io/badge/tests-479-success)
+![Version](https://img.shields.io/badge/version-0.19.0-orange)
+![Tests](https://img.shields.io/badge/tests-483-success)
 
 ---
 
