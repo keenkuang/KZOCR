@@ -22,14 +22,24 @@ from kzocr.engine.types import (
 
 
 class MockAdapter:
-    """mock 引擎适配器（Tier 0）。仅用于冒烟与 CI 回归。"""
+    """mock 引擎适配器（Tier 1）。仅用于冒烟与 CI 回归。"""
 
     def __init__(self, book_code: str = "TCM-MOCK-001") -> None:
         self.book_code = book_code
 
     def run_book(self, pdf_path: str) -> BookResult:
         from kzocr.engine.mock import mock_book_result
-        return mock_book_result(book_code=self.book_code)
+        result = mock_book_result(book_code=self.book_code)
+        # 确保每个 page 的 text 字段填充（E4 _join_paragraphs 回退机制依赖）
+        for p in result.pages:
+            if not p.text and p.paragraphs:
+                parts = []
+                for para in p.paragraphs:
+                    parts.append("".join(
+                        line.final or line.consensus or "" for line in para.lines
+                    ))
+                p.text = "\n".join(parts)
+        return result
 
     def run_page(self, page: PageInput) -> AdapterPageResult:
         return AdapterPageResult(

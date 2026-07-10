@@ -51,7 +51,7 @@ def _init_v07_registry(cfg) -> EngineRegistry:
     reg = EngineRegistry()
     if cfg.use_mock:
         reg.register_adapter(
-            AdapterMeta(name="mock", label="Mock", tier=0, kind="book"),
+            AdapterMeta(name="mock", label="Mock", tier=1, kind="book", batch_capable=True),
             EC(),
             adapter=MockAdapter(),
         )
