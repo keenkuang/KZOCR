@@ -60,6 +60,13 @@ class EngineStats:
             f"last_error={'<redacted>' if self.last_error else None})"
         )
 
+    def decay(self, half_life_days: float = 7.0) -> float:
+        """时效衰减因子（§4.2）。last_seen 越久衰减越强；未探测过返回 1.0。"""
+        if self.last_seen == 0.0:
+            return 1.0
+        elapsed_days = (time.time() - self.last_seen) / 86400.0
+        return 0.5 ** (elapsed_days / half_life_days)
+
 
 @dataclass
 class EngineRegistration:
