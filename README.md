@@ -1,156 +1,79 @@
-# KZOCR — kimi OCR + zai 校对台 + kHUB 文档推送
+# KZOCR
 
-[![Test Status](https://github.com/keenkuang/KZOCR/actions/workflows/test.yml/badge.svg)](https://github.com/keenkuang/KZOCR/actions/workflows/test.yml)
+**中医古籍 OCR 编排系统** — 从 PDF 到结构化数据的全自动流水线。
+
+![Test Status](https://img.shields.io/github/actions/workflow/status/keenkuang/KZOCR/test.yml?branch=main)
 ![Python Version](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.6.0-orange)
+![Version](https://img.shields.io/badge/version-0.14.0-orange)
+![Tests](https://img.shields.io/badge/tests-468-success)
 
 ---
 
-## 概述
+## 功能一览
 
-KZOCR 是一个**中医古籍 OCR 编排工具**，将 kimi OCR 引擎（BookPipeline）对 PDF 的识别结果写入 zai 人工校对台（SQLite），最终导出经过人工终校的 Markdown 并推送至 kHUB 文档服务，形成**扫描 → OCR → 校对 → 发布**的完整闭环。
-
-项目面向以下场景：
-
-- **中医古籍数字化**：处理大量 TCM 古籍 PDF，生成可校对的结构化数据
-- **人工校对衔接**：与 zai 校对台零改动集成，数据模型对齐 Prisma schema
-- **多引擎调度**：mock 引擎（测试）、VLM 直连（无 GPU 环境）、真实引擎（全管线）三模式切换
-
-### 引擎模式
-
-| 模式 | 环境变量 | 说明 |
-|------|---------|------|
-| **mock** | `KZOCR_USE_MOCK=1` | 桩数据，端到端测试用，不调用任何引擎 |
-| **VLM 直连** | `KZOCR_USE_VLM=1` | 绕过 BookPipeline，用 PaddleOCR-VL-1.6 或 SenseNova 逐页 VLM OCR，适合无 GPU 环境 |
-| **真实引擎** | 默认 | 调用 kimi 的 `BookPipeline`（PaddleOCR + MinerU + RapidOCR + UniRec + 云端 LLM），失败自动降级 |
+| 功能 | 说明 |
+|------|------|
+| **引擎编排** | Tier1 书级 → Tier2 云端 VLM → Tier3 本地 LLM 三级降级 |
+| **字形验证** | 5 检测器链（毒性剂量/跨页泄漏/字符尖峰/形似混淆/术语库） |
+| **TOC 抽取** | 纯文本方案，自动识别目录页并构建 1-5 层章节树 |
+| **方剂解析** | 9 字段分割 + 药材解析（含"各X克"句式）+ 加减解析 |
+| **LLM 质检** | 字段完整性/剂量合理性/药名可疑自动检查 |
+| **SQLite 持久化** | 逐页进度三态机 + benchmark 汇总 + 异常校对工单 |
+| **并发调度** | 多引擎并发执行 + 自适应并发控制 + 429 退避 |
+| **自适应调速** | 滚动窗口混合评分 + backoff 过滤 + AdaptiveController |
+| **Web 面板** | 书籍管理/方剂详情/引擎看板/校对工作台/跨书搜索 |
+| **REST API** | 8 个 JSON 端点，支持第三方系统集成 |
+| **Docker 部署** | 一键 docker compose up |
+| **批量处理** | `kzocr batch` 扫描目录批量处理 PDF |
 
 ---
 
 ## 快速开始
 
+### 安装
+
 ```bash
-# 安装
+# 最小安装（编排 + 方剂解析）
 pip install kzocr
 
-# 端到端冒烟测试（mock 引擎 → 适配器 → 导出 → 推送）
+# 含 Web 面板
+pip install "kzocr[web]"
+```
+
+### 冒烟测试
+
+```bash
 kzocr smoke --skip-push
-
-# 运行 OCR（mock 模式）
-KZOCR_USE_MOCK=1 kzocr pipeline sample.pdf --book-code TCM-001
-
-# 从 zai 库导出校正后 Markdown
-kzocr export TCM-001
-
-# 推送文档至 kHUB
-kzocr push output.md --title "中医古籍"
 ```
 
----
-
-## 配置说明
-
-KZOCR 通过环境变量配置，支持 `load_config()` 读取并构造 `Config` 单例。
-
-### 核心路径
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `KIMI_ENGINE_DIR` | `""` | kimi OCR 引擎目录（含 `tcm_ocr` 包） |
-| `ZAI_DIR` | `/home/keen/tcm_ocr_zai` | zai 校对台项目目录 |
-| `KZOCR_OUTPUT_DIR` | `/tmp/kzocr/output` | VLM 缓存及中间产物输出目录（v0.5 D0） |
-| `KHUB_BASE_URL` | `http://127.0.0.1:8000` | kHUB 服务基址 |
-
-### 引擎模式
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `KZOCR_USE_MOCK` | `0` | 强制使用 mock 引擎 |
-| `KZOCR_USE_VLM` | `0` | 启用 VLM 直连模式 |
-| `KZOCR_REQUIRE_REAL` | `0` | 真实引擎失败时抛错而非降级 |
-
-### VLM 模式
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `KZOCR_VLM_ENGINE` | `auto` | VLM 引擎选择：`auto` / `sensenova` / `paddleocr_vl16` |
-| `KZOCR_VLM_HOST` | `127.0.0.1` | llama-server 地址（PaddleOCR-VL 用） |
-| `KZOCR_VLM_PORT` | `18080` | llama-server 端口 |
-| `SENSENOVA_API_KEY` | `""` | SenseNova 云端 API Key |
-| `SENSENOVA_MODEL` | `sensenova-6.7-flash-lite` | SenseNova 模型名 |
-| `SENSENOVA_BASE_URL` | `https://token.sensenova.cn/v1/chat/completions` | SenseNova 端点 |
-| `SENSENOVA_TIMEOUT` | `180` | SenseNova 超时（秒） |
-| `KZOCR_ALLOW_CLOUD_VISION` | `0` | 允许发图像至云端（需数据出境许可） |
-
-### LLM 校对
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `KZOCR_LLM_ENABLED` | `0` | 启用云端 LLM 校对 |
-| `KZOCR_LLM_API_KEY` | `""` | 云端 LLM API Key |
-| `KZOCR_LLM_BASE_URL` | `""` | 云端 LLM Base URL |
-| `KZOCR_LLM_MODEL` | `qwen-max` | 云端 LLM 模型名 |
-
-> KZOCR 自动将 `KZOCR_LLM_*` 映射为引擎内部 `GLM_*` 环境变量（仅当后者未设置时）。
-
-### 安全与限流
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `KZOCR_MAX_PAGES` | `50` | VLM 模式最大处理页数（资源耗尽 DoS 防护） |
-| `KZOCR_TOTAL_TIMEOUT` | `7200` | VLM 模式 wall-clock 总预算（秒） |
-| `KZOCR_CACHE_TTL` | `86400` | VLM 缓存 TTL（秒，v0.5 D0） |
-| `KZOCR_CLEAR_CACHE` | `""` | 设为 `1` 清除 VLM 缓存后重新识别（v0.5 D3） |
-
----
-
-## 使用示例
-
-### 基本管线
+### 处理一本书
 
 ```bash
-# 运行 OCR 管线（默认引擎），指定书号
-kzocr pipeline book.pdf --book-code TCM-001
-
-# 输出： BOOK_CODE=TCM-001
+kzocr pipeline book.pdf --book-code TCM001
 ```
 
-### 指定数据库
+### 导出结果
 
 ```bash
-# pipeline 默认写入 kzocr.db（工作目录下的隔离库）
-# 可指定自定义 zai 库路径
-kzocr pipeline book.pdf --db /path/to/zai.db
+# Markdown 格式
+kzocr export TCM001
+
+# JSON 结构化格式（含 recipes/herbs/quality）
+kzocr export TCM001 --format json
 ```
 
-### VLM 模式（无 GPU 环境）
+### 启动 Web 面板
 
 ```bash
-# 使用本地 PaddleOCR-VL-1.6（需先启动 llama-server）
-KZOCR_USE_VLM=1 kzocr pipeline book.pdf
-
-# 使用 SenseNova 云端 VLM
-SENSENOVA_API_KEY=sk-xxx KZOCR_USE_VLM=1 KZOCR_VLM_ENGINE=sensenova kzocr pipeline book.pdf
+kzocr web
+# 浏览器访问 http://localhost:8080
 ```
 
-### 全链路冒烟测试
+### Docker 部署
 
 ```bash
-# mock 管道 + 导出验证（不推送 kHUB）
-kzocr smoke --skip-push
-
-# 带 kHUB 推送验证
-kzocr smoke --verify
-```
-
-### 导出与推送
-
-```bash
-# 从 zai 库导出校正后 Markdown
-kzocr export TCM-001 --out output.md
-
-# 推送至 kHUB
-kzocr push output.md --title "中医古籍"
+docker compose up -d
 ```
 
 ---
@@ -158,169 +81,91 @@ kzocr push output.md --title "中医古籍"
 ## 架构
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  CLI (argparse)                                                  │
-│  ~~~~~~~~~~~~~~~~                                                │
-│  kzocr pipeline/export/push/smoke                                │
-│  kzocr.cli:main                                                  │
-└─────────┬────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────┐     ┌─────────────────────────────────────────┐
-│  engine/run.py   │────▶│  run_engine()                          │
-│  ───────────────  │     │  ├─ use_mock  → mock_book_result()    │
-│  run_engine()     │     │  ├─ use_vlm   → _run_vlm()            │
-│  _run_vlm()       │     │  └─ default   → _run_real()           │
-│  _run_real()      │     │    (BookPipeline)                      │
-└─────────────────┘     └──────────────┬──────────────────────────┘
-                                       │
-                                       ▼
-                              ┌────────────────┐
-                              │  BookResult     │
-                              │  ────────────   │
-                              │  .pages         │
-                              │  .final_markdown│
-                              │  .is_mock        │
-                              │  .failed_pages   │
-                              └────────┬───────┘
-                                       │
-                              ┌────────▼────────────┐
-                              │  adapter/            │
-                              │  to_zai_prisma.py    │
-                              │  ────────────────    │
-                              │  push_book_to_zai()  │
-                              │  → SQLite (zai DB)    │
-                              └────────┬────────────┘
-                                       │
-                              ┌────────▼────────────┐
-                              │  export_zai.py       │
-                              │  ────────────────    │
-                              │  export_book_markdown│
-                              │  → Markdown 文件     │
-                              └────────┬────────────┘
-                                       │
-                              ┌────────▼────────────┐
-                              │  khub/client.py      │
-                              │  ────────────────    │
-                              │  push_document()     │
-                              │  → kHUB API          │
-                              └─────────────────────┘
+PDF → run_engine()
+        │
+        ├── EngineRegistry (E1) — 注册可用引擎
+        ├── EngineScheduler (E2) — 九步候选选择
+        ├── GlyphVerifier (E3) — 5 检测器验证
+        ├── OrchestrateBook (E4) — Tier123 编排主循环
+        │     ├── Tier1: 书级引擎（kimi BookPipeline / Mock）
+        │     ├── Tier2: 云端 VLM（SenseNova）
+        │     ├── Tier3: 本地 LLM
+        │     └── HumanGate: 全部失败记录
+        ├── BookDB (F2) — SQLite page_progress + benchmark
+        ├── TOC enrich (F1) — 章节树重建
+        └── QualityChecker — LLM 质检
+                │
+                └── BookResult → pages text / recipes / anomalies / trace
+                                 → kzocr export (md/json)
+                                 → kzocr web  (dashboard / search)
 ```
 
-### 关键模块
+---
 
-| 模块 | 路径 | 职责 |
+## 命令参考
+
+| 命令 | 说明 |
+|------|------|
+| `kzocr pipeline <pdf>` | 处理单本书 |
+| `kzocr batch <pdf_dir>` | 批量处理目录内所有 PDF |
+| `kzocr export <code>` | 导出 Markdown 或 JSON（`--format json`） |
+| `kzocr smoke` | 端到端冒烟测试 |
+| `kzocr web` | 启动 Web 管理面板 |
+| `kzocr review list <code>` | 查看校对异常 |
+| `kzocr review resolve <id>` | 标记异常决议 |
+| `kzocr push <file>` | 推送文档到 kHUB |
+
+---
+
+## 配置
+
+主要环境变量：
+
+| 变量 | 默认 | 说明 |
 |------|------|------|
-| CLI | `kzocr/cli.py` | argparse 入口，调度 pipeline/export/push/smoke 四条子命令 |
-| 配置 | `kzocr/config.py` | `Config` dataclass + 环境变量读取 |
-| 引擎调度 | `kzocr/engine/run.py` | mock/VLM/real 三模式调度，PDF 渲染与版心裁剪 |
-| 数据结构 | `kzocr/engine/types.py` | `BookResult` / `PageResult` / `LineResult` 等归一化 dataclass |
-| 错误处理 | `kzocr/engines/errors.py` | D1 异常分类体系 + `retry_with_policy` 指数退避重试 |
-| 泄漏防御 | `kzocr/engines/leakage.py` | C1 四层跨页文本泄漏检测 |
-| 原子写入 | `kzocr/engines/atomic.py` | C2 原子写入 + 路径穿越防御 |
-| 限流器 | `kzocr/engines/ratelimit.py` | C3 自适应速率限制 + 指数退避 |
-| 层级异常 | `kzocr/engines/hierarchy.py` | D4 字符数尖峰异常检测 |
-| 适配器 | `kzocr/adapter/to_zai_prisma.py` | `BookResult` → zai SQLite 直写，自动建表 |
-| 导出 | `kzocr/export_zai.py` | zai 库 → Markdown 导出 |
-| kHUB 客户端 | `kzocr/khub/client.py` | `POST /documents` 推送 API 调用 |
-| 出站安全 | `kzocr/security/egress.py` | B3 代码级硬编码 egress allowlist + DNS 复检 |
-| 内置资源 | `kzocr/resources/` | B5 种子数据（异体字映射、形似混淆、罕见字白名单、毒性药材） |
+| `KZOCR_DB_DIR` | `./db` | 数据库目录 |
+| `KZOCR_USE_MOCK` | `0` | 启用 mock 引擎 |
+| `KZOCR_SENSENOVA_API_KEY` | — | 云端 VLM 密钥 |
+| `KIMI_ENGINE_DIR` | — | 书级引擎目录 |
+| `KZOCR_ALLOW_CLOUD_VISION` | `0` | 允许发送图像到云端 |
+
+完整配置见 `docs/deploy-v07.md`。
 
 ---
 
-## 功能历史
+## REST API
 
-### v0.3 FREEZE（B1–B8）— 基础架构
+启动 Web 面板后，`/api/` 提供 JSON 端点：
 
-- **B1** — 字形验证体系：`glyph_status` 枚举 + `glyph_verified` 文本列
-- **B2** — `_common.py` 适配器到 LineResult 统一折算
-- **B3** — 出站 egress allowlist 代码级硬编码（无 toml 绕过）
-- **B4** — `is_mock` sink 守卫：mock 数据禁止写入 zai DB
-- **B5** — 内置种子资源：`variant_map` / `confusion_set` / `rare_allowlist` / `toxic_herbs`
-- **B6** — 双重上限守卫：`MAX_PAGES=50` + `TOTAL_TIMEOUT=7200s`
-- **B7** — `crop_img` 瞬态修复：存路径引用，不存像素数据
-- **B8** — 默认 VLM/视觉优先（无 GPU 环境自动选择）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/books` | 书籍列表 |
+| GET | `/api/books/{code}` | 书籍详情 |
+| GET | `/api/books/{code}/pages` | 逐页进度 |
+| GET | `/api/books/{code}/anomalies` | 异常列表（`?status=pending`） |
+| POST | `/api/books/{code}/anomalies/{id}/resolve` | 标记决议 |
+| GET | `/api/books/{code}/recipes` | 方剂列表 |
 
-### v0.4 AMEND（C1–C5）— 健壮性
-
-- **C1** — 四层跨页泄漏防御（`leakage.py`）
-- **C2** — 原子写入 + 路径穿越防御（`atomic.py`）
-- **C3** — 自适应速率限制 + 指数退避（`ratelimit.py`）
-- **C2+C3** — 安全加固：持久化限流器 + `max_entries` 守卫
-
-### v0.5 AMEND（D0–D4）— 异常处理
-
-- **D0** — Config 扩展：`kzocr_output_dir`、`cache_ttl_seconds`
-- **D1** — 异常分类体系（5 类异常 + `retry_with_policy` 重试策略）
-- **D2** — VLM 主循环结构化重试（API 重试、OverSize DPI 降低、`failed_pages` 追踪）
-- **D3** — VLM 逐页缓存（`config_hash` + TTL + `KZOCR_CLEAR_CACHE=1` 清除）
-- **D4** — 层级异常检测（`char_count_spike` 字符数尖峰检测）
-
----
-
-## 开发
-
-```bash
-# 克隆仓库
-git clone git@github.com:keenkuang/KZOCR.git
-cd KZOCR
-
-# 安装开发版本
-pip install -e .
-
-# 运行测试（268 个用例，~15s）
-python -m pytest tests/ -v
-
-# 端到端冒烟
-kzocr smoke --skip-push
-```
-
-### 测试结构
-
-| 文件 | 用例数 | 覆盖 |
-|------|--------|------|
-| `tests/test_pipeline.py` | 4 | 全链路回归 |
-| `tests/test_config.py` | 6 | D0 配置加载 |
-| `tests/test_errors.py` | 24 | D1 异常 + 重试 |
-| `tests/test_hierarchy.py` | 17 | D4 层级异常检测 |
-| `tests/test_vlm.py` | 16+ | D2 重试 + D3 缓存 |
-| `tests/test_common.py` | — | B2 适配器折算 |
-| `tests/test_leakage.py` | — | C1 泄漏防御 |
-| `tests/test_atomic.py` | — | C2 原子写入 |
-| `tests/test_ratelimit.py` | — | C3 限流器 |
-| `tests/test_egress.py` | — | B3 出站校验 |
-| `tests/test_types.py` | — | 数据模型 |
-| `tests/test_resources.py` | — | B5 种子数据 |
-| `tests/test_cloudllm_env.py` | — | LLM 环境变量映射 |
-
-### CI
-
-CI 工作流定义在 `.github/workflows/test.yml`，由两个相互独立的 job 组成：
-
-- `lint`：Python 3.12 上跑 `ruff check kzocr/ tests/`
-- `test`：在 Python 3.10 / 3.11 / 3.12 矩阵上跑 `python -m pytest tests/ -v`（`pip install PyMuPDF numpy pytest` 最小依赖）
-
-#### 已知 CI 修复（2026-07-10）
-
-CI 曾持续失败，根因为两层问题叠加，均已修复：
-
-1. **workflow YAML 非法** —— PR #5 修复。`test.yml` 中 `run: echo "Tests: ✅"` 在严格 YAML 解析下非法（值内 `Tests: ` 含冒号空格），GitHub 无法解析 workflow、job 为空。改为 `run: 'echo "Tests: passed"'`（单引号包裹含冒号命令）。
-2. **测试缺依赖崩溃** —— PR #6 修复。`kzocr/modelscope_pool.py` 顶层硬写 `from openai import OpenAI`，而 `openai` 属「运行环境另行安装」的 LLM 依赖，CI 最小环境未安装，致使 `tests/test_modelscope_pool.py` 在收集阶段 `ImportError: No module named 'openai'`、pytest 收集中断。改为可选导入（`try/except ImportError` → `OpenAI = None`），缺依赖时对应 provider 在初始化时自动禁用。
-
-修复后 CI 全绿：`lint` + `test`（3.10 / 3.11 / 3.12）均 `success`。
+FastAPI 自动生成 Swagger 文档：启动后访问 `http://localhost:8080/docs`
 
 ---
 
 ## 项目状态
 
-**最新版本**：v0.6.0（语义版本号，功能里程碑见 CHANGELOG.md）
-
-**已实现**：v0.3 FREEZE 基础架构 + v0.4 AMEND 健壮性 + v0.5 AMEND 异常处理体系 + v0.6 测试覆盖与项目基础设施
-
-**测试覆盖率**：268 个测试全通过（~15s）
-
-**文档**：架构设计文档见 `docs/plans/`，多角色评审报告见 `docs/reviews/`
+| 版本 | 方向 | 测试 |
+|------|------|------|
+| v0.7 | 引擎编排层 | 396 |
+| v0.8 | 方剂解析/章节合并/并发/校对 CLI/质量工程 | 441 |
+| v0.9 | 并发集成/Web 面板 | 447 |
+| v0.10 | 性能优化 | 449 |
+| v0.11 | REST API/Docker | 455 |
+| v0.12 | 仓库清理 | 455 |
+| v0.13 | LLM 质检管道 | 462 |
+| v0.14 | 产品化/可视化/批量 | **468** |
 
 ---
 
-最后更新：2026-07-10
+## 相关项目
+
+- [kHUB](https://github.com/keenkuang/kHUB) — 文档推送服务
+- [秘方求真 OCR Pipeline](https://github.com/your-org/traedocu) — 姊妹项目（VLM+Web）

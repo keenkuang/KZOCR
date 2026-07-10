@@ -14,10 +14,11 @@
 
 1. **阅读 README** — 了解项目概览和快速上手方式。
 2. **了解架构** — `docs/plans/` 目录下收录了架构设计文档，建议贡献者先通读。
-3. **运行测试** — 确保你当前的环境可以正常运行测试：
+3. **运行测试** — 确保你当前的环境可以正常运行测试（当前 468 测试）：
 
    ```bash
-   python -m pytest tests/
+   python -m pytest tests/ -q
+   python -m pytest tests/benchmarks/ -v   # 性能基准门禁
    ```
 
 ## 报告问题

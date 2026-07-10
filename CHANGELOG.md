@@ -5,6 +5,31 @@
 
 ---
 
+## v2026-07-10 — v0.15 文档体系完善
+
+> README/CONTRIBUTING 全面重写，468 tests
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| *(current)* | `README.md` | 全面重写（功能一览/架构/命令参考/REST API/项目状态） |
+| *(current)* | `CONTRIBUTING.md` | 更新测试命令 + 性能基准门禁说明 |
+
+---
+
+## v2026-07-10 — v0.14 产品化（JSON导出/Web可视化/批量处理/校对工作台）
+
+> **10 files changed, 418 insertions, 468 tests**
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `f1f45af` | `export_zai.py` | `export_json` 结构化导出（recipes/herbs/quality_issues） |
+| `f1f45af` | `cli.py` | `--format json` + `batch` 子命令 |
+| `f1f45af` | `web/app.py` | dashboard/recipe_detail/search/workspace 4 路由 |
+| `f1f45af` | `web/templates/` | 4 个新页面模板 |
+| `f1f45af` | `test_web_enhanced.py` | 6 例 |
+
+---
+
 ## v2026-07-10 — v0.13 LLM 质检管道
 
 > **1 commit, 4 files changed, 240 insertions, 462 tests passed**
