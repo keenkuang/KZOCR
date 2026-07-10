@@ -35,6 +35,7 @@ from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
 from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier
 from kzocr.security.egress import validate_url
+from kzocr.storage.db import BookDB
 
 _logger = logging.getLogger(__name__)
 
@@ -190,6 +191,10 @@ def orchestrate_book(
     pub_era = getattr(config, "pub_era", "") or ""
     title = getattr(config, "title", None) or book_code or "unknown"
 
+    # ── F2: 初始化 DB（沿用 config.db_dir 或 KZOCR_DB_DIR）──
+    db_dir = getattr(config, "db_dir", "") or os.environ.get("KZOCR_DB_DIR", "")
+    db = BookDB(book_code or "unknown", db_dir=db_dir)
+
     # ── 第 1 步：Tier1 全书处理（只执行一次）──
     tier1_candidates = _safe_select_candidates(
         scheduler, registry, 1,
@@ -283,6 +288,11 @@ def orchestrate_book(
                 _record_engine_usage(
                     registry, tier1_candidates[0], verdict, t1_elapsed_per_page, engine_usage_counter
                 )
+                # F2: 写入逐页进度
+                db.init_page(page_num, char_count=len(cur_text), engine_label=t1_engine_name)
+                db.update_ocr(page_num, status="success", char_count=len(cur_text), latency_ms=t1_elapsed_per_page)
+                db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
+                db.update_import(page_num, status="imported", count=1)
                 trace.extend(page_trace)
                 continue
 
@@ -385,6 +395,23 @@ def orchestrate_book(
 
         trace.extend(page_trace)
 
+        # F2: 写入逐页进度
+        last_engine = page_trace[-1].engine if page_trace else "unknown"
+        last_latency = page_trace[-1].latency_ms if page_trace else 0
+        char_count = len(final_text) if final_text else 0
+        db.init_page(page_num, char_count=char_count, engine_label=last_engine)
+        ocr_ok = verdict.status in ("PASS", "RARE", "FAIL", "UNKNOWN", "UNCERTAIN")
+        db.update_ocr(
+            page_num, status="success" if ocr_ok else "failed",
+            char_count=char_count, latency_ms=last_latency,
+        )
+        db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
+        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN"):
+            db.record_anomaly(page_num, verdict=verdict, detector_chain=verifier.last_detector_chain)
+        db.update_import(
+            page_num, status="imported" if verdict.status in ("PASS", "RARE") else "pending", count=1,
+        )
+
     # ── 书完成后处理 ──
     registry.persist_benchmarks()
 
@@ -410,6 +437,9 @@ def orchestrate_book(
             "[orchestrator] book=%s failed_ratio=%.2f exceeds threshold (10%%)",
             book_code, failed_ratio,
         )
+
+    # F2: 关闭 DB
+    db.close()
 
     return BookResult(
         book_code=book_code or "unknown",
