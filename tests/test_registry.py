@@ -148,3 +148,56 @@ def test_select_candidates_no_zero_division():
     reg.record("b", success=True, glyph="PASS")
     cands = select_candidates(reg, tier=1)
     assert len(cands) == 2
+
+
+def test_benchmark_persist_and_load_roundtrip(tmp_path):
+    """NDJSON 追加式持久化：写 → 重建 → 统计一致（§7.1）。"""
+    d = str(tmp_path / "benchmarks")
+    reg = EngineRegistry(benchmark_dir=d)
+    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
+    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=2000, pages=3)
+    reg.record("paddleocr", success=True, glyph="FAIL", latency_ms=1000, pages=2)
+    reg.persist_benchmarks()
+
+    reg2 = EngineRegistry(benchmark_dir=d)
+    reg2.register_adapter(_meta("paddleocr", 1), EngineConfig())
+    reg2.load_benchmarks()
+    r = reg2.get("paddleocr")
+    assert r.stats.total_pages == 5
+    assert r.stats.total_latency_ms == 3000
+    assert r.stats.glyph_pass_count == 1
+    assert r.stats.glyph_fail_count == 1
+    assert r.glyph_pass_rate == 0.5  # (PASS + RARE) / 全部 = (1+0)/2
+
+
+def test_benchmark_persist_is_append_only(tmp_path):
+    """多次 persist 应为跨进程追加，而非覆写（O(1)，不丢历史）。"""
+    d = str(tmp_path / "benchmarks")
+    reg = EngineRegistry(benchmark_dir=d)
+    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
+    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=100, pages=1)
+    reg.persist_benchmarks()
+    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=100, pages=1)
+    reg.persist_benchmarks()
+
+    reg2 = EngineRegistry(benchmark_dir=d)
+    reg2.register_adapter(_meta("paddleocr", 1), EngineConfig())
+    reg2.load_benchmarks()
+    assert reg2.get("paddleocr").stats.total_pages == 2
+
+
+def test_benchmark_persist_no_dir_is_noop():
+    """无 benchmark_dir 时 persist 不应抛，且 pending 被清空。"""
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("x", 1), EngineConfig())
+    reg.record("x", success=True, glyph="PASS")
+    reg.persist_benchmarks()
+    assert reg._pending == []
+
+
+def test_benchmark_load_missing_dir_is_noop():
+    """benchmark 目录不存在时 load 不应抛（冷启动）。"""
+    reg = EngineRegistry(benchmark_dir="/nonexistent/benchmarks")
+    reg.register_adapter(_meta("x", 1), EngineConfig())
+    reg.load_benchmarks()
+    assert reg.get("x").stats.total_pages == 0

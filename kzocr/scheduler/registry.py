@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Optional
 
 from kzocr.engine.types import (
@@ -20,6 +22,7 @@ from kzocr.engine.types import (
     GlyphStatus,
 )
 from kzocr.engines.errors import SchedulerError
+from kzocr.engines.atomic import _check_base
 
 # ── 冷启动与贝叶斯评分常量（v0.7 §3.5）──
 GLYPH_PASS_RATE_DEFAULT = 0.5  # 中等置信度假设，非 0
@@ -104,10 +107,17 @@ class EngineRegistration:
 
 
 class EngineRegistry:
-    """引擎注册中心：注册、查询、统计记录与候选选择。"""
+    """引擎注册中心：注册、查询、统计记录与候选选择。
 
-    def __init__(self) -> None:
+    benchmark 持久化（§7.1）：进程内 EngineStats 实时更新内存，书完成后通过
+    `persist_benchmarks()` 将增量事件以 NDJSON 逐行追加（O(1)）写入
+    `$benchmark_dir/{engine}.ndjson`；启动时 `load_benchmarks()` 重建已注册引擎统计。
+    """
+
+    def __init__(self, benchmark_dir: Optional[str] = None) -> None:
         self._regs: dict[str, EngineRegistration] = {}
+        self.benchmark_dir: Optional[str] = benchmark_dir
+        self._pending: list[dict] = []
 
     def register(self, reg: EngineRegistration) -> None:
         """注册一个引擎项（覆盖同名）。"""
@@ -174,6 +184,89 @@ class EngineRegistry:
         if not success:
             s.last_error = error
         s.last_seen = time.time()
+        if self.benchmark_dir is not None:
+            self._pending.append(
+                {
+                    "ts": s.last_seen,
+                    "engine": name,
+                    "page": pages,
+                    "latency_ms": int(latency_ms) if latency_ms is not None else 0,
+                    "glyph_status": glyph,
+                    "tier": reg.meta.tier,
+                    "success": success,
+                }
+            )
+
+    def persist_benchmarks(self) -> None:
+        """将累计的增量事件以 NDJSON 逐行追加（O(1)）写入 benchmark 目录（§7.1）。
+
+        进程内 EngineStats 实时更新内存，书完成后调用本方法批量 flush 增量；
+        行级追加而非全文覆写，避免 O(n²) I/O 退化。无 benchmark_dir 时为空操作。
+        """
+        if self.benchmark_dir is None:
+            self._pending.clear()
+            return
+        if not self._pending:
+            return
+        base = Path(self.benchmark_dir)
+        base.mkdir(parents=True, exist_ok=True)
+        by_engine: dict[str, list[dict]] = {}
+        for ev in self._pending:
+            by_engine.setdefault(ev["engine"], []).append(ev)
+        for engine, events in by_engine.items():
+            if "/" in engine or "\\" in engine:
+                raise ValueError(f"非法引擎名（路径穿越风险）: {engine}")
+            path = _check_base(base / f"{engine}.ndjson", allowed_base=None)
+            with path.open("a", encoding="utf-8") as f:
+                for ev in events:
+                    f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        self._pending.clear()
+
+    def load_benchmarks(self) -> None:
+        """进程启动时从 benchmark 目录加载 NDJSON，重建已注册引擎的 EngineStats（§7.1）。
+
+        目录不存在或文件损坏时静默跳过（冷启动 / 容错），不阻断启动。
+        """
+        if self.benchmark_dir is None:
+            return
+        base = Path(self.benchmark_dir)
+        if not base.is_dir():
+            return
+        for ndjson in sorted(base.glob("*.ndjson")):
+            engine = ndjson.stem
+            try:
+                with ndjson.open(encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        _apply_event(self.get(engine), json.loads(line))
+            except (json.JSONDecodeError, OSError):
+                continue
+
+
+def _apply_event(reg: Optional[EngineRegistration], ev: dict) -> None:
+    """将一条 benchmark 事件累加到引擎统计（load_benchmarks 用）。"""
+    if reg is None:
+        return  # 历史引擎不再注册，跳过
+    s = reg.stats
+    s.total_calls += 1
+    s.total_pages += int(ev.get("page", 1))
+    s.total_latency_ms += int(ev.get("latency_ms") or 0)
+    g = ev.get("glyph_status")
+    if g == "PASS":
+        s.glyph_pass_count += 1
+    elif g == "FAIL":
+        s.glyph_fail_count += 1
+    elif g == "UNKNOWN":
+        s.glyph_unknown_count += 1
+    elif g == "RARE":
+        s.glyph_rare_count += 1
+    elif g == "UNCERTAIN":
+        s.glyph_uncertain_count += 1
+    if not ev.get("success", True):
+        s.last_error = ev.get("error")
+    s.last_seen = float(ev.get("ts", s.last_seen))
 
 
 def _bayesian_score(reg: EngineRegistration) -> float:
