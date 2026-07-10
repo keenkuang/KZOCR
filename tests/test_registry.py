@@ -113,3 +113,37 @@ def test_select_candidates_empty_for_missing_tier():
     reg = EngineRegistry()
     reg.register_adapter(_meta("paddleocr", 1), {})
     assert select_candidates(reg, tier=9) == []
+
+
+def test_record_glyph_rare_and_uncertain_counted():
+    """glyph 契约：RARE/UNCERTAIN 不再被静默丢弃，且 RARE 计入通过率分子。"""
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("x", 1), {})
+    reg.record("x", success=True, glyph="RARE", latency_ms=100)
+    reg.record("x", success=True, glyph="UNCERTAIN", latency_ms=100)
+    reg.record("x", success=True, glyph="PASS", latency_ms=100)
+    r = reg.get("x")
+    assert r.stats.glyph_rare_count == 1
+    assert r.stats.glyph_uncertain_count == 1
+    # 通过率 = (PASS + RARE) / 全部样本 = (1 + 1) / 3
+    assert r.glyph_pass_rate == (1 + 1) / 3
+
+
+def test_avg_latency_no_zero_division():
+    """有页数但从未记录延迟时，avg_latency 返回保守默认值而非 0（修复除零）。"""
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("x", 1), {})
+    reg.record("x", success=True)  # 不传 latency_ms
+    r = reg.get("x")
+    assert r.avg_latency_per_page_ms == AVG_LATENCY_DEFAULT_MS
+
+
+def test_select_candidates_no_zero_division():
+    """有页数、无延迟记录时 select_candidates 不应崩溃（_bayesian_score 不除零）。"""
+    reg = EngineRegistry()
+    reg.register_adapter(_meta("a", 1), {})
+    reg.register_adapter(_meta("b", 1), {})
+    reg.record("a", success=True, glyph="PASS")
+    reg.record("b", success=True, glyph="PASS")
+    cands = select_candidates(reg, tier=1)
+    assert len(cands) == 2

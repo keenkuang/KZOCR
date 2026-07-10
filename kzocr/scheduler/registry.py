@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from kzocr.engine.types import AdapterMeta, EngineStatus
+from kzocr.engine.types import AdapterMeta, EngineStatus, GlyphStatus
 
 # ── 冷启动与贝叶斯评分常量（v0.7 §3.5）──
 GLYPH_PASS_RATE_DEFAULT = 0.5  # 中等置信度假设，非 0
@@ -31,6 +31,8 @@ class EngineStats:
     glyph_pass_count: int = 0
     glyph_fail_count: int = 0
     glyph_unknown_count: int = 0  # 追踪 UNKNOWN 状态
+    glyph_rare_count: int = 0  # 追踪 RARE（术语库命中，中医古籍属正确识别，非失败）
+    glyph_uncertain_count: int = 0  # 追踪 UNCERTAIN（需人工复核）
     last_error: Optional[str] = None
     last_seen: float = 0.0  # time.time() 挂钟时间，支持跨进程持久化
 
@@ -47,20 +49,31 @@ class EngineRegistration:
 
     @property
     def glyph_pass_rate(self) -> float:
-        """字形通过率 = pass / (pass + fail + unknown)，冷启动返回先验。"""
+        """字形通过率 = (PASS + RARE) / (PASS + FAIL + UNKNOWN + RARE + UNCERTAIN)。
+
+        RARE（术语库命中）在中医古籍中属正确识别，计入通过分子；UNKNOWN/UNCERTAIN
+        计入分母但不计通过。冷启动（无样本）返回先验 GLYPH_PASS_RATE_DEFAULT（§3.5）。
+        """
+        s = self.stats
         total = (
-            self.stats.glyph_pass_count
-            + self.stats.glyph_fail_count
-            + self.stats.glyph_unknown_count
+            s.glyph_pass_count
+            + s.glyph_fail_count
+            + s.glyph_unknown_count
+            + s.glyph_rare_count
+            + s.glyph_uncertain_count
         )
         if total == 0:
             return GLYPH_PASS_RATE_DEFAULT
-        return self.stats.glyph_pass_count / total
+        return (s.glyph_pass_count + s.glyph_rare_count) / total
 
     @property
     def avg_latency_per_page_ms(self) -> float:
-        """平均单页延迟，冷启动返回保守默认值。"""
-        if self.stats.total_pages == 0:
+        """平均单页延迟。无延迟样本（冷启动或延迟未记录）返回保守默认值。
+
+        修复：原实现仅凭 `total_pages == 0` 判空，会在「有页数、无延迟记录」时
+        返回 0，触发 `_bayesian_score` 的 1/0 除零崩溃；改为以 `total_latency_ms` 判空。
+        """
+        if self.stats.total_latency_ms == 0:
             return AVG_LATENCY_DEFAULT_MS
         return self.stats.total_latency_ms / self.stats.total_pages
 
@@ -103,12 +116,17 @@ class EngineRegistry:
         self,
         name: str,
         success: bool,
-        glyph: Optional[str] = None,
+        glyph: Optional[GlyphStatus] = None,
         latency_ms: Optional[float] = None,
         pages: int = 1,
         error: Optional[str] = None,
     ) -> None:
-        """记录一次引擎调用的结果，更新统计。"""
+        """记录一次引擎调用的结果，更新统计。
+
+        `glyph` 取字形验证状态（GlyphStatus）。RARE/UNCERTAIN 不再被静默丢弃，
+        分别计入独立计数——领域评审指出中医古籍异体字/古方名占比高，漏计会系统性
+        低估通过率。注：E3 落地 `GlyphVerdict` 后，此处应接受其 `.status` 字段。
+        """
         reg = self._regs.get(name)
         if reg is None:
             raise KeyError(f"未注册的引擎: {name}")
@@ -124,6 +142,10 @@ class EngineRegistry:
                 s.glyph_fail_count += 1
             elif glyph == "UNKNOWN":
                 s.glyph_unknown_count += 1
+            elif glyph == "RARE":
+                s.glyph_rare_count += 1
+            elif glyph == "UNCERTAIN":
+                s.glyph_uncertain_count += 1
         if not success:
             s.last_error = error
         s.last_seen = time.time()
