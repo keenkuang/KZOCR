@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kzocr.engine.run import run_engine, _run_real
+from kzocr.engine.run import _run_real
 
 
 # =============================================================================
@@ -93,42 +93,15 @@ def mock_real_env():
 
 
 # =============================================================================
-# TestRunRealRouting — 验证 run_engine 的路由逻辑
+# TestRunRealRouting — v0.7 已移除旧路由，run_engine 始终走编排路径
 # =============================================================================
 
+# 旧 _run_real 路由测试已随 v0.6 遗产路径移除。_run_real 函数本身保留
+# 用于 TestRunRealInternal 直接测试。运行 run_engine 时始终经
+# _init_v07_registry → orchestrate_book 路径。
+
 class TestRunRealRouting:
-    """run_engine() 的路由分发测试。"""
-
-    @patch("kzocr.engine.run._run_real")
-    def test_routes_to_real(self, mock_run_real, real_cfg):
-        """use_mock=False, use_vlm=False → 走 _run_real。"""
-        mock_run_real.return_value = MagicMock(is_mock=False, book_code="test")
-        result = run_engine("test.pdf", config=real_cfg)
-        mock_run_real.assert_called_once()
-        assert result.book_code == "test"
-
-    @patch("kzocr.engine.run._run_real")
-    def test_real_failure_falls_back_to_mock(self, mock_run_real, real_cfg):
-        """_run_real 抛异常 → 降级返回 mock BookResult。"""
-        mock_run_real.side_effect = RuntimeError("引擎异常")
-        result = run_engine("test.pdf", config=real_cfg)
-        assert result.is_mock is True
-
-    @patch("kzocr.engine.run._run_real")
-    def test_real_failure_with_require_real_raises(self, mock_run_real, real_cfg):
-        """require_real=True + _run_real 抛异常 → 异常透传。"""
-        mock_run_real.side_effect = RuntimeError("引擎异常")
-        real_cfg.require_real = True
-        with pytest.raises(RuntimeError, match="引擎异常"):
-            run_engine("test.pdf", config=real_cfg)
-
-    @patch("kzocr.engine.run._run_real")
-    def test_mock_takes_precedence_over_real(self, mock_run_real, real_cfg):
-        """use_mock=True → 不调用 _run_real。"""
-        real_cfg.use_mock = True
-        result = run_engine("test.pdf", config=real_cfg)
-        mock_run_real.assert_not_called()
-        assert result.is_mock is True
+    """占位：旧路由已移除（v0.7 默认编排）。"""
 
 
 # =============================================================================

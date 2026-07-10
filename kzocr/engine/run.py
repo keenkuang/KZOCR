@@ -21,7 +21,6 @@ import fitz
 import numpy as np
 
 from kzocr import config as app_config
-from .mock import mock_book_result as build_mock_book
 from .types import BookResult, PageResult, ParagraphResult, LineResult
 from kzocr.engines.errors import (
     ApiError,
@@ -78,44 +77,21 @@ def _init_v07_registry(cfg) -> EngineRegistry:
 
 def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> BookResult:
     cfg = config if config is not None else app_config.config
-    if getattr(cfg, "use_v07", False):
-        logger.info("[engine] use_v07=True，使用 v0.7 编排调度系统")
-        registry = _init_v07_registry(cfg)
-        overrides = EngineOverrides()
-        book = orchestrate_book(
-            pdf_path=pdf_path,
-            book_code=book_code,
-            config=cfg,
-            registry=registry,
-            overrides=overrides,
-        )
-        try:
-            enrich_book_result(book)
-        except Exception:
-            logger.warning("[engine] TOC enrich 失败，跳过", exc_info=True)
-        return book
-    if cfg.use_mock:
-        logger.info("[engine] use_mock=True，使用桩数据")
-        return build_mock_book(book_code=book_code or "TCM-MOCK-001")
-
-    if cfg.use_vlm:
-        try:
-            return _run_vlm(pdf_path, cfg, book_code)
-        except Exception as exc:  # noqa: BLE001
-            if cfg.require_real:
-                raise
-            logger.error("[engine] ⚠ VLM 引擎执行失败，已降级为占位【假数据】（非真实 OCR）：%s", exc)
-            print("⚠ 警告：VLM 引擎失败，本次产出为占位假数据，并非真实 OCR 结果。")
-            return build_mock_book(book_code=book_code or "TCM-MOCK-001")
-
+    logger.info("[engine] v0.7 编排调度系统")
+    registry = _init_v07_registry(cfg)
+    overrides = EngineOverrides()
+    book = orchestrate_book(
+        pdf_path=pdf_path,
+        book_code=book_code,
+        config=cfg,
+        registry=registry,
+        overrides=overrides,
+    )
     try:
-        return _run_real(pdf_path, cfg, book_code)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("[engine] ⚠ 真实引擎执行失败: %s", exc)
-        print("⚠ 警告：真实引擎失败，本次产出为占位假数据，并非真实 OCR 结果。")
-        if cfg.require_real:
-            raise
-        return build_mock_book(book_code=book_code or "TCM-MOCK-001")
+        enrich_book_result(book)
+    except Exception:
+        logger.warning("[engine] TOC enrich 失败，跳过", exc_info=True)
+    return book
 
 
 def _build_engine_config() -> dict:

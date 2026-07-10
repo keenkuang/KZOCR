@@ -75,21 +75,6 @@ def test_book_pipeline_adapter_with_mock_pipeline():
 @patch("kzocr.engine.run._init_v07_registry")
 @patch("kzocr.engine.run.orchestrate_book")
 @patch("kzocr.engine.run.enrich_book_result")
-def test_run_engine_v07_disabled_by_default(
-    mock_enrich, mock_orch, mock_init, monkeypatch
-):
-    """use_v07 默认 False 时走旧路径（不调用编排）。"""
-    from kzocr.config import Config
-    from kzocr.engine.run import run_engine
-    cfg = Config(use_mock=True)  # v07 不会是默认 False
-    result = run_engine("fake.pdf", "test", cfg)
-    assert result.is_mock
-    mock_orch.assert_not_called()
-
-
-@patch("kzocr.engine.run._init_v07_registry")
-@patch("kzocr.engine.run.orchestrate_book")
-@patch("kzocr.engine.run.enrich_book_result")
 def test_run_engine_v07_enabled(mock_enrich, mock_orch, mock_init, monkeypatch):
     """use_v07=True 时调用编排路径。"""
     from kzocr.config import Config

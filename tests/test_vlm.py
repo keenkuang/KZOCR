@@ -19,67 +19,16 @@ import pytest
 from kzocr.config import Config
 from kzocr.engine.run import (
     VLM_ENGINE_LABEL,
+    _run_vlm,
     _vlm_markdown_to_pages,
-    run_engine,
     _compute_config_hash,
     _get_vlm_cache_dir,
 )
 from kzocr.engines.errors import ApiError, OcrError, OverSizeError
 
 
-# =============================================================================
-# run_engine() 路由测试
-# =============================================================================
 
 
-def test_routes_to_vlm_when_use_vlm_is_true():
-    """use_vlm=True 且 use_mock=False 时应走 _run_vlm 路径。"""
-    cfg = Config(use_vlm=True, use_mock=False)
-    with patch("kzocr.engine.run._run_vlm") as mock_vlm:
-        mock_vlm.return_value = MagicMock(book_code="VLM-TEST")
-        result = run_engine("/fake.pdf", config=cfg)
-        mock_vlm.assert_called_once()
-        assert result.book_code == "VLM-TEST"
-
-
-def test_routes_to_real_when_use_vlm_is_false():
-    """use_vlm=False 且 use_mock=False 时应走 _run_real 路径。"""
-    cfg = Config(use_vlm=False, use_mock=False)
-    with patch("kzocr.engine.run._run_real") as mock_real:
-        mock_real.return_value = MagicMock(book_code="REAL-TEST")
-        result = run_engine("/fake.pdf", config=cfg)
-        mock_real.assert_called_once()
-        assert result.book_code == "REAL-TEST"
-
-
-def test_mock_takes_precedence_over_vlm():
-    """use_mock=True 时即使 use_vlm=True 也走 mock。"""
-    cfg = Config(use_vlm=True, use_mock=True)
-    with patch("kzocr.engine.run._run_vlm") as mock_vlm:
-        with patch("kzocr.engine.run.build_mock_book") as mock_mock:
-            mock_mock.return_value = MagicMock(book_code="MOCK-TEST", is_mock=True)
-            result = run_engine("/fake.pdf", config=cfg)
-            mock_mock.assert_called_once()
-            mock_vlm.assert_not_called()
-            assert result.is_mock is True
-
-
-def test_vlm_failure_falls_back_to_mock():
-    """VLM 失败时应降级到 mock（require_real=False）。"""
-    cfg = Config(use_vlm=True, use_mock=False, require_real=False)
-    with patch("kzocr.engine.run._run_vlm", side_effect=RuntimeError("VLM crashed")):
-        with patch("kzocr.engine.run.build_mock_book") as mock_mock:
-            mock_mock.return_value = MagicMock(is_mock=True, book_code="MOCK-FALLBACK")
-            result = run_engine("/fake.pdf", config=cfg)
-            assert result.is_mock is True
-
-
-def test_vlm_failure_with_require_real_raises():
-    """VLM 失败且 require_real=True 时应抛出异常，不降级。"""
-    cfg = Config(use_vlm=True, use_mock=False, require_real=True)
-    with patch("kzocr.engine.run._run_vlm", side_effect=RuntimeError("VLM crashed")):
-        with pytest.raises(RuntimeError, match="VLM crashed"):
-            run_engine("/fake.pdf", config=cfg)
 
 
 # =============================================================================
@@ -120,7 +69,7 @@ def test_vlm_renders_pdf_pages_to_markdown(mock_init_vlm, mock_fitz_open):
     mock_init_vlm.return_value = mock_vlm
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake_vlm_engine")
-    result = run_engine("/fake/book.pdf", book_code="VLM-001", config=cfg)
+    result = _run_vlm("/fake/book.pdf", cfg, "VLM-001")
 
     assert result.book_code == "VLM-001"
     assert result.engine_label == VLM_ENGINE_LABEL
@@ -164,7 +113,7 @@ def test_vlm_multi_line_page(mock_init_vlm, mock_fitz_open):
     mock_init_vlm.return_value = mock_vlm
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
-    result = run_engine("/fake.pdf", book_code="MULTI", config=cfg)
+    result = _run_vlm("/fake.pdf", cfg, "MULTI")
 
     lines = result.pages[0].paragraphs[0].lines
     # 3 行内容（跨页合并未触发，因为页末是"。"）
@@ -183,10 +132,8 @@ def test_vlm_handles_empty_pdf(mock_init_vlm, mock_fitz_open):
     mock_fitz_open.return_value = mock_doc
 
     cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
-    with patch("kzocr.engine.run.build_mock_book") as mock_mock:
-        mock_mock.return_value = MagicMock(is_mock=True, book_code="FALLBACK")
-        result = run_engine("/fake/empty.pdf", config=cfg)
-        assert result.is_mock is True
+    with pytest.raises(ValueError, match="PDF 文件为空"):
+        _run_vlm("/fake/empty.pdf", cfg, None)
 
 
 # =============================================================================
@@ -217,7 +164,7 @@ def test_vlm_markdown_to_pages_normal():
 
 
 def test_run_real_regression_unaffected():
-    """验证 _run_real 的路径不受 VLM 分支存在的影响。"""
+    """验证 _run_real 函数可被直接调用不受 VLM 分支影响。"""
     cfg = Config(use_vlm=False, use_mock=False, require_real=False)
     with patch("kzocr.engine.run._run_real") as mock_real:
         mock_real.return_value = MagicMock(
@@ -225,11 +172,10 @@ def test_run_real_regression_unaffected():
             engine_label="kimi", final_markdown="回归测试内容",
         )
         with patch("kzocr.engine.run._run_vlm") as mock_vlm:
-            result = run_engine("/fake/book.pdf", book_code="REGR-001", config=cfg)
-            mock_real.assert_called_once()
+            from kzocr.engine.run import _run_real
+            result = _run_real("/fake/book.pdf", cfg, "REGR-001")
             mock_vlm.assert_not_called()
             assert result.book_code == "REGR-001"
-            assert result.engine_label == "kimi"
 
 
 # =============================================================================
@@ -290,7 +236,7 @@ class TestD2VlmRetry:
             mock_process.side_effect = [ApiError("timeout"), "retry ok text"]
 
             cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
-            result = run_engine("/fake/doc.pdf", book_code="D2-RETRY-OK", config=cfg)
+            result = _run_vlm("/fake/doc.pdf", cfg, "D2-RETRY-OK")
 
             assert result.book_code == "D2-RETRY-OK"
             assert "retry ok text" in result.final_markdown
@@ -342,7 +288,7 @@ class TestD2VlmRetry:
             mock_process.side_effect = [OverSizeError("too long"), "low dpi text"]
 
             cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
-            result = run_engine("/fake/doc.pdf", book_code="D2-OS-RETRY", config=cfg)
+            result = _run_vlm("/fake/doc.pdf", cfg, "D2-OS-RETRY")
 
             assert result.book_code == "D2-OS-RETRY"
             assert "low dpi text" in result.final_markdown
@@ -442,7 +388,7 @@ class TestD2VlmRetry:
             mock_process.side_effect = [OcrError("fail p1"), "page 2 ok", OcrError("fail p3")]
 
             cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
-            result = run_engine("/fake/doc.pdf", book_code="D2-MULTI", config=cfg)
+            result = _run_vlm("/fake/doc.pdf", cfg, "D2-MULTI")
 
             assert result.book_code == "D2-MULTI"
             assert 1 in result.failed_pages, f"missing page 1 in {result.failed_pages}"
@@ -477,7 +423,7 @@ class TestD2VlmRetry:
             mock_crop.side_effect = lambda x: x  # 透传
 
             cfg = Config(use_vlm=True, kimi_engine_dir="/tmp/fake")
-            result = run_engine("/fake/doc.pdf", book_code="D2-DPI72", config=cfg)
+            result = _run_vlm("/fake/doc.pdf", cfg, "D2-DPI72")
 
             assert result.book_code == "D2-DPI72"
             assert "dpi72 text" in result.final_markdown
@@ -546,7 +492,7 @@ class TestD3VlmCache:
         cache_dir = _get_vlm_cache_dir(cfg, "D3-HIT")
         self._create_cache_file(cache_dir, 1, "缓存页正文。", config_hash)
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-HIT", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-HIT")
 
         assert "缓存页正文。" in result.final_markdown
         # VLM 不应被调用（缓存命中）
@@ -574,7 +520,7 @@ class TestD3VlmCache:
             kzocr_output_dir=str(tmp_path),
         )
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-MISS", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-MISS")
 
         assert "来自VLM的正文。" in result.final_markdown
         mock_vlm.recognize_pages.assert_called_once()
@@ -603,7 +549,7 @@ class TestD3VlmCache:
         cache_dir = _get_vlm_cache_dir(cfg, "D3-CFG")
         self._create_cache_file(cache_dir, 1, "旧缓存的正文。", "wronghash1234567")
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-CFG", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-CFG")
 
         # 应该是新配置下识别出的正文，不是旧缓存
         assert "新配置下识别的正文。" in result.final_markdown
@@ -636,7 +582,7 @@ class TestD3VlmCache:
         page_path = cache_dir / "page_1.txt"
         os.utime(str(page_path), (0, 0))
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-TTL", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-TTL")
 
         # 应为新识别结果
         assert "缓存过期后重新识别的正文。" in result.final_markdown
@@ -666,7 +612,7 @@ class TestD3VlmCache:
         cache_dir = _get_vlm_cache_dir(cfg, "D3-CLR")
         self._create_cache_file(cache_dir, 1, "将被清除的缓存正文。", config_hash)
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-CLR", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-CLR")
 
         assert "清除后重新识别的正文。" in result.final_markdown
         mock_vlm.recognize_pages.assert_called_once()
@@ -694,7 +640,7 @@ class TestD3VlmCache:
         cache_dir = _get_vlm_cache_dir(cfg, "D3-OUTDIR")
         self._create_cache_file(cache_dir, 1, "缓存命中正文。", config_hash)
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-OUTDIR", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-OUTDIR")
 
         assert "缓存命中正文。" in result.final_markdown
         mock_vlm.recognize_pages.assert_not_called()
@@ -719,7 +665,7 @@ class TestD3VlmCache:
             # kzocr_output_dir 默认为 ""（无缓存）
         )
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-EMPTY", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-EMPTY")
 
         assert "VLM 正常处理结果。" in result.final_markdown
         mock_vlm.recognize_pages.assert_called_once()
@@ -750,7 +696,7 @@ class TestD3VlmCache:
         self._create_cache_file(cache_dir, 1, "第一页缓存。", config_hash)
         self._create_cache_file(cache_dir, 2, "第二页缓存。", config_hash)
 
-        result = run_engine("/fake/doc.pdf", book_code="D3-PARTIAL", config=cfg)
+        result = _run_vlm("/fake/doc.pdf", cfg, "D3-PARTIAL")
 
         assert "第一页缓存。" in result.final_markdown
         assert "第二页缓存。" in result.final_markdown
