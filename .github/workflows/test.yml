@@ -28,6 +28,12 @@ jobs:
       - name: Run tests with details
         run: python -m pytest tests/ -v --tb=short
 
+      - name: Performance benchmarks
+        run: python -m pytest tests/benchmarks/ -v --tb=short
+
+      - name: Chaos injection tests
+        run: python -m pytest tests/test_chaos.py -v --tb=short
+
       - name: List test count (sanity check)
         run: python -m pytest tests/ --no-header -q
 
