@@ -84,6 +84,31 @@ kzocr pipeline book.pdf --book-code TCM-001
 
 ---
 
+## v2026-07-10 — v0.7.1 集成测试 + 429 限流 + benchmark 表
+
+> **4 commits, 5 files changed, 474 insertions, 396 tests passed**
+
+### 日期：2026-07-10
+
+### 新增/修改
+
+| Commit | 模块 | 说明 |
+|--------|------|------|
+| `3f1e61b` | 测试 | `tests/test_integration.py` 10 例全链路集成测试（三级降级/DB/CLI/TOC） |
+| `603148d` | CI | `test.yml` 补 pillow 依赖（PIL） |
+| `b5645d0` | 适配 | 429 限流处理（`RateLimitedError` → `_rate_limited_until` → `select_candidates` 退避） |
+| `b5645d0` | DB | `benchmark_results` 表 + `BookDB.write_benchmark()` |
+| `b5645d0` | 编排 | `orchestrate_book` 书完成时自动写入 benchmark 汇总 |
+
+### 采纳 traedocu V3.4 功能
+
+| 功能 | traedocu 参考 | KZOCR 实现 |
+|------|--------------|-----------|
+| 429 限流退避 | `AdaptiveTokenBucket` 降速 | `except RateLimitedError` → 记录退避到期时间，`select_candidates` 排除冷却期引擎 |
+| benchmark 汇总 | `benchmark_results` SQLite 表 | `write_benchmark()` 写入 engine/total_pages/error_rate/latency_p50/throughput |
+
+---
+
 ### 说明
 修复 GitHub Actions CI 持续失败的根因（两层问题叠加），并同步文档一致性。
 
