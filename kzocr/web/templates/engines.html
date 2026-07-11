@@ -1,35 +1,234 @@
 {% extends "base.html" %}
-{% block breadcrumb %}运营中心 / 引擎状态{% endblock %}
-{% block title %}引擎状态{% endblock %}
+{% from "_macros.html" import stat_card, status_badge, section_title, empty_state, engine_status_dot, modal %}
+{% block breadcrumb %}运营中心 / 引擎管理{% endblock %}
+{% block title %}引擎管理{% endblock %}
 {% block content %}
-<div class="grid grid-cols-1 gap-4">
-    <div class="bg-white rounded-lg border p-4">
-        <h3 class="text-sm font-medium mb-3">引擎概览（{{ engines|length }} 个）</h3>
-        {% if engines %}
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {% for e in engines %}
-            <div class="border rounded-lg p-4 {% if e.error_rate and e.error_rate > 0.1 %}border-red-200 bg-red-50{% else %}border-gray-200{% endif %}">
-                <div class="flex items-center justify-between mb-2">
-                    <h4 class="font-medium text-sm">{{ e.name }}</h4>
-                    <span class="text-xs px-2 py-0.5 rounded-full {% if e.error_rate and e.error_rate > 0.1 %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
-                        {% if e.error_rate and e.error_rate > 0.1 %}异常{% else %}正常{% endif %}
-                    </span>
-                </div>
-                <div class="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                    <div>总页: <span class="font-medium">{{ e.total_pages }}</span></div>
-                    <div>成功: <span class="font-medium text-green-600">{{ e.success_pages }}</span></div>
-                    <div>失败: <span class="font-medium {% if e.fail_pages > 0 %}text-red-600{% endif %}">{{ e.fail_pages }}</span></div>
-                    <div>错误率: <span class="font-medium {% if e.error_rate and e.error_rate > 0.1 %}text-red-600{% endif %}">{{ '%.1f'|format(e.error_rate * 100) if e.error_rate else 0 }}%</span></div>
-                    <div>平均延迟: <span class="font-medium">{{ e.latency_avg_ms }}ms</span></div>
-                    <div>吞吐: <span class="font-medium">{{ '%.1f'|format(e.pages_per_min) if e.pages_per_min else '-' }}页/分</span></div>
-                </div>
-                <p class="text-xs text-gray-400 mt-2">最后记录: {{ e.last_seen or '-' }}</p>
-            </div>
-            {% endfor %}
+
+{% set enabled_count = configs|selectattr('enabled')|list|length %}
+{% set disabled_count = configs|rejectattr('enabled')|list|length %}
+{% set total_workers = configs|sum(attribute='workers') %}
+
+<div class="space-y-5 animate-fade-in-up">
+    <!-- 统计卡片 -->
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {{ stat_card('引擎总数', configs|length, '已注册', '🔧', 'primary') }}
+        {{ stat_card('启用', enabled_count, '正常运行', '✅', 'chart-4') }}
+        {{ stat_card('禁用', disabled_count, '已暂停使用', '⏸️', 'chart-3' if disabled_count > 0 else 'chart-4') }}
+        {{ stat_card('总 Worker', total_workers, '并发处理能力', '⚙️', 'chart-5') }}
+    </div>
+
+    <!-- 引擎列表 -->
+    <div class="rounded-lg border overflow-hidden animate-fade-in-up" style="background:var(--card);border-color:oklch(0.88 0.02 80);">
+        {{ section_title('引擎列表', '管理 OCR 引擎的注册、配置与状态检测', '/engines/new', '+ 新增') }}
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr style="background:var(--primary);color:oklch(0.985 0.01 85);">
+                        <th class="px-4 py-3 text-left text-xs font-medium">启用</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">名称</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">模型</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">状态</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium">响应</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">Worker</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">限流</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">Batch</th>
+                        <th class="px-4 py-3 text-center text-xs font-medium">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for c in configs %}
+                {% set name = c.name %}
+                <tr class="border-t transition-colors hover:bg-opacity-50 {% if not c.enabled %}" style="opacity:0.5;{% endif %}" style="border-color:oklch(0.88 0.02 80);" id="engine-row-{{ name }}">
+                    <td class="px-4 py-3">
+                        <input type="checkbox" class="engine-toggle rounded cursor-pointer" data-engine="{{ name }}"
+                               style="accent-color:var(--primary);"
+                               {% if c.enabled %}checked{% endif %}>
+                    </td>
+                    <td class="px-4 py-3 font-medium">
+                        <a href="/engines/{{ name }}/edit" class="hover:underline" style="color:var(--primary);">{{ name }}</a>
+                    </td>
+                    <td class="px-4 py-3"><code class="text-xs" style="color:oklch(0.52 0.02 60);">{{ c.model_name or '-' }}</code></td>
+                    <td class="px-4 py-3"><span class="engine-status-dot gray" data-engine="{{ name }}"></span></td>
+                    <td class="px-4 py-3 text-right"><span class="engine-latency font-mono text-xs" data-engine="{{ name }}" style="color:oklch(0.52 0.02 60);">-</span></td>
+                    <td class="px-4 py-3 font-mono text-xs">{{ c.workers }}</td>
+                    <td class="px-4 py-3 font-mono text-xs">{{ c.rate_limit }}/min</td>
+                    <td class="px-4 py-3 font-mono text-xs">{{ c.batch_size }}</td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center justify-center gap-1">
+                            <a href="/engines/{{ name }}/edit"
+                               class="text-xs px-2 py-1 rounded transition-colors"
+                               style="color:var(--primary);" onmouseover="this.style.background='oklch(0.42 0.11 158 / 0.1)'" onmouseout="this.style.background='transparent'">编辑</a>
+                            <button class="test-engine-btn text-xs px-2 py-1 rounded transition-colors cursor-pointer border-none"
+                                    data-engine="{{ name }}"
+                                    style="color:oklch(0.55 0.09 50);" onmouseover="this.style.background='oklch(0.55 0.09 50 / 0.1)'" onmouseout="this.style.background='transparent'">测试</button>
+                            <form method="post" action="/engines/{{ name }}/delete" style="display:inline"
+                                  onsubmit="return confirm('确定删除引擎 {{ name }}？')">
+                                <button type="submit"
+                                        class="text-xs px-2 py-1 rounded transition-colors cursor-pointer border-none"
+                                        style="color:var(--destructive);" onmouseover="this.style.background='oklch(0.55 0.20 28 / 0.1)'" onmouseout="this.style.background='transparent'">删除</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="px-4 py-3">{{ empty_state('🔧', '暂无引擎', '点击上方「+ 新增」按钮添加第一个引擎') }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
-        {% else %}
-        <p class="text-sm text-gray-400 py-4 text-center">暂无引擎数据（运行 OCR 后自动生成）</p>
-        {% endif %}
     </div>
 </div>
+
+<!-- 新增引擎 Modal -->
+{% call modal('newEngineModal', '新增引擎') %}
+<form method="post" action="/engines/new" class="space-y-4">
+    <div>
+        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">引擎名称</label>
+        <input name="name" required placeholder="如 deepseek-vl"
+               class="w-full border rounded-md px-3 py-2 text-sm transition-all"
+               style="border-color:oklch(0.88 0.02 80);"
+               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+    </div>
+    <div>
+        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">Base URL</label>
+        <input name="base_url" required placeholder="如 https://api.deepseek.com/v1"
+               class="w-full border rounded-md px-3 py-2 text-sm transition-all"
+               style="border-color:oklch(0.88 0.02 80);"
+               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+    </div>
+    <div class="flex justify-end gap-2 pt-2">
+        <button type="button" onclick="document.getElementById('newEngineModal').classList.add('hidden')"
+                class="text-xs px-4 py-2 rounded-md border transition-all"
+                style="border-color:oklch(0.88 0.02 80);color:oklch(0.52 0.02 60);"
+                onmouseover="this.style.background='oklch(0.95 0.01 85)'" onmouseout="this.style.background=''">取消</button>
+        <button type="submit" class="text-xs px-4 py-2 rounded-md transition-all"
+                style="background:var(--primary);color:oklch(0.985 0.01 85);"
+                onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">创建</button>
+    </div>
+</form>
+{% endcall %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 状态指示器
+function setDot(el, cls, title) {
+    el.className = 'status-dot ' + cls;
+    el.title = title || '';
+}
+
+function setLatency(name, ms) {
+    var cell = document.querySelector('.engine-latency[data-engine="' + name + '"]');
+    if (cell) {
+        cell.textContent = ms !== undefined && ms !== null ? ms + 'ms' : '-';
+        cell.style.color = ms < 200 ? '#198754' : (ms < 1000 ? '#d97706' : '#dc3545');
+    }
+}
+
+function checkEngine(el, name) {
+    if (!name) name = el.getAttribute('data-engine');
+    if (!name) return;
+    setDot(el, 'yellow', '检测中...');
+    setLatency(name, '...');
+    fetch('/engines/' + encodeURIComponent(name) + '/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'online') {
+                var ms = data.latency_ms;
+                setDot(el, 'green', '在线' + (ms ? ' (' + ms + 'ms)' : ''));
+                setLatency(name, ms);
+            } else if (data.status === 'auth_required') {
+                setDot(el, 'yellow', '需认证 (401/403)');
+                setLatency(name, data.latency_ms);
+            } else {
+                var err = data.error || '未知错误';
+                setDot(el, 'red', '离线: ' + err);
+                setLatency(name, null);
+            }
+        })
+        .catch(function() {
+            setDot(el, 'red', '检测失败');
+            setLatency(name, null);
+        });
+}
+
+// 页面加载时批量检测
+document.addEventListener('DOMContentLoaded', function() {
+    var allDots = document.querySelectorAll('.engine-status-dot');
+    allDots.forEach(function(el) {
+        setDot(el, 'yellow', '检测中...');
+    });
+    fetch('/engines/status/all')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            allDots.forEach(function(el) {
+                var name = el.getAttribute('data-engine');
+                var st = data[name] || {};
+                if (st.status === 'online') {
+                    var ms = st.latency_ms;
+                    setDot(el, 'green', '在线' + (ms ? ' (' + ms + 'ms)' : ''));
+                    setLatency(name, ms);
+                } else if (st.status === 'auth_required') {
+                    setDot(el, 'yellow', '需认证');
+                    setLatency(name, st.latency_ms);
+                } else {
+                    var err = st.error || '未知';
+                    setDot(el, 'red', '离线: ' + err);
+                    setLatency(name, null);
+                }
+            });
+        })
+        .catch(function() {
+            allDots.forEach(function(el) {
+                checkEngine(el);
+            });
+        });
+});
+
+// 测试按钮
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.test-engine-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var name = this.getAttribute('data-engine');
+            var el = document.querySelector('.engine-status-dot[data-engine="' + name + '"]');
+            if (el) checkEngine(el, name);
+        });
+    });
+});
+
+// 启用/禁用复选框
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.engine-toggle').forEach(function(chk) {
+        chk.addEventListener('change', function() {
+            var name = this.getAttribute('data-engine');
+            var row = document.getElementById('engine-row-' + name);
+            fetch('/engines/' + encodeURIComponent(name) + '/toggle', {method: 'POST'})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.enabled) {
+                        row.style.opacity = '1';
+                    } else {
+                        row.style.opacity = '0.5';
+                    }
+                })
+                .catch(function() {
+                    this.checked = !this.checked;
+                });
+        });
+    });
+});
+
+// 新增引擎按钮
+document.addEventListener('DOMContentLoaded', function() {
+    var addBtn = document.querySelector('a[href="/engines/new"]');
+    if (addBtn) {
+        addBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.getElementById('newEngineModal').classList.remove('hidden');
+        });
+    }
+});
+</script>
 {% endblock %}

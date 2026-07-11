@@ -91,9 +91,232 @@ async def index(request: Request):
 
 @app.get("/engines", response_class=HTMLResponse)
 async def engines_page(request: Request):
-    """引擎状态页面。"""
+    """引擎管理页面（列表 + 新增模态框）。"""
+    from kzocr.engine.engine_config import list_engine_configs
+    configs = list_engine_configs()
+    return templates.TemplateResponse(request, "engines.html", {"configs": configs})
+
+
+@app.post("/engines/new")
+async def engine_new(request: Request):
+    """新增引擎。"""
+    from kzocr.engine.engine_config import save_engine_config
+    form = await request.form()
+    name = form.get("name", "").strip()
+    base_url = form.get("base_url", "").strip()
+    if not name:
+        return RedirectResponse(url="/engines", status_code=303)
+    save_engine_config(name, {
+        "base_url": base_url,
+        "enabled": True,
+        "workers": 2,
+        "rate_limit": 5,
+        "batch_size": 10,
+        "adaptive": {"enabled": True, "min_workers": 1, "max_workers": 6},
+    })
+    return RedirectResponse(url="/engines", status_code=303)
+
+
+@app.get("/engines/status/all")
+async def all_engine_status():
+    """批量检测所有引擎状态。"""
+    from kzocr.engine.engine_config import list_engine_configs
+    import asyncio, urllib.request, time, os
+    from fastapi.responses import JSONResponse
+    configs = list_engine_configs()
+    async def _check_one(cfg):
+        name = cfg["name"]
+        base_url = cfg.get("base_url", "")
+        api_key_env = cfg.get("api_key_env", "")
+        api_key = os.environ.get(api_key_env, "") if api_key_env else ""
+        if not base_url or not base_url.startswith(("http://", "https://")):
+            return name, {"status": "offline", "error": "无效 base_url"}
+        def _sync():
+            for url in [base_url.rstrip("/") + "/v1/models", base_url.rstrip("/")]:
+                try:
+                    req = urllib.request.Request(url, method="GET")
+                    if api_key:
+                        req.add_header("Authorization", f"Bearer {api_key}")
+                    t0 = time.time()
+                    resp = urllib.request.urlopen(req, timeout=8)
+                    ms = int((time.time() - t0) * 1000)
+                    return {"status": "online", "latency_ms": ms}
+                except urllib.error.HTTPError as e:
+                    ms = int((time.time() - t0) * 1000)
+                    return {"status": "online", "latency_ms": ms}
+                except Exception:
+                    continue
+            return {"status": "offline", "error": "无法连接"}
+        return name, await asyncio.get_event_loop().run_in_executor(None, _sync)
+    tasks = [_check_one(c) for c in configs]
+    results_list = await asyncio.gather(*tasks)
+    output = dict(results_list)
+    return JSONResponse(output)
+
+
+@app.get("/engines/{name}/edit", response_class=HTMLResponse)
+async def engine_edit(request: Request, name: str):
+    """引擎编辑页面。"""
+    from kzocr.engine.engine_config import load_engine_config
+    cfg = load_engine_config(name)
+    if not cfg:
+        return HTMLResponse(f"<h2>引擎 {name} 不存在</h2><a href='/engines'>返回</a>", status_code=404)
+    return templates.TemplateResponse(request, "engine_edit.html", {"name": name, "cfg": cfg})
+
+
+@app.post("/engines/{name}/save")
+async def engine_save(name: str, request: Request):
+    """保存引擎配置。"""
+    from kzocr.engine.engine_config import save_engine_config, load_engine_config
+    form = await request.form()
+    cfg = load_engine_config(name) or {}
+    cfg["enabled"] = form.get("enabled") == "true"
+    cfg["model_name"] = form.get("model_name") or None
+    cfg["base_url"] = form.get("base_url", "")
+    cfg["workers"] = max(int(form.get("workers", 2)), 1)
+    cfg["rate_limit"] = max(int(form.get("rate_limit", 5)), 1)
+    cfg["batch_size"] = max(int(form.get("batch_size", 10)), 1)
+    api_key_env = form.get("api_key_env", "").strip()
+    if api_key_env:
+        cfg["api_key_env"] = api_key_env
+    elif "api_key_env" in cfg:
+        del cfg["api_key_env"]
+    if form.get("adaptive_enabled") == "true":
+        cfg["adaptive"] = {
+            "enabled": True,
+            "min_workers": max(int(form.get("min_workers", 1)), 1),
+            "max_workers": max(int(form.get("max_workers", 6)), 1),
+        }
+    else:
+        cfg.pop("adaptive", None)
+    prompt_override = form.get("prompt_override_book", "").strip()
+    if prompt_override:
+        cfg["prompt_overrides"] = {"book_context": prompt_override}
+    elif "prompt_overrides" in cfg:
+        del cfg["prompt_overrides"]
+    save_engine_config(name, cfg)
+    return RedirectResponse(url="/engines", status_code=303)
+
+
+@app.post("/engines/{name}/delete")
+async def engine_delete(name: str):
+    """删除引擎。"""
+    from kzocr.engine.engine_config import delete_engine_config
+    delete_engine_config(name)
+    return RedirectResponse(url="/engines", status_code=303)
+
+
+@app.post("/engines/{name}/toggle")
+async def engine_toggle(name: str):
+    """切换引擎启用/禁用。"""
+    from kzocr.engine.engine_config import load_engine_config, save_engine_config
+    from fastapi.responses import JSONResponse
+    cfg = load_engine_config(name)
+    if not cfg:
+        return JSONResponse({"error": f"引擎 {name} 不存在"}, status_code=404)
+    cfg["enabled"] = not cfg.get("enabled", True)
+    save_engine_config(name, cfg)
+    return JSONResponse({"name": name, "enabled": cfg["enabled"]})
+
+
+@app.get("/engines/{name}/status")
+async def engine_status(name: str):
+    """检测单个引擎连通性。"""
+    from kzocr.engine.engine_config import load_engine_config
+    import asyncio, urllib.request, time, os
+    from fastapi.responses import JSONResponse
+    cfg = load_engine_config(name)
+    if not cfg:
+        return JSONResponse({"status": "unknown", "error": "引擎不存在", "name": name})
+    base_url = cfg.get("base_url", "")
+    api_key_env = cfg.get("api_key_env", "")
+    api_key = os.environ.get(api_key_env, "") if api_key_env else ""
+
+    async def _check():
+        def _sync():
+            if not base_url or not base_url.startswith(("http://", "https://")):
+                return {"status": "offline", "error": f"无效的 base_url: {base_url}"}
+            probe_urls = [
+                base_url.rstrip("/") + "/v1/models",
+                base_url.rstrip("/"),
+            ]
+            for url in probe_urls:
+                try:
+                    req = urllib.request.Request(url, method="GET")
+                    if api_key:
+                        req.add_header("Authorization", f"Bearer {api_key}")
+                    t0 = time.time()
+                    resp = urllib.request.urlopen(req, timeout=8)
+                    ms = int((time.time() - t0) * 1000)
+                    return {"status": "online", "latency_ms": ms, "code": resp.status}
+                except urllib.error.HTTPError as e:
+                    ms = int((time.time() - t0) * 1000)
+                    # 401/403 = 服务器可达但需认证，标记为 auth_required
+                    if e.code in (401, 403):
+                        return {"status": "auth_required", "latency_ms": ms, "code": e.code, "note": f"HTTP {e.code}，需要认证"}
+                    # 其他 4xx/5xx = 服务不可用
+                    return {"status": "offline", "error": f"HTTP {e.code}", "latency_ms": ms, "code": e.code}
+                except Exception as exc:
+                    continue
+            return {"status": "offline", "error": "无法连接"}
+        return await asyncio.get_event_loop().run_in_executor(None, _sync)
+    result = await _check()
+    result["name"] = name
+    return JSONResponse(result)
+
+
+@app.get("/engines/status/all")
+async def all_engine_status():
+    """批量检测所有引擎状态。"""
+    from kzocr.engine.engine_config import list_engine_configs
+    import asyncio, urllib.request, time, os
+    from fastapi.responses import JSONResponse
+    configs = list_engine_configs()
+    async def _check_one(cfg):
+        name = cfg["name"]
+        base_url = cfg.get("base_url", "")
+        api_key_env = cfg.get("api_key_env", "")
+        api_key = os.environ.get(api_key_env, "") if api_key_env else ""
+        if not base_url or not base_url.startswith(("http://", "https://")):
+            return name, {"status": "offline", "error": "无效 base_url"}
+        def _sync():
+            for url in [base_url.rstrip("/") + "/v1/models", base_url.rstrip("/")]:
+                try:
+                    req = urllib.request.Request(url, method="GET")
+                    if api_key:
+                        req.add_header("Authorization", f"Bearer {api_key}")
+                    t0 = time.time()
+                    resp = urllib.request.urlopen(req, timeout=8)
+                    ms = int((time.time() - t0) * 1000)
+                    return {"status": "online", "latency_ms": ms}
+                except urllib.error.HTTPError as e:
+                    ms = int((time.time() - t0) * 1000)
+                    return {"status": "online", "latency_ms": ms}
+                except Exception:
+                    continue
+            return {"status": "offline", "error": "无法连接"}
+        return name, await asyncio.get_event_loop().run_in_executor(None, _sync)
+    tasks = [_check_one(c) for c in configs]
+    results_list = await asyncio.gather(*tasks)
+    output = dict(results_list)
+    return JSONResponse(output)
+
+
+# =============================================================================
+# 监控看板 — 引擎运行状态
+# =============================================================================
+
+
+@app.get("/monitor", response_class=HTMLResponse)
+async def monitor_page(request: Request):
+    """实时监控：引擎状态卡 + 全局汇总。"""
+    from kzocr.engine.engine_config import list_engine_configs
+    import os, json
+    configs = list_engine_configs()
     dbd = _db_dir()
-    engine_list: list[dict] = []
+
+    # 从 benchmark_results 收集各引擎性能汇总
+    engine_stats: dict[str, dict] = {}
     for f in sorted(os.listdir(dbd)):
         if not f.endswith(".db"):
             continue
@@ -101,93 +324,162 @@ async def engines_page(request: Request):
         db = BookDB(code, db_dir=dbd)
         try:
             rows = db._conn.execute(
-                "SELECT engine, total_pages, success_pages, fail_pages, "
-                "error_rate, total_latency_ms, pages_per_min, total_elapsed_s, created_at "
+                "SELECT engine, total_pages, success_pages, fail_pages, error_rate, "
+                "total_latency_ms, latency_p95_ms, pages_per_min "
                 "FROM benchmark_results ORDER BY id DESC"
             ).fetchall()
             for r in rows:
-                eng_name = r["engine"]
-                if eng_name and eng_name != "none":
-                    existing = next((e for e in engine_list if e["name"] == eng_name), None)
-                    if not existing:
-                        engine_list.append({
-                            "name": eng_name,
-                            "total_pages": r["total_pages"],
-                            "success_pages": r["success_pages"],
-                            "fail_pages": r["fail_pages"],
-                            "error_rate": r["error_rate"],
-                            "latency_avg_ms": round(r["total_latency_ms"] / max(r["total_pages"], 1), 1),
-                            "pages_per_min": r["pages_per_min"],
-                            "last_seen": r["created_at"],
-                        })
+                eng = r["engine"]
+                if not eng or eng == "none":
+                    continue
+                if eng not in engine_stats:
+                    engine_stats[eng] = {"total_pages": 0, "success_pages": 0,
+                                         "fail_pages": 0, "error_rates": [], "latencies": [],
+                                         "p95s": [], "ppms": [], "count": 0}
+                s = engine_stats[eng]
+                s["total_pages"] += r["total_pages"] or 0
+                s["success_pages"] += r["success_pages"] or 0
+                s["fail_pages"] += r["fail_pages"] or 0
+                s["count"] += 1
+                if r["error_rate"] is not None:
+                    s["error_rates"].append(r["error_rate"])
+                if r["total_latency_ms"] and r["total_pages"]:
+                    s["latencies"].append(r["total_latency_ms"] / max(r["total_pages"], 1))
+                if r["latency_p95_ms"]:
+                    s["p95s"].append(r["latency_p95_ms"])
+                if r["pages_per_min"]:
+                    s["ppms"].append(r["pages_per_min"])
         except Exception:
             pass
         finally:
             db.close()
-    return templates.TemplateResponse(request, "engines.html", {"engines": engine_list})
 
-
-@app.get("/engines/config", response_class=HTMLResponse)
-async def engines_config_page(request: Request):
-    """引擎配置管理页面。"""
-    from kzocr.engine.engine_config import list_engine_configs
-    configs = list_engine_configs()
-    # 补充来自 benchmark 的状态数据
-    dbd = _db_dir()
+    # 合并引擎配置信息
+    engine_list = []
     for c in configs:
-        c["status"] = "HEALTHY"
-        c["error_rate"] = 0.0
-        c["pages_count"] = 0
-        for f in sorted(os.listdir(dbd)):
-            if not f.endswith(".db"):
-                continue
-            code = f[:-3]
-            try:
-                db = BookDB(code, db_dir=dbd)
-                row = db._conn.execute(
-                    "SELECT error_rate, total_pages FROM benchmark_results "
-                    "WHERE engine=? AND error_rate IS NOT NULL ORDER BY id DESC LIMIT 1",
-                    (c["name"],),
-                ).fetchone()
-                if row:
-                    c["error_rate"] = row["error_rate"]
-                    c["pages_count"] = row["total_pages"]
-                    c["status"] = "DEGRADED" if row["error_rate"] > 0.1 else "HEALTHY"
-                db.close()
-            except Exception:
-                pass
-    return templates.TemplateResponse(request, "engine_config.html", {
-        "configs": configs,
-        "tiers": [1, 2, 3],
-        "statuses": ["HEALTHY", "DEGRADED", "UNAVAILABLE"],
+        name = c["name"]
+        s = engine_stats.get(name, {})
+        avg_err = sum(s.get("error_rates", [])) / max(len(s.get("error_rates", [])), 1)
+        avg_p95 = sum(s.get("p95s", [])) / max(len(s.get("p95s", [])), 1)
+        avg_ppm = sum(s.get("ppms", [])) / max(len(s.get("ppms", [])), 1)
+        engine_list.append({
+            "name": name,
+            "enabled": c.get("enabled", True),
+            "base_url": c.get("base_url", ""),
+            "total_pages": s.get("total_pages", 0),
+            "success_pages": s.get("success_pages", 0),
+            "fail_pages": s.get("fail_pages", 0),
+            "error_rate": round(avg_err * 100, 1),
+            "avg_latency_ms": round(sum(s.get("latencies", [])) / max(len(s.get("latencies", [])), 1), 0),
+            "p95_ms": round(avg_p95, 0),
+            "pages_per_min": round(avg_ppm, 1),
+            "runs": s.get("count", 0),
+        })
+    # 只从 configs 中拿引擎，不从 benchmark 新增
+    return templates.TemplateResponse(request, "monitor.html", {"engines": engine_list})
+
+
+# =============================================================================
+# 基准测试 — 跨书 benchmark_results 聚合
+# =============================================================================
+
+
+@app.get("/benchmark", response_class=HTMLResponse)
+async def benchmark_page(request: Request):
+    """基准测试看板：引擎汇总卡片 + 明细表格。"""
+    import os
+    dbd = _db_dir()
+    all_rows = []
+    engine_agg: dict[str, dict] = {}
+
+    for f in sorted(os.listdir(dbd)):
+        if not f.endswith(".db"):
+            continue
+        code = f[:-3]
+        db = BookDB(code, db_dir=dbd)
+        try:
+            rows = db._conn.execute(
+                "SELECT book_code, engine, total_pages, success_pages, fail_pages, "
+                "error_rate, total_latency_ms, latency_p50_ms, latency_p95_ms, "
+                "pages_per_min, total_elapsed_s, created_at "
+                "FROM benchmark_results ORDER BY id DESC LIMIT 50"
+            ).fetchall()
+            for r in rows:
+                row = dict(r)
+                all_rows.append(row)
+                eng = row.get("engine", "")
+                if not eng or eng == "none":
+                    continue
+                if eng not in engine_agg:
+                    engine_agg[eng] = {"runs": 0, "total_pages": 0, "success_pages": 0,
+                                       "fail_pages": 0, "total_latency": 0, "p95s": [], "ppms": []}
+                a = engine_agg[eng]
+                a["runs"] += 1
+                a["total_pages"] += row.get("total_pages", 0) or 0
+                a["success_pages"] += row.get("success_pages", 0) or 0
+                a["fail_pages"] += row.get("fail_pages", 0) or 0
+                a["total_latency"] += row.get("total_latency_ms", 0) or 0
+                if row.get("latency_p95_ms"):
+                    a["p95s"].append(row["latency_p95_ms"])
+                if row.get("pages_per_min"):
+                    a["ppms"].append(row["pages_per_min"])
+        except Exception:
+            pass
+        finally:
+            db.close()
+
+    # 按created_at 降序排列，取前 200 条
+    all_rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    all_rows = all_rows[:200]
+
+    return templates.TemplateResponse(request, "benchmark.html", {
+        "rows": all_rows,
+        "summary": engine_agg,
+        "total": len(all_rows),
     })
 
 
-@app.post("/engines/config/{name}")
-async def engines_config_save(request: Request, name: str):
-    """保存引擎配置。新增时 name='new'，从表单读取实际名称。"""
-    from kzocr.engine.engine_config import save_engine_config
-    form = await request.form()
-    actual_name = form.get("name", name) if name == "new" else name
-    save_engine_config(actual_name, {
-        "label": form.get("label", actual_name),
-        "tier": int(form.get("tier", 1)),
-        "requires_network": form.get("requires_network") == "true",
-        "batch_capable": form.get("batch_capable") == "true",
-        "enabled": form.get("enabled") == "true",
-        "backoff_threshold_ms": int(form.get("backoff_threshold_ms", 30000)),
-        "backoff_fail_rate": float(form.get("backoff_fail_rate", 0.5)),
-        "max_workers": int(form.get("max_workers", 3)),
-    })
-    return RedirectResponse(url="/engines/config", status_code=303)
+@app.get("/monitor/api")
+async def monitor_api():
+    """监控数据 JSON API"""
+    from kzocr.engine.engine_config import list_engine_configs
+    import os
+    configs = list_engine_configs()
+    dbd = _db_dir()
+    engines = {}
+    for c in configs:
+        engines[c["name"]] = {"name": c["name"], "enabled": c.get("enabled", True),
+                               "base_url": c.get("base_url", ""), "total_pages": 0,
+                               "error_rate": 0, "latency_ms": 0}
+    for f in sorted(os.listdir(dbd)):
+        if not f.endswith(".db"):
+            continue
+        db = BookDB(f[:-3], db_dir=dbd)
+        try:
+            rows = db._conn.execute(
+                "SELECT engine, total_pages, error_rate, total_latency_ms "
+                "FROM benchmark_results ORDER BY id DESC LIMIT 10"
+            ).fetchall()
+            for r in rows:
+                eng = r["engine"]
+                if eng in engines:
+                    engines[eng]["total_pages"] += r["total_pages"] or 0
+                    if r["error_rate"]:
+                        engines[eng]["error_rate"] = max(engines[eng]["error_rate"], r["error_rate"])
+                    engines[eng]["latency_ms"] = r["total_latency_ms"] or 0
+        except Exception:
+            pass
+        finally:
+            db.close()
+    return {
+        "engines": list(engines.values()),
+        "total_engines": len(configs),
+    }
 
 
-@app.get("/engines/config/{name}/delete")
-async def engines_config_delete(name: str):
-    """删除引擎配置。"""
-    from kzocr.engine.engine_config import delete_engine_config
-    delete_engine_config(name)
-    return RedirectResponse(url="/engines/config", status_code=303)
+# =============================================================================
+# Prompt 管理
+# =============================================================================
 
 
 @app.get("/prompts", response_class=HTMLResponse)

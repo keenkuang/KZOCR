@@ -1,0 +1,4 @@
+{
+  "name": "correct_prompt",
+  "text": "请修正以下方剂的解析错误：\n\n{errors}\n\n原始文本：{raw_text}\n\n请输出修正后的完整方剂信息。"
+}

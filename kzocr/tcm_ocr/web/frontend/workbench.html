@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>人工校对工作台 - TCM-Modern-OCR</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f0e8; color: #1f2937; font-size: 14px;
+}
+
+/* 顶部栏 */
+.topbar {
+    height: 56px; background: #1a2e1a; color: #fff;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; position: sticky; top: 0; z-index: 100;
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.topbar-title { font-size: 18px; font-weight: 600; }
+.topbar-sub { font-size: 12px; color: #9ca3af; }
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.reviewer-badge {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px; background: rgba(255,255,255,0.1);
+    border-radius: 8px; font-size: 13px;
+}
+.reviewer-avatar {
+    width: 28px; height: 28px; border-radius: 50%; background: #f59e0b;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 12px; color: #1a2e1a;
+}
+.task-counter { font-size: 12px; color: #9ca3af; }
+.task-counter span { color: #f59e0b; font-weight: 600; }
+
+/* 主体布局 */
+.main { display: flex; height: calc(100vh - 56px); }
+
+/* 左侧面板 - 任务列表 */
+.left-panel {
+    width: 360px; background: #fff; border-right: 1px solid #e8e0d5;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.panel-header {
+    padding: 16px; border-bottom: 1px solid #e8e0d5;
+    display: flex; gap: 8px; flex-wrap: wrap;
+}
+.filter-btn {
+    padding: 5px 12px; border: 1px solid #e8e0d5; border-radius: 6px;
+    background: #fff; font-size: 12px; cursor: pointer; color: #6b7280;
+}
+.filter-btn:hover { background: #faf7f2; }
+.filter-btn.active { background: #1a2e1a; color: #fff; border-color: #1a2e1a; }
+.task-list { flex: 1; overflow-y: auto; }
+.task-item {
+    padding: 14px 16px; border-bottom: 1px solid #f0ebe3;
+    cursor: pointer; transition: all 0.2s;
+    display: flex; gap: 10px;
+}
+.task-item:hover { background: #faf7f2; }
+.task-item.active { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.task-item.completed { opacity: 0.5; }
+
+.task-priority {
+    width: 32px; height: 32px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; flex-shrink: 0;
+}
+.priority-P0 { background: #fee2e2; color: #dc2626; }
+.priority-P1 { background: #fef3c7; color: #d97706; }
+.priority-P2 { background: #dbeafe; color: #2563eb; }
+.priority-P3 { background: #f3f4f6; color: #6b7280; }
+
+.task-info { flex: 1; min-width: 0; }
+.task-book { font-size: 12px; color: #9ca3af; margin-bottom: 2px; }
+.task-text {
+    font-size: 13px; color: #1f2937; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+}
+.task-text .wrong { color: #dc2626; text-decoration: line-through; }
+.task-text .arrow { color: #9ca3af; margin: 0 4px; }
+.task-text .correct { color: #16a34a; }
+.task-meta { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+
+/* 右侧工作区 */
+.right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* 原文对比区 */
+.compare-area {
+    padding: 24px; background: #fff; border-bottom: 1px solid #e8e0d5;
+}
+.compare-title {
+    font-size: 12px; color: #9ca3af; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 12px;
+}
+.compare-row {
+    display: flex; gap: 16px; margin-bottom: 12px; align-items: flex-start;
+}
+.compare-label {
+    width: 100px; font-size: 12px; color: #6b7280;
+    padding-top: 10px; flex-shrink: 0;
+}
+.compare-value {
+    flex: 1; padding: 12px 16px; border-radius: 8px; font-size: 15px;
+    font-family: "Courier New", monospace; line-height: 1.6;
+}
+.value-ocr { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.value-consensus { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.value-llm { background: #fef3c7; color: #d97706; border: 1px solid #fde68a; }
+
+/* 推送原因区 */
+.reason-area {
+    padding: 16px 24px; background: #faf7f2; border-bottom: 1px solid #e8e0d5;
+}
+.reason-title { font-size: 12px; color: #9ca3af; margin-bottom: 8px; }
+.reason-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.reason-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+}
+.reason-tag.P0 { background: #fee2e2; color: #dc2626; }
+.reason-tag.P1 { background: #fef3c7; color: #d97706; }
+.reason-tag.P2 { background: #dbeafe; color: #2563eb; }
+.reason-desc { font-size: 12px; color: #6b7280; margin-top: 8px; line-height: 1.5; }
+
+/* 操作区 */
+.action-area {
+    padding: 24px; background: #fff; flex: 1;
+}
+.action-title { font-size: 12px; color: #9ca3af; margin-bottom: 12px; }
+
+.final-text-box {
+    width: 100%; padding: 14px 16px; border: 2px solid #e8e0d5;
+    border-radius: 10px; font-size: 15px; font-family: "Courier New", monospace;
+    line-height: 1.6; resize: vertical; min-height: 80px;
+    background: #faf7f2;
+}
+.final-text-box:focus {
+    outline: none; border-color: #1a2e1a; background: #fff;
+}
+
+.note-box {
+    width: 100%; padding: 10px 14px; border: 1px solid #e8e0d5;
+    border-radius: 8px; font-size: 13px; margin-top: 12px;
+    resize: vertical; min-height: 50px;
+}
+
+.button-row {
+    display: flex; gap: 12px; margin-top: 16px; align-items: center;
+}
+.btn {
+    padding: 10px 24px; border-radius: 8px; font-size: 14px;
+    font-weight: 500; cursor: pointer; border: none; transition: all 0.2s;
+}
+.btn-accept { background: #16a34a; color: #fff; }
+.btn-accept:hover { background: #15803d; }
+.btn-reject { background: #dc2626; color: #fff; }
+.btn-reject:hover { background: #b91c1c; }
+.btn-modify { background: #1a2e1a; color: #fff; }
+.btn-modify:hover { background: #2d4a2d; }
+.btn-skip { background: #f3f4f6; color: #6b7280; }
+.btn-skip:hover { background: #e5e7eb; }
+
+.timer { margin-left: auto; font-size: 13px; color: #6b7280; font-family: monospace; }
+
+/* 底部统计 */
+.bottom-bar {
+    padding: 12px 24px; background: #1a2e1a; color: #fff;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px;
+}
+.bottom-bar span { color: #fbbf24; font-weight: 600; }
+
+/* 快捷键提示 */
+.shortcuts {
+    display: flex; gap: 16px;
+}
+.shortcut { color: #9ca3af; }
+.shortcut kbd {
+    background: rgba(255,255,255,0.15); padding: 2px 6px;
+    border-radius: 4px; font-size: 11px; color: #fff;
+}
+
+/* 响应式 */
+@media (max-width: 1024px) {
+    .left-panel { width: 280px; }
+}
+</style>
+</head>
+<body>
+
+<!-- 顶部栏 -->
+<div class="topbar">
+    <div class="topbar-left">
+        <div class="topbar-title">&#9997; 人工校对工作台</div>
+        <div class="topbar-sub">TCM-Modern-OCR 四级决策链路 · 第3级</div>
+    </div>
+    <div class="topbar-right">
+        <div class="task-counter">待处理: <span id="pendingCount">5</span> | 已完成: <span id="completedCount">0</span></div>
+        <div class="reviewer-badge">
+            <div class="reviewer-avatar">张</div>
+            <span>张审校</span>
+        </div>
+    </div>
+</div>
+
+<!-- 主体 -->
+<div class="main">
+    <!-- 左侧任务列表 -->
+    <div class="left-panel">
+        <div class="panel-header">
+            <button class="filter-btn active" onclick="filterTasks('all')">全部</button>
+            <button class="filter-btn" onclick="filterTasks('P0')">P0</button>
+            <button class="filter-btn" onclick="filterTasks('P1')">P1</button>
+            <button class="filter-btn" onclick="filterTasks('P2')">P2</button>
+        </div>
+        <div class="task-list" id="taskList">
+            <!-- 动态生成 -->
+        </div>
+    </div>
+
+    <!-- 右侧工作区 -->
+    <div class="right-panel" id="workPanel">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;">
+            <div style="text-align:center;">
+                <div style="font-size:48px;margin-bottom:16px;">&#128221;</div>
+                <div style="font-size:16px;">请点击左侧任务开始校对</div>
+                <div style="font-size:12px;margin-top:8px;">或使用快捷键 N 加载下一个任务</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ============== 数据 ==============
+const tasks = [
+    {
+        task_id: "T-001", book_title: "《中医内科学》", page: 45, line: 3,
+        priority: "P0", status: "pending",
+        ocr: "孕妇服用本品，气虚者慎用",
+        consensus: "孕妇忌服本品，气虚者慎用",
+        llm: "孕妇服用本品，气虚者慎用",
+        reasons: [{code:"NEGATION_VIOLATION", name:"否定词完整性破坏", priority:"P0", desc:"LLM将'忌'改为'服'，否定词丢失"}]
+    },
+    {
+        task_id: "T-002", book_title: "《中医内科学》", page: 67, line: 1,
+        priority: "P0", status: "pending",
+        ocr: "附子30g",
+        consensus: "附子10g",
+        llm: "附子30g",
+        reasons: [{code:"DOSAGE_POST_ALERT", name:"剂量异常(LLM修改后)", priority:"P0", desc:"附子30g超出药典上限15g"}]
+    },
+    {
+        task_id: "T-003", book_title: "《方剂学》", page: 89, line: 5,
+        priority: "P0", status: "pending",
+        ocr: "父子10g",
+        consensus: "附子10g",
+        llm: "父子10g",
+        reasons: [{code:"GLYPH_VERIFY_FAILED", name:"字形验证失败", priority:"P0", desc:"LLM将附子改为父子，字形验证拦截"}]
+    },
+    {
+        task_id: "T-004", book_title: "《方剂学》", page: 120, line: 2,
+        priority: "P1", status: "pending",
+        ocr: "白木... [3引擎分歧]",
+        consensus: "白术 (共识)",
+        llm: null,
+        reasons: [{code:"CONSENSUS_DISPUTE", name:"多引擎识别分歧", priority:"P1", desc:"MinerU:白木 PaddleOCR:白术 共识:白术"}]
+    },
+    {
+        task_id: "T-005", book_title: "《金匮要略》", page: 234, line: 5,
+        priority: "P0", status: "pending",
+        ocr: "甘草30g",
+        consensus: "甘草3g",
+        llm: "甘草30g",
+        reasons: [{code:"DOSAGE_POST_ALERT", name:"剂量异常(LLM修改后)", priority:"P0", desc:"甘草正常剂量3g，LLM改为30g"}]
+    },
+];
+
+let currentTask = null;
+let timerInterval = null;
+let secondsElapsed = 0;
+let completedCount = 0;
+
+// ============== 渲染任务列表 ==============
+function renderTaskList(filter) {
+    const list = document.getElementById('taskList');
+    let filtered = tasks.filter(t => t.status !== 'completed');
+    if (filter && filter !== 'all') {
+        filtered = filtered.filter(t => t.priority === filter);
+    }
+    
+    list.innerHTML = filtered.map(t => `
+        <div class="task-item ${t.task_id === (currentTask?.task_id) ? 'active' : ''}" 
+             onclick="loadTask('${t.task_id}')" data-id="${t.task_id}">
+            <div class="task-priority priority-${t.priority}">${t.priority}</div>
+            <div class="task-info">
+                <div class="task-book">${t.book_title} · P${t.page} L${t.line}</div>
+                <div class="task-text">
+                    <span class="wrong">${t.ocr.substring(0, 20)}</span>
+                    <span class="arrow">→</span>
+                    <span class="correct">${t.consensus.substring(0, 20)}</span>
+                </div>
+                <div class="task-meta">${t.reasons.map(r => r.name).join(' · ')}</div>
+            </div>
+        </div>
+    `).join('');
+    
+    document.getElementById('pendingCount').textContent = filtered.length;
+}
+
+// ============== 加载任务 ==============
+function loadTask(taskId) {
+    currentTask = tasks.find(t => t.task_id === taskId);
+    if (!currentTask) return;
+    
+    // 更新列表高亮
+    document.querySelectorAll('.task-item').forEach(el => el.classList.remove('active'));
+    const activeEl = document.querySelector(`[data-id="${taskId}"]`);
+    if (activeEl) activeEl.classList.add('active');
+    
+    // 渲染工作区
+    const panel = document.getElementById('workPanel');
+    panel.innerHTML = `
+        <div class="compare-area">
+            <div class="compare-title">原文对比</div>
+            <div class="compare-row">
+                <div class="compare-label">OCR原始</div>
+                <div class="compare-value value-ocr">${currentTask.ocr}</div>
+            </div>
+            <div class="compare-row">
+                <div class="compare-label">共识结果</div>
+                <div class="compare-value value-consensus">${currentTask.consensus}</div>
+            </div>
+            ${currentTask.llm ? `
+            <div class="compare-row">
+                <div class="compare-label">LLM修改</div>
+                <div class="compare-value value-llm">${currentTask.llm}</div>
+            </div>` : ''}
+        </div>
+        
+        <div class="reason-area">
+            <div class="reason-title">推送原因</div>
+            <div class="reason-tags">
+                ${currentTask.reasons.map(r => `
+                    <span class="reason-tag ${r.priority}">${r.name}</span>
+                `).join('')}
+            </div>
+            <div class="reason-desc">${currentTask.reasons.map(r => r.desc).join('；')}</div>
+        </div>
+        
+        <div class="action-area">
+            <div class="action-title">校对操作</div>
+            <textarea class="final-text-box" id="finalText" placeholder="在此输入最终校对文本...">${currentTask.consensus}</textarea>
+            <textarea class="note-box" id="noteText" placeholder="校对备注（可选）..."></textarea>
+            <div class="button-row">
+                <button class="btn btn-accept" onclick="submitTask('accept')">&#9989; 接受共识</button>
+                <button class="btn btn-reject" onclick="submitTask('reject')">&#10060; 拒绝LLM</button>
+                <button class="btn btn-modify" onclick="submitTask('modify')">&#9998; 手动修改</button>
+                <button class="btn btn-skip" onclick="nextTask()">跳过 N</button>
+                <div class="timer" id="timer">00:00</div>
+            </div>
+        </div>
+        
+        <div class="bottom-bar">
+            <div class="shortcuts">
+                <span class="shortcut"><kbd>A</kbd> 接受</span>
+                <span class="shortcut"><kbd>R</kbd> 拒绝</span>
+                <span class="shortcut"><kbd>M</kbd> 修改</span>
+                <span class="shortcut"><kbd>N</kbd> 下一个</span>
+            </div>
+            <div>当前: <span>${currentTask.book_title}</span> · ${currentTask.reasons[0].name}</div>
+        </div>
+    `;
+    
+    // 启动计时器
+    startTimer();
+    document.getElementById('finalText').focus();
+}
+
+// ============== 计时器 ==============
+function startTimer() {
+    secondsElapsed = 0;
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        secondsElapsed++;
+        const m = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
+        const s = String(secondsElapsed % 60).padStart(2, '0');
+        const el = document.getElementById('timer');
+        if (el) el.textContent = `${m}:${s}`;
+    }, 1000);
+}
+
+// ============== 提交校对 ==============
+function submitTask(action) {
+    if (!currentTask) return;
+    
+    const finalText = document.getElementById('finalText').value;
+    const note = document.getElementById('noteText').value;
+    
+    // 标记完成
+    currentTask.status = 'completed';
+    currentTask.final_text = finalText;
+    currentTask.action = action;
+    currentTask.note = note;
+    currentTask.time_spent = secondsElapsed;
+    
+    completedCount++;
+    document.getElementById('completedCount').textContent = completedCount;
+    
+    // 显示反馈
+    const actionNames = {accept: '接受', reject: '拒绝', modify: '修改'};
+    showToast(`&#9989; 已${actionNames[action]} · ${currentTask.task_id}`);
+    
+    // 自动下一个
+    setTimeout(nextTask, 500);
+}
+
+// ============== 下一个任务 ==============
+function nextTask() {
+    const pending = tasks.filter(t => t.status !== 'completed');
+    if (pending.length === 0) {
+        document.getElementById('workPanel').innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+                <div style="text-align:center;color:#16a34a;">
+                    <div style="font-size:64px;margin-bottom:16px;">&#127881;</div>
+                    <div style="font-size:20px;font-weight:600;">所有任务已完成！</div>
+                    <div style="font-size:14px;color:#6b7280;margin-top:8px;">共处理 ${completedCount} 条校对决策</div>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    // 按优先级排序
+    const order = {P0:0, P1:1, P2:2, P3:3};
+    pending.sort((a, b) => order[a.priority] - order[b.priority]);
+    loadTask(pending[0].task_id);
+}
+
+// ============== 筛选 ==============
+function filterTasks(priority) {
+    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    renderTaskList(priority);
+}
+
+// ============== Toast ==============
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#1a2e1a;color:#fff;padding:12px 20px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+    toast.innerHTML = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+}
+
+// ============== 键盘快捷键 ==============
+document.addEventListener('keydown', (e) => {
+    if (!currentTask) {
+        if (e.key === 'n' || e.key === 'N') nextTask();
+        return;
+    }
+    if (e.target.tagName === 'TEXTAREA') {
+        if (e.key === 'Enter' && e.ctrlKey) submitTask('modify');
+        return;
+    }
+    switch(e.key.toLowerCase()) {
+        case 'a': submitTask('accept'); break;
+        case 'r': submitTask('reject'); break;
+        case 'm': document.getElementById('finalText').focus(); break;
+        case 'n': nextTask(); break;
+    }
+});
+
+// ============== 初始化 ==============
+renderTaskList('all');
+</script>
+
+</body>
+</html>

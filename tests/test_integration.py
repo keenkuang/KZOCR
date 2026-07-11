@@ -109,8 +109,8 @@ def test_run_engine_v07_toc_enrich(tdb):
 # =============================================================================
 
 
-def test_tier1_fails_tier2_takes_over(mini_pdf, tdb):
-    """Tier1 书级引擎失败 → Tier2 云端 VLM 接管 → 页成功。"""
+def test_tier1_fails_tier3_takes_over(mini_pdf, tdb):
+    """Tier1 书级引擎失败 → Tier3 本地 LLM 接管 → 页成功（Tier2 云端已移除）。"""
     os.environ["KZOCR_DB_DIR"] = tdb
     reg = EngineRegistry()
     # Tier1: 抛出异常的书级引擎
@@ -120,10 +120,10 @@ def test_tier1_fails_tier2_takes_over(mini_pdf, tdb):
     reg.register_adapter(
         AdapterMeta(name="t1_fail", label="T1 Fail", tier=1, batch_capable=True),
         EngineConfig(), adapter=FailingBookAdapter())
-    # Tier2: 成功的页级引擎
+    # Tier3: 成功的页级引擎
     reg.register_adapter(
-        AdapterMeta(name="t2_ok", label="T2", tier=2, requires_network=True),
-        EngineConfig(base_url="https://api.deepseek.com/v1"),
+        AdapterMeta(name="t3_ok", label="T3", tier=3),
+        EngineConfig(),
         adapter=MockPageAdapter(["黄芪补气，方用萆薢分清饮"] * 3),
     )
     with pytest.MonkeyPatch.context() as mp:

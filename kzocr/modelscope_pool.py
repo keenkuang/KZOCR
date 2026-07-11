@@ -212,7 +212,7 @@ class _ProviderPool:
         )
         return (resp.choices[0].message.content or "").strip() or None
 
-    def chat(self, messages, max_tokens=4096, temperature=0.1, timeout=60) -> Optional[str]:
+    def chat(self, messages, max_tokens=2048, temperature=0.0, timeout=60) -> Optional[str]:
         if not self.enabled:
             return None
         for _ in range(len(self._models)):
@@ -229,7 +229,7 @@ class _ProviderPool:
         return None
 
     def chat_vision(self, prompt, image_path=None, image_data_url=None,
-                    max_tokens=4096, temperature=0, timeout=90) -> Optional[str]:
+                    max_tokens=2048, temperature=0, timeout=90) -> Optional[str]:
         if not self.enabled:
             return None
         if image_path:

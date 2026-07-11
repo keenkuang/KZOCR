@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stat_card, status_badge, section_title, engine_status_dot, empty_state %}
+{% block breadcrumb %}运营中心 / 实时监控{% endblock %}
+{% block title %}实时监控{% endblock %}
+{% block content %}
+
+<div class="space-y-5 animate-fade-in-up">
+    <!-- 全局统计 -->
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {{ stat_card('引擎总数', engines|length, '已注册', '🔧', 'primary') }}
+        {% set enabled = engines|selectattr('enabled')|list|length %}
+        {{ stat_card('运行中', enabled, '引擎', '✅', 'chart-4' if enabled > 0 else 'chart-3') }}
+        {% set total_pages = engines|sum(attribute='total_pages') %}
+        {{ stat_card('处理页数', total_pages, '累计', '📄', 'chart-2') }}
+        {% set avg_runs = (engines|sum(attribute='runs') / (engines|length if engines|length > 0 else 1))|int %}
+        {{ stat_card('平均运行', avg_runs, '次/引擎', '📊', 'chart-5') }}
+    </div>
+
+    <!-- 引擎状态卡片网格 -->
+    {% if engines %}
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {% for e in engines %}
+        {% set is_degraded = e.error_rate > 10 %}
+        <div class="rounded-lg border card-hover animate-fade-in-up overflow-hidden"
+             style="{% if is_degraded %}border-color:var(--chart-3);{% else %}border-color:oklch(0.88 0.02 80);{% endif %}background:var(--card);"
+             style="animation-delay:{{ '%.2f'|format(0.05 * loop.index0) }}s"
+             id="monitor-card-{{ e.name }}">
+            <!-- Card Header -->
+            <div class="flex items-center justify-between px-4 py-3 border-b"
+                 style="border-color:oklch(0.88 0.02 80);background:oklch(0.97 0.01 85);">
+                <div class="flex items-center gap-2">
+                    <span class="monitor-dot" data-engine="{{ e.name }}">{{ engine_status_dot('gray', '') }}</span>
+                    <span class="font-semibold text-sm">{{ e.name }}</span>
+                </div>
+                <div>
+                    {% if is_degraded %}
+                    {{ status_badge('red', '异常 ' ~ e.error_rate ~ '%') }}
+                    {% elif e.error_rate > 0 %}
+                    {{ status_badge('yellow', '警告 ' ~ e.error_rate ~ '%') }}
+                    {% else %}
+                    {{ status_badge('green', '正常') }}
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Card Body -->
+            <div class="p-4">
+                <div class="grid grid-cols-3 gap-3 text-center text-xs mb-3">
+                    <div class="rounded p-2" style="background:oklch(0.95 0.01 85);">
+                        <p class="text-muted" style="color:oklch(0.52 0.02 60);">总页数</p>
+                        <p class="font-bold font-mono text-sm" style="color:var(--primary);">{{ e.total_pages }}</p>
+                    </div>
+                    <div class="rounded p-2" style="background:oklch(0.95 0.01 85);">
+                        <p class="text-muted" style="color:oklch(0.52 0.02 60);">延迟</p>
+                        <p class="font-bold font-mono text-sm">{{ e.avg_latency_ms|int }}ms</p>
+                    </div>
+                    <div class="rounded p-2" style="background:oklch(0.95 0.01 85);">
+                        <p class="text-muted" style="color:oklch(0.52 0.02 60);">P95</p>
+                        <p class="font-bold font-mono text-sm">{{ e.p95_ms|int }}ms</p>
+                    </div>
+                </div>
+                <div class="flex justify-between text-[10px]" style="color:oklch(0.6 0.02 70);">
+                    <span>运行 {{ e.runs }} 次</span>
+                    <span>吞吐 {{ e.pages_per_min }}页/分</span>
+                    <span>成功 {{ e.success_pages }}/{{ e.total_pages }}</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="rounded-lg border p-8" style="background:var(--card);border-color:oklch(0.88 0.02 80);">
+        {{ empty_state('📊', '暂无引擎数据', '先注册引擎并运行 OCR 处理后自动生成监控数据') }}
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 页面加载时检测各引擎连通性
+document.addEventListener('DOMContentLoaded', function() {
+    var dots = document.querySelectorAll('.monitor-dot .status-dot');
+    dots.forEach(function(dot) {
+        dot.className = 'status-dot yellow animate-ping-slow';
+        dot.title = '检测中';
+    });
+    fetch('/engines/status/all')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            dots.forEach(function(dot) {
+                var card = dot.closest('[id^="monitor-card-"]');
+                if (!card) return;
+                var name = card.id.replace('monitor-card-', '');
+                var st = data[name] || {};
+                if (st.status === 'online') {
+                    dot.className = 'status-dot green';
+                    dot.title = '在线' + (st.latency_ms ? ' (' + st.latency_ms + 'ms)' : '');
+                } else if (st.status === 'auth_required') {
+                    dot.className = 'status-dot yellow';
+                    dot.title = '需认证';
+                } else {
+                    dot.className = 'status-dot red';
+                    dot.title = '离线';
+                }
+            });
+        })
+        .catch(function() {
+            dots.forEach(function(dot) {
+                dot.className = 'status-dot gray';
+            });
+        });
+});
+</script>
+{% endblock %}

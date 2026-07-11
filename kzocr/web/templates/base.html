@@ -5,73 +5,168 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KZOCR Web Panel</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        tcm: {
+                            primary: 'oklch(0.42 0.11 158)',
+                            'primary-light': 'oklch(0.72 0.14 65)',
+                            chart1: 'oklch(0.5 0.13 158)',
+                            chart2: 'oklch(0.7 0.14 65)',
+                            chart3: 'oklch(0.58 0.19 28)',
+                            chart4: 'oklch(0.68 0.1 180)',
+                            chart5: 'oklch(0.55 0.09 50)',
+                            sidebar: 'oklch(0.2 0.02 155)',
+                            'sidebar-hover': 'oklch(0.26 0.03 155)',
+                            bg: 'oklch(0.985 0.008 85)',
+                            card: 'oklch(0.995 0.005 85)',
+                            destructive: 'oklch(0.55 0.20 28)',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
+        :root {
+            --primary: oklch(0.42 0.11 158);
+            --primary-light: oklch(0.72 0.14 65);
+            --chart-1: oklch(0.5 0.13 158);
+            --chart-2: oklch(0.7 0.14 65);
+            --chart-3: oklch(0.58 0.19 28);
+            --chart-4: oklch(0.68 0.1 180);
+            --chart-5: oklch(0.55 0.09 50);
+            --sidebar: oklch(0.2 0.02 155);
+            --sidebar-hover: oklch(0.26 0.03 155);
+            --sidebar-active: oklch(0.72 0.14 65);
+            --background: oklch(0.985 0.008 85);
+            --card: oklch(0.995 0.005 85);
+            --destructive: oklch(0.55 0.20 28);
+            --radius: 0.625rem;
+        }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .sidebar { width: 240px; }
-        .badge { @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full; }
-        .badge-green { @apply badge bg-green-100 text-green-800; }
-        .badge-red { @apply badge bg-red-100 text-red-800; }
-        .badge-yellow { @apply badge bg-yellow-100 text-yellow-800; }
-        .badge-gray { @apply badge bg-gray-100 text-gray-600; }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up { animation: fadeInUp 0.3s ease-out both; }
+
+        @keyframes ping { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+        .animate-ping-slow { animation: ping 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+
+        @keyframes shimmer { 100% { transform: translateX(100%); } }
+        .shimmer {
+            position: relative; overflow: hidden;
+            background: linear-gradient(90deg, oklch(0.95 0.01 85) 25%, oklch(0.98 0.005 85) 50%, oklch(0.95 0.01 85) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+
+        /* Status dot */
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; cursor: default; }
+        .status-dot.green { background: #198754; box-shadow: 0 0 0 3px rgba(25,135,84,0.2); }
+        .status-dot.red { background: #dc3545; }
+        .status-dot.yellow { background: #ffc107; }
+        .status-dot.gray { background: #6c757d; }
+
+        /* Section title decoration */
+        .section-title-deco::before {
+            content: ""; display: inline-block;
+            width: 4px; height: 1em;
+            background: var(--primary);
+            margin-right: 8px;
+            vertical-align: middle;
+            border-radius: 2px;
+        }
+
+        /* Card hover */
+        .card-hover { transition: all 0.2s ease; }
+        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-2px); }
+
+        /* Modal backdrop */
+        .modal-backdrop { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-900">
+<body style="background:var(--background);color:oklch(0.22 0.02 50);">
     <div class="flex h-screen overflow-hidden">
         <!-- Sidebar -->
-        <aside class="sidebar shrink-0 bg-white border-r border-gray-200 flex flex-col">
-            <div class="p-4 border-b border-gray-100">
-                <h1 class="text-lg font-bold text-gray-800">KZOCR</h1>
-                <p class="text-xs text-gray-400 mt-0.5">中医古籍 OCR 编排系统</p>
+        <aside class="sidebar shrink-0 flex flex-col" style="background:var(--sidebar);">
+            <div class="px-5 py-5 border-b" style="border-color:oklch(0.3 0.02 155);">
+                <div class="flex items-center gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-lg" style="background:linear-gradient(135deg,var(--primary),var(--chart-2));">
+                        <span class="text-white text-sm font-bold">KZ</span>
+                    </div>
+                    <div>
+                        <h1 class="text-sm font-bold" style="color:oklch(0.92 0.015 85);">KZOCR</h1>
+                        <p class="text-[10px]" style="color:oklch(0.6 0.02 85);">中医古籍 OCR 编排</p>
+                    </div>
+                </div>
             </div>
-            <nav class="flex-1 p-3 space-y-1 text-sm">
-                <a href="/" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if request.url.path == '/' %}bg-gray-100 font-medium{% endif %}">
-                    <span>📚</span> 书籍列表
-                </a>
-                <a href="/register" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/register' in request.url.path and '/registrations' not in request.url.path %}bg-gray-100 font-medium{% endif %}">
-                    <span>📝</span> 书籍登记
-                </a>
-                <a href="/registrations" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/registrations' in request.url.path %}bg-gray-100 font-medium{% endif %}">
-                    <span>📋</span> 已登记
-                </a>
-                <a href="/pipeline" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/pipeline' in request.url.path %}bg-gray-100 font-medium{% endif %}">
-                    <span>⚡</span> OCR 处理
-                </a>
-                <a href="/engines" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/engines' in request.url.path %}bg-gray-100 font-medium{% endif %}">
-                    <span>🔧</span> 引擎
-                </a>
-                <a href="/prompts" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/prompts' in request.url.path %}bg-gray-100 font-medium{% endif %}">
-                    <span>📝</span> Prompt
-                </a>
-                <a href="/search" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 {% if '/search' in request.url.path %}bg-gray-100 font-medium{% endif %}">
-                    <span>🔍</span> 搜索
-                </a>
-                <div class="text-xs text-gray-400 uppercase px-3 pt-4 pb-1">工具</div>
-                <a href="https://github.com/keenkuang/KZOCR" target="_blank" class="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 text-gray-500">
-                    <span>📖</span> GitHub
-                </a>
+            <nav class="flex-1 overflow-y-auto p-3 space-y-0.5 text-sm">
+                {% set nav_items = [
+                    ('/', '📚', '书籍列表', '运营中心'),
+                    ('/register', '📝', '书籍登记', '运营中心'),
+                    ('/registrations', '📋', '已登记', '运营中心'),
+                    ('/pipeline', '⚡', 'OCR 处理', '运营中心'),
+                    ('/engines', '🔧', '引擎', '核心业务'),
+                    ('/monitor', '📊', '监控', '核心业务'),
+                    ('/benchmark', '📈', '基准测试', '核心业务'),
+                    ('/prompts', '📝', 'Prompt', '核心业务'),
+                    ('/search', '🔍', '搜索', '核心业务'),
+                ] %}
+                {% set current_groups = [] %}
+                {% for href, icon, label, group in nav_items %}
+                    {% set is_active = request.url.path == href or (href != '/' and href in request.url.path) %}
+                    {% if group not in current_groups %}
+                        {% set _ = current_groups.append(group) %}
+                        {% if not loop.first %}
+                        <div class="border-t my-2" style="border-color:oklch(0.3 0.02 155);"></div>
+                        {% endif %}
+                        <div class="text-[10px] uppercase tracking-wider px-3 pt-2 pb-1" style="color:oklch(0.55 0.03 85);">{{ group }}</div>
+                    {% endif %}
+                    <a href="{{ href }}"
+                       class="flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-150"
+                       {% if is_active %}
+                       style="background:var(--sidebar-active);color:oklch(0.18 0.02 50);font-weight:500;"
+                       {% else %}
+                       style="color:oklch(0.75 0.02 85);"
+                       onmouseover="this.style.background='var(--sidebar-hover)';this.style.color='oklch(0.92 0.015 85)';"
+                       onmouseout="this.style.background='transparent';this.style.color='oklch(0.75 0.02 85)';"
+                       {% endif %}>
+                        <span>{{ icon }}</span>
+                        <span>{{ label }}</span>
+                    </a>
+                {% endfor %}
             </nav>
-            <div class="p-3 border-t border-gray-100 text-xs text-gray-400">
+            <div class="px-4 py-3 border-t text-[10px]" style="border-color:oklch(0.3 0.02 155);color:oklch(0.5 0.02 85);">
                 KZOCR v0.8
             </div>
         </aside>
 
         <!-- Main -->
         <div class="flex-1 flex flex-col overflow-hidden">
-            <header class="bg-white border-b border-gray-200 px-6 py-3 shrink-0">
+            <header class="shrink-0 px-6 py-3 border-b" style="background:var(--card);border-color:oklch(0.88 0.02 80);">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-xs text-gray-400">{% block breadcrumb %}运营中心{% endblock %}</p>
-                        <h2 class="text-base font-semibold">{% block title %}总览{% endblock %}</h2>
+                        <p class="text-xs" style="color:oklch(0.52 0.02 60);">{% block breadcrumb %}运营中心{% endblock %}</p>
+                        <h2 class="section-title-deco text-base font-semibold" style="color:oklch(0.22 0.02 50);">{% block title %}总览{% endblock %}</h2>
                     </div>
                 </div>
             </header>
             <main class="flex-1 overflow-y-auto p-6">
                 {% block content %}{% endblock %}
             </main>
-            <footer class="border-t bg-white px-6 py-2 shrink-0 text-xs text-gray-400 text-center">
-                KZOCR Web Panel · 中医古籍 OCR
+            <footer class="border-t shrink-0 px-6 py-2 text-xs text-center" style="border-color:oklch(0.88 0.02 80);background:var(--card);color:oklch(0.52 0.02 60);">
+                KZOCR Web Panel · 中医古籍 OCR 编排系统
             </footer>
         </div>
     </div>
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>

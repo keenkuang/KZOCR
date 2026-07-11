@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Protocol
+
+import numpy as np
 
 from kzocr.engine.types import GlyphVerdict
 from kzocr.engines import leakage as _leakage
@@ -410,4 +413,246 @@ class GlyphVerifier:
             confidence=0.5,
             details=f"has_fail={has_fail},has_unknown={has_unknown}",
             detector_name="GlyphVerifier",
+        )
+
+    def verify_with_vision(
+        self,
+        text: str,
+        context: DetectorContext,
+        page_img: Optional[np.ndarray] = None,
+        vision_adapter: Optional["VisionRecheckAdapter"] = None,
+    ) -> GlyphVerdict:
+        """两级校验：文本级 + 视觉回看，两者都必须通过。
+
+        1. 文本级校验始终执行（5 个检测器，<50ms）
+        2. 视觉回看始终执行（如有适配器，~1.5s）
+        3. 两者都通过 → PASS/RARE
+        4. 任一不通过 → FAIL（降级触发 Tier2 或人工）
+
+        Args:
+            text: 待验证文本
+            context: 检测上下文
+            page_img: 页面 numpy 图像 (H,W,3)
+            vision_adapter: 视觉回看适配器实例
+        """
+        # ── 第 1 步：文本级校验（始终执行）──
+        text_verdict = self.verify(text, context)
+
+        # ── 第 2 步：视觉回看（始终执行，如有适配器）──
+        vision_verdict: Optional[GlyphVerdict] = None
+        if page_img is not None and vision_adapter is not None:
+            try:
+                vision_verdict = vision_adapter.recheck(
+                    text=text,
+                    page_img=page_img,
+                    engine_label=context.engine_label,
+                )
+            except Exception as exc:
+                _logger.warning("[verifier] 视觉回看失败: %s", exc)
+
+        # ── 第 3 步：综合裁决 ──
+        text_ok = text_verdict.status in ("PASS", "RARE")
+        vision_ok = (vision_verdict is None) or (vision_verdict.status == "PASS")
+
+        if text_ok and vision_ok:
+            if text_verdict.status == "PASS" and vision_verdict is None:
+                return text_verdict  # 纯文本校验通过
+            # 标记视觉辅助通过
+            return GlyphVerdict(
+                status=text_verdict.status,
+                confidence=min(text_verdict.confidence, 0.8),
+                details=(
+                    f"{text_verdict.details or ''}"
+                    f"{';vision_recheck_passed' if vision_verdict and vision_verdict.status == 'PASS' else ''}"
+                ),
+                detector_name="GlyphVerifier",
+            )
+
+        # 无视觉适配器时保留 UNCERTAIN（让编排器决定：不确定页可人工复核）
+        if text_verdict.status == "UNCERTAIN" and vision_verdict is None:
+            return text_verdict
+
+        # 任一不通过 → FAIL
+        fail_reasons = []
+        if not text_ok:
+            fail_reasons.append(f"text={text_verdict.status}")
+        if vision_verdict is not None and not vision_ok:
+            fail_reasons.append(f"vision={vision_verdict.status}")
+
+        return GlyphVerdict(
+            status="FAIL",
+            confidence=0.3,
+            details=";".join(fail_reasons) + f";text_detail={text_verdict.details or ''}",
+            detector_name="GlyphVerifier+Vision",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
+# VisionRecheckAdapter — 视觉回看（§4.2.7）
+# ═══════════════════════════════════════════════════════════════
+
+
+class VisionRecheckAdapter:
+    """视觉回看适配器：用 VL 模型验证 OCR 文本与图像的匹配度。
+
+    对文本级校验未放行的行，将页面图像 + OCR 文本发给 VL 模型做二次确认。
+    支持 SenseNova（首选）和 OpenAI 兼容的 VL 模型。
+
+    设计依据：
+    - v0.2 ocr-engine-unification.md §4.2.7
+    - §8 假设 1 裁决：协议层预留 VisionRecheckAdapter/recheck 挂点
+    """
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "",
+        max_image_pixels: int = 2048,
+        timeout: int = 30,
+    ) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+        self.max_image_pixels = max_image_pixels
+        self.timeout = timeout
+
+    @classmethod
+    def sensenova_default(cls) -> "VisionRecheckAdapter":
+        """使用 SenseNova 6.7-flash-lite 的默认配置。"""
+        return cls(
+            api_key=os.environ.get("KZOCR_SENSENOVA_API_KEY", ""),
+            base_url="https://token.sensenova.cn/v1",
+            model="sensenova-6.7-flash-lite",
+        )
+
+    @classmethod
+    def modelscope_default(cls) -> "VisionRecheckAdapter":
+        """使用 ModelScope Qwen3-VL-8B 的默认配置。"""
+        return cls(
+            api_key=os.environ.get("KZOCR_MODELSCOPE_API_KEY", ""),
+            base_url="https://api-inference.modelscope.cn/v1",
+            model="Qwen/Qwen3-VL-8B-Instruct",
+        )
+
+    def _resize_image(self, img: np.ndarray) -> np.ndarray:
+        """缩放图像至 VL 模型可接受的尺寸（max 2048 长边）。"""
+        h, w = img.shape[:2]
+        scale = min(self.max_image_pixels / max(h, w), 1.0)
+        if scale >= 1.0:
+            return img
+        from PIL import Image as PILImage
+        pil = PILImage.fromarray(img)
+        pil = pil.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
+        return np.array(pil)
+
+    def _img_to_b64(self, img: np.ndarray) -> str:
+        """numpy 图像 → base64 data URL（JPEG 高质量）。"""
+        from PIL import Image as PILImage
+        import io
+        pil = PILImage.fromarray(img)
+        buf = io.BytesIO()
+        pil.save(buf, format="JPEG", quality=90)
+        import base64
+        return f"data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}"
+
+    def recheck(
+        self,
+        text: str,
+        page_img: np.ndarray,
+        bbox: tuple | None = None,
+        engine_label: str = "",
+    ) -> GlyphVerdict:
+        """视觉回看主入口。
+
+        Args:
+            text: 待验证的 OCR 文本
+            page_img: 页面图像 (H,W,3)
+            bbox: 可选裁剪区域 (x1,y1,x2,y2)，有则只验证裁剪区域
+            engine_label: 来源引擎名（仅日志）
+
+        Returns:
+            GlyphVerdict: PASS=图像确认文字正确, FAIL=文字与图像不匹配
+        """
+        import time as _time
+
+        if not self.api_key or not self.base_url or not self.model:
+            return GlyphVerdict(
+                status="UNKNOWN",
+                confidence=0.0,
+                details="vision_recheck_not_configured",
+                detector_name="VisionRecheckAdapter",
+            )
+
+        # 裁剪 bbox 区域（如果有）
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox
+            crop = page_img[y1:y2, x1:x2]
+            if crop.size == 0:
+                crop = self._resize_image(page_img)
+        else:
+            crop = self._resize_image(page_img)
+
+        img_b64 = self._img_to_b64(crop)
+
+        # 构造验证 prompt
+        verify_prompt = (
+            "逐字核对以下OCR识别结果与图片中的文字是否完全一致。\n\n"
+            f"OCR结果：{text}\n\n"
+            "核对要求：\n"
+            "1. 逐字比对，包括汉字、数字、标点符号（，。、？！""''《》（）；：）、英文字母、特殊符号（§◇@#等）\n"
+            "2. 检查是否多字、漏字、错字、顺序颠倒\n"
+            "3. 检查数字、剂量、百分比是否完全匹配\n"
+            "4. 检查全半角标点是否与图片一致\n\n"
+            "如果图片中每个字符（含标点）都与OCR结果完全匹配，请仅回答 PASS。\n"
+            "如果存在任何不匹配（包括标点符号差异），请仅回答 FAIL。"
+        )
+
+        import json
+        import urllib.request
+
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        payload = json.dumps({
+            "model": self.model,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": img_b64}},
+                {"type": "text", "text": verify_prompt},
+            ]}],
+            "max_tokens": 2048,
+            "temperature": 0.0,
+            "reasoning_effort": "none",
+        }).encode()
+
+        t0 = _time.time()
+        try:
+            req = urllib.request.Request(url, data=payload, method="POST")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Authorization", f"Bearer {self.api_key}")
+            resp = urllib.request.urlopen(req, timeout=self.timeout)
+            body = json.loads(resp.read().decode())
+            ms = int((_time.time() - t0) * 1000)
+            answer = (body.get("choices", [{}])[0]
+                      .get("message", {}).get("content", "") or "").strip()
+            _logger.info("[VisionRecheck] %s → %s (%dms)", engine_label or self.model, answer[:50], ms)
+        except Exception as exc:
+            _logger.warning("[VisionRecheck] API 调用失败: %s", exc)
+            return GlyphVerdict(
+                status="UNKNOWN",
+                confidence=0.0,
+                details=f"vision_recheck_api_error;{str(exc)[:60]}",
+                detector_name="VisionRecheckAdapter",
+            )
+
+        if answer.upper().startswith("PASS"):
+            return GlyphVerdict(
+                status="PASS",
+                confidence=0.7,
+                details=f"vision_recheck_passed;latency_ms={ms}",
+                detector_name="VisionRecheckAdapter",
+            )
+        return GlyphVerdict(
+            status="FAIL",
+            confidence=0.5,
+            details=f"vision_recheck_failed;response={answer[:100]};latency_ms={ms}",
+            detector_name="VisionRecheckAdapter",
         )

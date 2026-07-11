@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "model_name": "deepseek-ai/DeepSeek-OCR",
+  "base_url": "https://api.siliconflow.cn/v1",
+  "api_key_env": "KZOCR_SILICONFLOW_API_KEY",
+  "workers": 5,
+  "rate_limit": 30,
+  "batch_size": 10,
+  "adaptive": {
+    "enabled": true,
+    "min_workers": 2,
+    "max_workers": 10
+  },
+  "prompt_overrides": null,
+  "name": "siliconflow-deepseek-ocr"
+}

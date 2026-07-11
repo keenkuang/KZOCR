@@ -10,9 +10,9 @@ out/
 exports/
 *.log
 
-# 本地子模块（按需通过 scripts/setup_submodules.sh 拉取）
+# 本地子模块目录（代码已整合到 kzocr/tcm_ocr/）
 /engines/
-console/
+/console/
 
 # 运行时数据库产物
 *.db

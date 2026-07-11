@@ -111,6 +111,10 @@ class TestRunRealRouting:
 class TestRunRealInternal:
     """_run_real() 内部行为测试（全 mock 环境）。"""
 
+    @pytest.mark.skipif(
+        "not os.environ.get('KIMI_ENGINE_DIR')",
+        reason="需要 KIMI_ENGINE_DIR 环境变量指向 kimi 引擎目录",
+    )
     def test_real_success(self, mock_real_env, real_cfg_full):
         """正常链路：返回 BookResult，包含正确标题和 book_code。"""
         book = _run_real("test.pdf", real_cfg_full, "TCM-001")

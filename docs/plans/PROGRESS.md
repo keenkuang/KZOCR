@@ -1,42 +1,32 @@
 # KZOCR 工作状态快照（crash-safe）
 
-> 最后更新：2026-07-10 19:52 CST
+> 最后更新：2026-07-11 12:15 CST
 > 用途：CodeBuddy 当机/重启后，从这里恢复上下文。本文件随代码一起提交并推送到 GitHub。
-> 当前焦点：**v0.5 AMEND — 异常处理体系改进**（D0-D4 已实施并合并，HEAD `1f52052`）
+> 当前焦点：**tcm_ocr 集成 + 视觉回看 + Web UI + 引擎管理**
 
-## 1. 最近已落地并推送 GitHub 的提交（origin/main，用 id_ed25519_kzocr key）
+## 1. 最近已落地并推送 GitHub 的提交（origin/main）
 
 | commit | 内容 |
 |---|---|
-| `2904869` | **docs: v0.5 AMEND** — 异常处理体系改进方案 (D1-D4) |
-| `e9c3c44` | fix: B7 crop_img 瞬态 — mock 示例填充 crop_img_path |
-| `e2df42e` | feat: B5 内置种子资源目录 — 4 个非空 JSON + ResourceStore 加载器 |
-| `835df7d` | fix: C2+C3 安全加固 — 路径穿越防御 + 限流器持久化 + 数据上限守卫 |
-| `7c7dff8` | feat: B6 MAX_PAGES=50 + TOTAL_TIMEOUT=7200s wall-clock budget |
-| `f5168d8` | feat: B3 egress allowlist — code-level hardcoded domain whitelist |
-| `581a958` | feat: Stage 1 implementation — C1 Leakage + C2 Atomic + C3 RateLimiter |
-| `0ac0d85` | docs: round5 multi-role review (6 roles) — v0.4 AMEND summary |
-| `cf3561d` | docs: v0.4 AMEND — absorb TOC project experience (C1-C5) |
-| `0630d57` | fix: round4 review residual issues — freeze contract types + conversion |
-| `d94ec0e` | docs: add test report (21 tests, coverage gaps) |
-| `2e15e87` | test: CloudLLM env mapping unit tests (5 cases) |
-| `a33325d` | docs: v0.3 定稿冻结(B1-B8 裁决) + 更新状态快照 |
+| 待提交 | **feat: tcm_ocr 子模块代码集成到 kzocr/tcm_ocr** — 94 个 Python 文件，导入路径全部更新为内部引用 |
+| 待提交 | **feat: VisionRecheckAdapter 视觉回看** — 两级校验（文本+视觉），温度/max_tokens 统一 |
+| 待提交 | **refactor: 移除 Tier2 云端 VLM** — 编排管道跳过 Tier2 直走 Tier3 |
+| 待提交 | **feat: Web UI 引擎管理** — 完整 CRUD + 状态检测 + TCM 风格设计 |
+| 待提交 | **feat: 监控/基准测试/Prompt 预览页** — 3 个新功能页面 |
 
 - **推送方式**：本仓库已设 `git config core.sshCommand "ssh -i ~/.ssh/id_ed25519_kzocr -o IdentitiesOnly=yes"`（默认 `id_ed25519` 是 khub-TCM 只读 deploy key，会被拒）。推送 KZOCR 必须用 kzocr key。
-- 测试：`pytest tests/` 全 15 例通过（整改提交前已验证）。
+- 测试：`pytest tests/` 全 **482 通过，1 跳过**（需 kimi 引擎环境）。
 
 ## 2. 本次会话已完成
 
-1. **恢复引擎集成**：修复 2 个之前未提交的整改 bug（`to_zai_prisma.py` 缺 `logger` NameError；`test_vlm.py` mock 缺 `engine_label`）。
-2. **解锁真实 kimi 引擎**：上游已修复，`BookPipeline(config)` + `process_book(pdf, book_id)` 与 `kzocr/engine/run.py:_run_real` 调用一致。
-3. **VLM 直连已验证**：`run.py:_run_vlm` 已实现+测试，开关 `KZOCR_USE_VLM=1`。
-4. **round3 多角色评审（8 角色）完成**：`docs/reviews/2026-07-09-round3/` 下 8 份 + `summary.md`。
-5. **方案修订到 v0.2**：吸收评审，落定 5 道硬门槛、结构化适配器返回、字形 `glyph_status` 枚举、版心裁剪非脱敏修正、`UNKNOWN` 入 HumanGate、`is_mock` 阻断 publish、目标 schema=规范 `schema.prisma`、6 项假设裁决。
-6. **round4 多角色评审（v0.2）完成**：`docs/reviews/2026-07-09-round4/` 下 8 份 + `summary.md`。结论 v0.2「有条件定稿」。
-7. **v0.3 定稿冻结（B1–B8）**：写入 `docs/plans/ocr-engine-unification.v0.3-FREEZE.md`，8 项 blocker 全部拍板。
-8. **v0.4 AMEND 落地**：C1-C5 全部实现，114 测试通过。C2+C3 安全加固（Security C2/C3）。B5/B6/B7 内建种子资源、MAX_PAGES、crop_img 瞬态修复。
-9. **kimi_agent_ocr C4 修复**：INSERT OR REPLACE → ON CONFLICT DO UPDATE（本地 `d833cb4`，远程仓库未创建）。
-10. **v0.5 AMEND 方案**：D1-D4 异常处理体系改进方案已多次评审并实施。
+1. **tcm_ocr 子模块代码集成**：将 git 子模块（`kimi_agent_ocr` v1.1）的 94 个 Python 文件复制到 `kzocr/tcm_ocr/`，所有导入路径从 `tcm_ocr.*` 改为 `kzocr.tcm_ocr.*`。
+2. **VisionRecheckAdapter 视觉回看**：实现两级校验（文本 + 视觉），支持 SenseNova/ModelScope Qwen，始终执行双检，任一不通过即降级。psycopg2 改为惰性导入。
+3. **编排管道重构**：移除 Tier2 云端 VLM，Tier1 失败后直走 Tier3 本地 LLM。
+4. **Web UI 引擎管理**：完整 CRUD + 状态检测（在线/需认证/离线三态）+ TCM 草药配色设计。
+5. **Web UI 新页面**：监控看板、基准测试、Prompt 模板预览页。
+6. **模型参数统一**：所有模型 temperature=0.0，max_tokens=2048。
+7. **引擎注册**：30 个引擎（ModelScope 19 + 硅基流动 3 + SenseNova + 本地引擎）。
+8. **Tier2 移除**：根据用户要求移除 Tier2 云端，Tier1→Tier3→HumanGate。
 
 ## 3. v0.5 AMEND 实施记录（2026-07-10）
 
@@ -50,12 +40,26 @@
 | D3: VLM断点续跑 | `1f52052` | ✅ |
 | D4: 层级异常检测 | `cc6f52a` | ✅ |
 
-## 4. 环境关键事实
+## 4. 当前架构关键事实
 
 - KZOCR 仓库：`/home/keen/KZOCR`，分支 `main`，远程 `git@github.com:keenkuang/KZOCR.git`（SSH）。
-- kimi 真实引擎：`/home/keen/kimi_agent_ocr/tcm_ocr_system_v1.1`（经 `KIMI_ENGINE_DIR` 注入 sys.path），现已可导入。
-- VLM 本地服务（PaddleOCR-VL-1.6 llama-server）**当前未监听** 127.0.0.1:18080 → 跑 VLM 直连需先起服务或配 SenseNova key。
-- 无 GPU 环境：真实 kimi 多引擎逐行 OCR 可能跑不动；VLM 整页推理是无 GPU 最佳出路。
+- tcm_ocr 引擎代码已集成到 `kzocr/tcm_ocr/`（94 个 Python 文件），不再是外部子模块依赖。
+- VisionRecheckAdapter 使用 ModelScope Qwen3-VL-8B（视觉回看），OCR 引擎使用 SenseNova，二者不同供应商。
+- 编排管道：Tier1 书级 → 两级校验（文本+视觉）→ 通过放行 / 失败走 Tier3 → HumanGate。
+- Web UI 运行于 8088 端口（http://127.0.0.1:8088）
+- 30 个引擎已注册（ModelScope 19 + 硅基流动 3 + SenseNova + 本地引擎）
+- 数据库：`kzocr/storage/db.py`（SQLite），每个 book_code 对应一个 .db 文件
+
+## 5. 环境变量
+
+| 变量 | 用途 |
+|------|------|
+| `KZOCR_SENSENOVA_API_KEY` | SenseNova 云端 OCR |
+| `KZOCR_MODELSCOPE_API_KEY` | ModelScope 视觉回看 + OCR |
+| `KZOCR_SILICONFLOW_API_KEY` | 硅基流动 DeepSeek-OCR |
+| `KZOCR_ALLOW_CLOUD_VISION` | 启用云端视觉回看（默认关） |
+| `KZOCR_ENGINE_CONFIG_DIR` | 引擎配置 JSON 存储目录 |
+| `KZOCR_DB_DIR` | SQLite 数据库目录 |
 
 ## 4. round3 + round4 评审核心结论
 

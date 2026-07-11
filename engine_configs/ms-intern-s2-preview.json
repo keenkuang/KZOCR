@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "model_name": "Shanghai_AI_Laboratory/Intern-S2-Preview",
+  "base_url": "https://api-inference.modelscope.cn/v1",
+  "api_key_env": "KZOCR_MODELSCOPE_API_KEY",
+  "workers": 2,
+  "rate_limit": 10,
+  "batch_size": 5,
+  "adaptive": {
+    "enabled": true,
+    "min_workers": 1,
+    "max_workers": 4
+  },
+  "prompt_overrides": null,
+  "name": "ms-intern-s2-preview"
+}

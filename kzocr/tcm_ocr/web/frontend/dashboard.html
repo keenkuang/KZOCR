@@ -1,0 +1,1750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCM-Modern-OCR · 总览仪表盘</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+        /* ==================== 基础重置与变量 ==================== */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* 内容区背景 */
+            --bg-main: #f5f0e8;
+            --bg-card: #ffffff;
+            --bg-card-hover: #fafafa;
+
+            /* 侧边栏 */
+            --sidebar-bg: #1a2e1a;
+            --sidebar-width: 256px;
+            --sidebar-text: #9ca3af;
+            --sidebar-text-hover: #d1d5db;
+            --sidebar-active: #d97706;
+            --sidebar-active-bg: rgba(217, 119, 6, 0.15);
+            --sidebar-group-title: #6b7280;
+
+            /* 指标卡颜色 */
+            --cer-green: #16a34a;
+            --cer-green-light: #dcfce7;
+            --accuracy-amber: #d97706;
+            --accuracy-amber-light: #fef3c7;
+            --intercept-red: #dc2626;
+            --intercept-red-light: #fee2e2;
+
+            /* 文字 */
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --text-muted: #9ca3af;
+
+            /* 边框与阴影 */
+            --border-color: #e5e7eb;
+            --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+            --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
+            --shadow-header: 0 1px 3px rgba(0, 0, 0, 0.04);
+
+            /* 进度条背景 */
+            --progress-bg: #e5e7eb;
+
+            /* 顶部栏 */
+            --header-height: 64px;
+
+            /* 圆角 */
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ==================== 布局框架 ==================== */
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* ==================== 左侧导航栏 ==================== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            z-index: 100;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+        }
+
+        /* Logo 区域 */
+        .sidebar-logo {
+            padding: 20px 20px 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .sidebar-logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .sidebar-logo-icon svg {
+            width: 22px;
+            height: 22px;
+            color: #fff;
+        }
+
+        .sidebar-logo-text {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            overflow: hidden;
+        }
+
+        .sidebar-logo-brand {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
+        .sidebar-logo-sub {
+            font-size: 11px;
+            color: var(--sidebar-text);
+            white-space: nowrap;
+        }
+
+        /* 导航菜单 */
+        .sidebar-nav {
+            flex: 1;
+            padding: 12px 12px;
+            overflow-y: auto;
+        }
+
+        .nav-group {
+            margin-bottom: 4px;
+        }
+
+        .nav-group-title {
+            padding: 12px 12px 6px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--sidebar-group-title);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--sidebar-text);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            margin-bottom: 1px;
+            position: relative;
+        }
+
+        .nav-item:hover {
+            background: rgba(255,255,255,0.05);
+            color: var(--sidebar-text-hover);
+        }
+
+        .nav-item.active {
+            background: var(--sidebar-active-bg);
+            color: var(--sidebar-active);
+        }
+
+        .nav-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 16px;
+            background: var(--sidebar-active);
+            border-radius: 0 2px 2px 0;
+        }
+
+        .nav-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            opacity: 0.8;
+        }
+
+        .nav-item.active .nav-icon {
+            opacity: 1;
+            color: var(--sidebar-active);
+        }
+
+        .nav-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 红色徽章 */
+        .nav-badge {
+            background: #dc2626;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 1px 6px;
+            border-radius: 10px;
+            min-width: 18px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        /* 侧边栏底部 */
+        .sidebar-footer {
+            padding: 12px 20px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            font-size: 11px;
+            color: var(--sidebar-group-title);
+            line-height: 1.6;
+        }
+
+        /* ==================== 主内容区 ==================== */
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* ==================== 顶部导航栏 ==================== */
+        .top-header {
+            height: var(--header-height);
+            background: var(--bg-main);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 28px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            border-bottom: 1px solid rgba(0,0,0,0.04);
+        }
+
+        .header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .breadcrumb {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .breadcrumb a {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .breadcrumb a:hover {
+            color: var(--text-secondary);
+        }
+
+        .breadcrumb-sep {
+            font-size: 10px;
+            opacity: 0.6;
+        }
+
+        .page-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: 0.3px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* 搜索框 */
+        .search-box {
+            position: relative;
+            width: 240px;
+        }
+
+        .search-box input {
+            width: 100%;
+            height: 36px;
+            padding: 0 12px 0 36px;
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            background: var(--bg-card);
+            font-size: 13px;
+            color: var(--text-primary);
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-box input:focus {
+            border-color: var(--cer-green);
+            box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.08);
+        }
+
+        .search-box svg {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            color: var(--text-muted);
+        }
+
+        /* 通知铃铛 */
+        .header-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--bg-card);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+
+        .header-btn:hover {
+            background: #f3f4f6;
+        }
+
+        .header-btn svg {
+            width: 18px;
+            height: 18px;
+            color: var(--text-secondary);
+        }
+
+        .btn-badge {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 18px;
+            height: 18px;
+            background: #dc2626;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 600;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid var(--bg-main);
+        }
+
+        /* 用户信息 */
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 4px 12px 4px 4px;
+            border-radius: 20px;
+            background: var(--bg-card);
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+
+        .user-info:hover {
+            background: #f3f4f6;
+        }
+
+        .user-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+
+        .user-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .user-email {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* ==================== 内容区域 ==================== */
+        .content-area {
+            flex: 1;
+            padding: 20px 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* ==================== 指标卡片行 ==================== */
+        .metrics-row {
+            display: grid;
+            gap: 16px;
+        }
+
+        .metrics-row-4 {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        .metrics-row-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .metrics-row-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        /* 小型指标卡 */
+        .metric-card-sm {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            box-shadow: var(--shadow-card);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+        }
+
+        .metric-card-sm:hover {
+            box-shadow: var(--shadow-card-hover);
+            transform: translateY(-1px);
+        }
+
+        .metric-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .metric-icon svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        .metric-icon.blue {
+            background: #eff6ff;
+            color: #2563eb;
+        }
+
+        .metric-icon.green {
+            background: #f0fdf4;
+            color: #16a34a;
+        }
+
+        .metric-icon.purple {
+            background: #faf5ff;
+            color: #9333ea;
+        }
+
+        .metric-icon.orange {
+            background: #fff7ed;
+            color: #ea580c;
+        }
+
+        .metric-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .metric-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+            margin-bottom: 3px;
+        }
+
+        .metric-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .metric-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* 大型指标卡 */
+        .metric-card-lg {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            box-shadow: var(--shadow-card);
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card-lg::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 20px;
+            bottom: 20px;
+            width: 4px;
+            border-radius: 0 3px 3px 0;
+        }
+
+        .metric-card-lg:hover {
+            box-shadow: var(--shadow-card-hover);
+            transform: translateY(-1px);
+        }
+
+        .metric-card-lg.green-accent::before {
+            background: var(--cer-green);
+        }
+
+        .metric-card-lg.amber-accent::before {
+            background: var(--accuracy-amber);
+        }
+
+        .metric-card-lg.red-accent::before {
+            background: var(--intercept-red);
+        }
+
+        .metric-lg-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+            padding-left: 8px;
+        }
+
+        .metric-lg-title {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .metric-lg-value {
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .metric-lg-value.green {
+            color: var(--cer-green);
+        }
+
+        .metric-lg-value.amber {
+            color: var(--accuracy-amber);
+        }
+
+        .metric-lg-value.red {
+            color: var(--intercept-red);
+        }
+
+        .metric-lg-right {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .metric-lg-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .metric-lg-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .metric-lg-icon.green-bg {
+            background: var(--cer-green-light);
+            color: var(--cer-green);
+        }
+
+        .metric-lg-icon.amber-bg {
+            background: var(--accuracy-amber-light);
+            color: var(--accuracy-amber);
+        }
+
+        .metric-lg-icon.red-bg {
+            background: var(--intercept-red-light);
+            color: var(--intercept-red);
+        }
+
+        .metric-status-tag {
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 12px;
+        }
+
+        .metric-status-tag.green {
+            background: var(--cer-green-light);
+            color: var(--cer-green);
+        }
+
+        .metric-status-tag.amber {
+            background: var(--accuracy-amber-light);
+            color: var(--accuracy-amber);
+        }
+
+        .metric-status-tag.red {
+            background: var(--intercept-red-light);
+            color: var(--intercept-red);
+        }
+
+        .metric-lg-target {
+            font-size: 12px;
+            color: var(--text-muted);
+            padding-left: 8px;
+            margin-bottom: 12px;
+        }
+
+        .metric-progress {
+            padding-left: 8px;
+        }
+
+        .progress-bar-bg {
+            height: 6px;
+            background: var(--progress-bg);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 1s ease;
+        }
+
+        .progress-bar-fill.green {
+            background: linear-gradient(90deg, #22c55e, #16a34a);
+        }
+
+        .progress-bar-fill.amber {
+            background: linear-gradient(90deg, #f59e0b, #d97706);
+        }
+
+        .progress-bar-fill.red {
+            background: linear-gradient(90deg, #ef4444, #dc2626);
+        }
+
+        .metric-progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 6px;
+            padding-left: 8px;
+        }
+
+        /* ==================== 图表卡片 ==================== */
+        .chart-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            box-shadow: var(--shadow-card);
+            transition: all 0.2s ease;
+        }
+
+        .chart-card:hover {
+            box-shadow: var(--shadow-card-hover);
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .chart-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .chart-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .chart-action-btn {
+            padding: 4px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: #fff;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chart-action-btn:hover {
+            background: #f9fafb;
+            border-color: #d1d5db;
+        }
+
+        .chart-action-btn.active {
+            background: var(--cer-green);
+            color: #fff;
+            border-color: var(--cer-green);
+        }
+
+        .chart-body {
+            position: relative;
+            height: 240px;
+        }
+
+        /* ==================== 底部信息栏 ==================== */
+        .footer-bar {
+            margin-top: auto;
+            padding: 16px 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            border-top: 1px solid rgba(0,0,0,0.04);
+        }
+
+        .footer-left, .footer-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .footer-dot {
+            width: 4px;
+            height: 4px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            opacity: 0.5;
+        }
+
+        /* ==================== 加载动画 ==================== */
+        .loading-skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ==================== 响应式 ==================== */
+        @media (max-width: 1280px) {
+            .metrics-row-4 {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .metrics-row-3 {
+                grid-template-columns: 1fr;
+            }
+            .metrics-row-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s;
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+            }
+            .metrics-row-4 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ==================== 工具提示 ==================== */
+        .tooltip {
+            position: relative;
+        }
+
+        .tooltip:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 10px;
+            background: #1f2937;
+            color: #fff;
+            font-size: 12px;
+            border-radius: 6px;
+            white-space: nowrap;
+            z-index: 200;
+            margin-bottom: 6px;
+        }
+
+        /* ==================== 最近活动表格 ==================== */
+        .recent-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .recent-table th {
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .recent-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f3f4f6;
+            color: var(--text-primary);
+        }
+
+        .recent-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .recent-table tr:hover td {
+            background: #f9fafb;
+        }
+
+        .priority-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .priority-fatal {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .priority-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .priority-info {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .priority-pass {
+            background: #dcfce7;
+            color: #15803d;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- ==================== 左侧导航栏 ==================== -->
+        <aside class="sidebar">
+            <!-- Logo -->
+            <div class="sidebar-logo">
+                <div class="sidebar-logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3v18"/>
+                        <path d="M5 10h14"/>
+                        <path d="M5 14h14"/>
+                        <path d="M7 7l5-4 5 4"/>
+                        <path d="M7 17l5 4 5-4"/>
+                    </svg>
+                </div>
+                <div class="sidebar-logo-text">
+                    <span class="sidebar-logo-brand">TCM-Modern-OCR</span>
+                    <span class="sidebar-logo-sub">中医现代出版物校对系统</span>
+                </div>
+            </div>
+
+            <!-- 导航菜单 -->
+            <nav class="sidebar-nav">
+                <!-- 运营中心 -->
+                <div class="nav-group">
+                    <div class="nav-group-title">运营中心</div>
+                    <a href="#" class="nav-item active">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="7" height="9" x="3" y="3" rx="1"/>
+                            <rect width="7" height="5" x="14" y="3" rx="1"/>
+                            <rect width="7" height="9" x="14" y="12" rx="1"/>
+                            <rect width="7" height="5" x="3" y="16" rx="1"/>
+                        </svg>
+                        <span class="nav-text">总览仪表盘</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 3v18h18"/>
+                            <path d="m19 9-5 5-4-4-3 3"/>
+                        </svg>
+                        <span class="nav-text">运营统计</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
+                            <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+                            <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+                            <path d="M10 6h4"/>
+                            <path d="M10 10h4"/>
+                            <path d="M10 14h4"/>
+                            <path d="M10 18h4"/>
+                        </svg>
+                        <span class="nav-text">系统架构</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        <span class="nav-text">系统配置</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" x2="12" y1="15" y2="3"/>
+                        </svg>
+                        <span class="nav-text">数据导出</span>
+                    </a>
+                </div>
+
+                <!-- 核心业务 -->
+                <div class="nav-group">
+                    <div class="nav-group-title">核心业务</div>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+                        </svg>
+                        <span class="nav-text">书籍管理</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/>
+                            <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/>
+                            <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>
+                        </svg>
+                        <span class="nav-text">方剂管理</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 3h3v3h-3z"/>
+                            <path d="M8 3h3v3H8z"/>
+                            <path d="M5 8h14v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8z"/>
+                            <path d="M12 12v4"/>
+                        </svg>
+                        <span class="nav-text">方剂对比</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                        <span class="nav-text">人工校对</span>
+                    </a>
+                </div>
+
+                <!-- 知识库 -->
+                <div class="nav-group">
+                    <div class="nav-group-title">知识库</div>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                        </svg>
+                        <span class="nav-text">中药名范式库</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+                            <path d="M2 12h20"/>
+                        </svg>
+                        <span class="nav-text">经络穴位范式库</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="4 7 4 4 20 4 20 7"/>
+                            <line x1="9" x2="15" y1="20" y2="20"/>
+                            <line x1="12" x2="12" y1="4" y2="20"/>
+                        </svg>
+                        <span class="nav-text">上下文衔接模式</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 7v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V3h-4"/>
+                            <path d="M3 7h14"/>
+                            <path d="M14 3v4"/>
+                            <path d="M10 3v4"/>
+                            <path d="M6 3v4"/>
+                        </svg>
+                        <span class="nav-text">术语库</span>
+                    </a>
+                </div>
+
+                <!-- 质量管控 -->
+                <div class="nav-group">
+                    <div class="nav-group-title">质量管控</div>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        <span class="nav-text">知识审核中心</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                            <line x1="12" x2="12" y1="9" y2="13"/>
+                            <line x1="12" x2="12.01" y1="17" y2="17"/>
+                        </svg>
+                        <span class="nav-text">否定词拦截</span>
+                        <span class="nav-badge">1</span>
+                    </a>
+                </div>
+
+                <!-- 标准参考 -->
+                <div class="nav-group">
+                    <div class="nav-group-title">标准参考</div>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="m21 21-4.3-4.3"/>
+                        </svg>
+                        <span class="nav-text">药典查询</span>
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                        </svg>
+                        <span class="nav-text">出版社分析</span>
+                    </a>
+                </div>
+            </nav>
+
+            <!-- 侧边栏底部 -->
+            <div class="sidebar-footer">
+                <div>V1.0 知书基线</div>
+                <div>Phase 0 编码入场基线</div>
+            </div>
+        </aside>
+
+        <!-- ==================== 主内容区 ==================== -->
+        <div class="main-content">
+            <!-- 顶部导航栏 -->
+            <header class="top-header">
+                <div class="header-left">
+                    <div class="breadcrumb">
+                        <a href="#">运营中心</a>
+                        <span class="breadcrumb-sep">/</span>
+                        <span>总览</span>
+                    </div>
+                    <h1 class="page-title">总览仪表盘</h1>
+                </div>
+                <div class="header-right">
+                    <div class="search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="m21 21-4.3-4.3"/>
+                        </svg>
+                        <input type="text" placeholder="搜索..." id="searchInput">
+                    </div>
+                    <button class="header-btn tooltip" data-tooltip="通知">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        <span class="btn-badge">1</span>
+                    </button>
+                    <div class="user-info">
+                        <div class="user-avatar">管</div>
+                        <div class="user-details">
+                            <span class="user-name">系统管理员</span>
+                            <span class="user-email">admin@tcm-ocr.local</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- 内容区域 -->
+            <main class="content-area">
+                <!-- 第一行：4个小指标卡 -->
+                <div class="metrics-row metrics-row-4">
+                    <div class="metric-card-sm">
+                        <div class="metric-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value" id="bookCount">10</div>
+                            <div class="metric-label">书籍总数</div>
+                            <div class="metric-sub">已完成4 · 归档1</div>
+                        </div>
+                    </div>
+                    <div class="metric-card-sm">
+                        <div class="metric-icon green">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M11 20A7 7 0 0 1 9.8 6.9C15.5 5 19 7.5 21 11"/>
+                                <path d="M12.5 9.5 11 11"/>
+                                <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+                                <path d="m15 5 4 4"/>
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value" id="paradigmCount">117</div>
+                            <div class="metric-label">范式库总量</div>
+                            <div class="metric-sub">中药62 · 穴位39 · 衍...</div>
+                        </div>
+                    </div>
+                    <div class="metric-card-sm">
+                        <div class="metric-icon purple">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M10 2v7.31"/>
+                                <path d="M14 9.3V1.99"/>
+                                <path d="M8.5 2h7"/>
+                                <path d="M14 9.3a6.5 6.5 0 1 1-4 0"/>
+                                <path d="M5.52 16h12.96"/>
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value" id="formulaCount">8/40</div>
+                            <div class="metric-label">方剂/药材</div>
+                            <div class="metric-sub">方剂组成独立表单提取</div>
+                        </div>
+                    </div>
+                    <div class="metric-card-sm">
+                        <div class="metric-icon orange">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </div>
+                        <div class="metric-content">
+                            <div class="metric-value" id="proofreadCount">8</div>
+                            <div class="metric-label">校对记录</div>
+                            <div class="metric-sub">致命7 · 警告1</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 第二行：3个大指标卡 -->
+                <div class="metrics-row metrics-row-3">
+                    <div class="metric-card-lg green-accent">
+                        <div class="metric-lg-header">
+                            <div>
+                                <div class="metric-lg-title">最终阶段平均CER</div>
+                                <div class="metric-lg-value green" id="cerValue">0.454%</div>
+                            </div>
+                            <div class="metric-lg-right">
+                                <div class="metric-lg-icon green-bg">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <circle cx="12" cy="12" r="6"/>
+                                        <circle cx="12" cy="12" r="2"/>
+                                    </svg>
+                                </div>
+                                <span class="metric-status-tag green">达标</span>
+                            </div>
+                        </div>
+                        <div class="metric-lg-target">目标值 &le; 1%</div>
+                        <div class="metric-progress">
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill green" id="cerProgress" style="width: 54.6%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-progress-label">
+                            <span>当前 0.454%</span>
+                            <span>目标 1%</span>
+                        </div>
+                    </div>
+
+                    <div class="metric-card-lg amber-accent">
+                        <div class="metric-lg-header">
+                            <div>
+                                <div class="metric-lg-title">行级识别准确率</div>
+                                <div class="metric-lg-value amber" id="accuracyValue">99.32%</div>
+                            </div>
+                            <div class="metric-lg-right">
+                                <div class="metric-lg-icon amber-bg">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+                                        <polyline points="16 7 22 7 22 13"/>
+                                    </svg>
+                                </div>
+                                <span class="metric-status-tag amber">达标</span>
+                            </div>
+                        </div>
+                        <div class="metric-lg-target">v1.0 目标 &ge; 95%</div>
+                        <div class="metric-progress">
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill amber" id="accuracyProgress" style="width: 99.32%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-progress-label">
+                            <span>当前 99.32%</span>
+                            <span>目标 95%</span>
+                        </div>
+                    </div>
+
+                    <div class="metric-card-lg red-accent">
+                        <div class="metric-lg-header">
+                            <div>
+                                <div class="metric-lg-title">灾难性错误拦截率</div>
+                                <div class="metric-lg-value red" id="interceptValue">99.33%</div>
+                            </div>
+                            <div class="metric-lg-right">
+                                <div class="metric-lg-icon red-bg">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                    </svg>
+                                </div>
+                                <span class="metric-status-tag red">达标</span>
+                            </div>
+                        </div>
+                        <div class="metric-lg-target">目标 &ge; 99%</div>
+                        <div class="metric-progress">
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill red" id="interceptProgress" style="width: 99.33%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-progress-label">
+                            <span>当前 99.33%</span>
+                            <span>目标 99%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 第三行：2个图表卡 -->
+                <div class="metrics-row metrics-row-2">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div>
+                                <div class="chart-title">近7日处理时长趋势</div>
+                                <div class="chart-subtitle">平均处理时长（分钟）</div>
+                            </div>
+                            <div class="chart-actions">
+                                <button class="chart-action-btn active">7天</button>
+                                <button class="chart-action-btn">30天</button>
+                            </div>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div>
+                                <div class="chart-title">书籍处理状态分布</div>
+                                <div class="chart-subtitle">各阶段书籍数量统计</div>
+                            </div>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="statusChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 第四行：最近决策记录 -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">最近校对决策</div>
+                            <div class="chart-subtitle">近7天质量管控记录</div>
+                        </div>
+                    </div>
+                    <div class="chart-body" style="height: auto;">
+                        <table class="recent-table" id="recentTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>书籍</th>
+                                    <th>页面</th>
+                                    <th>字段</th>
+                                    <th>原始值</th>
+                                    <th>修正值</th>
+                                    <th>优先级</th>
+                                    <th>原因</th>
+                                    <th>时间</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentTableBody">
+                                <!-- JS 填充 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
+
+            <!-- 底部信息栏 -->
+            <footer class="footer-bar">
+                <div class="footer-left">
+                    <span>TCM-Modern-OCR</span>
+                    <span class="footer-dot"></span>
+                    <span>中医现代出版物OCR校对系统</span>
+                    <span class="footer-dot"></span>
+                    <span>基于V5.9说明书构建</span>
+                </div>
+                <div class="footer-right">
+                    <span>Phase 0 编码入场基线</span>
+                    <span class="footer-dot"></span>
+                    <span>20模块</span>
+                    <span class="footer-dot"></span>
+                    <span>4级决策校对链路</span>
+                    <span class="footer-dot"></span>
+                    <span>15视图</span>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+    // ==================== Demo 数据 ====================
+    const demoData = {
+        stats: {
+            book_count: 10,
+            book_completed: 4,
+            book_archived: 1,
+            paradigm_count: 117,
+            paradigm_herb: 62,
+            paradigm_acupoint: 39,
+            paradigm_derived: 16,
+            formula_count: 8,
+            herb_count: 40,
+            proofread_count: 8,
+            proofread_fatal: 7,
+            proofread_warning: 1,
+            cer: 0.454,
+            accuracy: 99.32,
+            intercept_rate: 99.33
+        },
+        dailyTrend: {
+            labels: ['05-18', '05-19', '05-20', '05-21', '05-22', '05-23', '05-24'],
+            data: [12.5, 10.8, 15.2, 8.6, 11.3, 9.7, 7.2]
+        },
+        bookStatus: {
+            labels: ['已完成', '处理中', '待处理', '已归档'],
+            data: [4, 3, 2, 1],
+            colors: ['#16a34a', '#d97706', '#6b7280', '#9ca3af']
+        },
+        recentDecisions: [
+            { id: 8024, book: '中医方剂学', page: 'P156', field: 'dosage', original: '三片', corrected: '三钱', priority: 'fatal', reason: '剂量单位错误', time: '2025-05-24 14:32' },
+            { id: 8023, book: '中医方剂学', page: 'P156', field: 'herb_name', original: '黄芹', corrected: '黄芩', priority: 'fatal', reason: '中药名错误', time: '2025-05-24 14:30' },
+            { id: 8022, book: '中药学', page: 'P89', field: 'property', original: '大寒', corrected: '微寒', priority: 'fatal', reason: '药性标注错误', time: '2025-05-24 11:15' },
+            { id: 8021, book: '中药学', page: 'P88', field: 'channel', original: '肺、大肠', corrected: '肺、胃', priority: 'fatal', reason: '归经错误', time: '2025-05-23 16:45' },
+            { id: 8020, book: '针灸学', page: 'P203', field: 'point_name', original: '足三理', corrected: '足三里', priority: 'fatal', reason: '穴位名错误', time: '2025-05-23 10:22' },
+            { id: 8019, book: '针灸学', page: 'P202', field: 'location', original: '膝上三寸', corrected: '膝下三寸', priority: 'warning', reason: '位置描述模糊', time: '2025-05-22 15:08' },
+            { id: 8018, book: '中医方剂学', page: 'P112', field: 'ingredient', original: '人參', corrected: '人参', priority: 'fatal', reason: '异体字标准化', time: '2025-05-22 09:45' },
+            { id: 8017, book: '中医基础理论', page: 'P45', field: 'term', original: '阴陽', corrected: '阴阳', priority: 'fatal', reason: '繁简混用', time: '2025-05-21 14:20' }
+        ]
+    };
+
+    // ==================== Chart 实例存储 ====================
+    let trendChartInstance = null;
+    let statusChartInstance = null;
+
+    // ==================== API 数据获取 ====================
+    async function fetchData(endpoint, fallback) {
+        try {
+            const response = await fetch(`/api/dashboard/${endpoint}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+        } catch (err) {
+            console.warn(`API /api/dashboard/${endpoint} 不可用，使用演示数据`, err);
+            return fallback;
+        }
+    }
+
+    // ==================== 更新指标卡 ====================
+    function updateMetrics(data) {
+        const s = data || demoData.stats;
+
+        document.getElementById('bookCount').textContent = s.book_count || 0;
+        document.querySelector('.metric-card-sm:nth-child(1) .metric-sub').textContent =
+            `已完成${s.book_completed || 0} · 归档${s.book_archived || 0}`;
+
+        document.getElementById('paradigmCount').textContent = s.paradigm_count || 0;
+        document.querySelector('.metric-card-sm:nth-child(2) .metric-sub').textContent =
+            `中药${s.paradigm_herb || 0} · 穴位${s.paradigm_acupoint || 0} · 衍...`;
+
+        document.getElementById('formulaCount').textContent =
+            `${s.formula_count || 0}/${s.herb_count || 0}`;
+
+        document.getElementById('proofreadCount').textContent = s.proofread_count || 0;
+        document.querySelector('.metric-card-sm:nth-child(4) .metric-sub').textContent =
+            `致命${s.proofread_fatal || 0} · 警告${s.proofread_warning || 0}`;
+
+        // 更新大指标卡
+        const cer = (s.cer || 0).toFixed(3);
+        const acc = (s.accuracy || 0).toFixed(2);
+        const icp = (s.intercept_rate || 0).toFixed(2);
+
+        document.getElementById('cerValue').textContent = cer + '%';
+        document.getElementById('accuracyValue').textContent = acc + '%';
+        document.getElementById('interceptValue').textContent = icp + '%';
+
+        // 更新进度条
+        const cerProgress = Math.min((s.cer || 0) / 1 * 100, 100);
+        document.getElementById('cerProgress').style.width = cerProgress + '%';
+        document.getElementById('accuracyProgress').style.width = acc + '%';
+        document.getElementById('interceptProgress').style.width = icp + '%';
+
+        // 更新进度标签
+        document.querySelector('.metric-card-lg.green-accent .metric-progress-label span:first-child').textContent = `当前 ${cer}%`;
+        document.querySelector('.metric-card-lg.amber-accent .metric-progress-label span:first-child').textContent = `当前 ${acc}%`;
+        document.querySelector('.metric-card-lg.red-accent .metric-progress-label span:first-child').textContent = `当前 ${icp}%`;
+    }
+
+    // ==================== 初始化趋势图 ====================
+    function initTrendChart(data) {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        const d = data || demoData.dailyTrend;
+
+        if (trendChartInstance) {
+            trendChartInstance.destroy();
+        }
+
+        trendChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    label: '处理时长（分钟）',
+                    data: d.data,
+                    borderColor: '#16a34a',
+                    backgroundColor: 'rgba(22, 163, 74, 0.08)',
+                    borderWidth: 2.5,
+                    pointBackgroundColor: '#16a34a',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1f2937',
+                        titleFont: { size: 12 },
+                        bodyFont: { size: 13 },
+                        padding: 10,
+                        cornerRadius: 8,
+                        displayColors: false,
+                        callbacks: {
+                            label: function(context) {
+                                return context.parsed.y + ' 分钟';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            font: { size: 11 },
+                            color: '#9ca3af'
+                        },
+                        border: { display: false }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(0,0,0,0.03)',
+                            drawBorder: false
+                        },
+                        ticks: {
+                            font: { size: 11 },
+                            color: '#9ca3af',
+                            stepSize: 5,
+                            callback: function(v) { return v + 'm'; }
+                        },
+                        border: { display: false }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                }
+            }
+        });
+    }
+
+    // ==================== 初始化状态图 ====================
+    function initStatusChart(data) {
+        const ctx = document.getElementById('statusChart').getContext('2d');
+        const d = data || demoData.bookStatus;
+
+        if (statusChartInstance) {
+            statusChartInstance.destroy();
+        }
+
+        statusChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    data: d.data,
+                    backgroundColor: d.colors || ['#16a34a', '#d97706', '#6b7280', '#9ca3af'],
+                    borderWidth: 0,
+                    hoverOffset: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '65%',
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            padding: 16,
+                            font: { size: 12 },
+                            color: '#6b7280',
+                            generateLabels: function(chart) {
+                                const data = chart.data;
+                                return data.labels.map((label, i) => ({
+                                    text: `${label}  (${data.datasets[0].data[i]})`,
+                                    fillStyle: data.datasets[0].backgroundColor[i],
+                                    strokeStyle: data.datasets[0].backgroundColor[i],
+                                    lineWidth: 0,
+                                    pointStyle: 'circle',
+                                    index: i
+                                }));
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: '#1f2937',
+                        bodyFont: { size: 13 },
+                        padding: 10,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const pct = ((context.parsed / total) * 100).toFixed(1);
+                                return ` ${context.label}: ${context.parsed} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            },
+            plugins: [{
+                id: 'centerText',
+                beforeDraw: function(chart) {
+                    const { width } = chart;
+                    const { top, bottom } = chart.chartArea;
+                    const ctx = chart.ctx;
+                    const centerY = (top + bottom) / 2;
+
+                    ctx.save();
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    // 总数
+                    const total = chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                    ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, sans-serif';
+                    ctx.fillStyle = '#1f2937';
+                    ctx.fillText(total.toString(), width / 2 - 40, centerY - 8);
+
+                    // 标签
+                    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+                    ctx.fillStyle = '#9ca3af';
+                    ctx.fillText('书籍总数', width / 2 - 40, centerY + 14);
+
+                    ctx.restore();
+                }
+            }]
+        });
+    }
+
+    // ==================== 填充最近决策表格 ====================
+    function fillRecentTable(data) {
+        const tbody = document.getElementById('recentTableBody');
+        const decisions = data || demoData.recentDecisions;
+
+        tbody.innerHTML = decisions.map(d => {
+            const priorityClass = d.priority === 'fatal' ? 'priority-fatal' :
+                                  d.priority === 'warning' ? 'priority-warning' :
+                                  d.priority === 'info' ? 'priority-info' : 'priority-pass';
+            const priorityLabel = d.priority === 'fatal' ? '致命' :
+                                  d.priority === 'warning' ? '警告' :
+                                  d.priority === 'info' ? '提示' : '通过';
+            return `
+                <tr>
+                    <td>#${d.id}</td>
+                    <td>${d.book}</td>
+                    <td>${d.page}</td>
+                    <td>${d.field}</td>
+                    <td style="color:#dc2626;text-decoration:line-through">${d.original}</td>
+                    <td style="color:#16a34a;font-weight:500">${d.corrected}</td>
+                    <td><span class="priority-badge ${priorityClass}">${priorityLabel}</span></td>
+                    <td>${d.reason}</td>
+                    <td style="color:var(--text-muted);font-size:12px">${d.time}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // ==================== 搜索框功能 ====================
+    document.getElementById('searchInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            const query = this.value.trim();
+            if (query) {
+                alert('搜索功能：' + query);
+            }
+        }
+    });
+
+    // ==================== 图表周期切换 ====================
+    document.querySelectorAll('.chart-action-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.chart-action-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            // 模拟切换数据
+            if (this.textContent === '30天') {
+                initTrendChart({
+                    labels: Array.from({length: 15}, (_, i) => `05-${i + 10}`),
+                    data: Array.from({length: 15}, () => Math.random() * 15 + 5)
+                });
+            } else {
+                initTrendChart(demoData.dailyTrend);
+            }
+        });
+    });
+
+    // ==================== 加载所有数据 ====================
+    async function loadAllData() {
+        // 获取统计数据
+        const stats = await fetchData('stats', demoData.stats);
+        updateMetrics(stats);
+
+        // 获取趋势数据
+        const trend = await fetchData('daily-trend', demoData.dailyTrend);
+        initTrendChart(trend);
+
+        // 获取状态数据
+        const status = await fetchData('books-status', demoData.bookStatus);
+        initStatusChart(status);
+
+        // 获取最近决策
+        const recent = await fetchData('recent-decisions', { decisions: demoData.recentDecisions });
+        fillRecentTable(recent.decisions || recent);
+    }
+
+    // ==================== 初始化 ====================
+    document.addEventListener('DOMContentLoaded', function() {
+        loadAllData();
+
+        // 30秒自动刷新
+        setInterval(loadAllData, 30000);
+
+        console.log('[TCM-Modern-OCR] Dashboard 初始化完成，30秒自动刷新已启用');
+    });
+    </script>
+</body>
+</html>

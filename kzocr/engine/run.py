@@ -61,7 +61,7 @@ def _init_v07_registry(cfg) -> EngineRegistry:
         reg.register_adapter(
             AdapterMeta(name="kimi", label="Kimi Pipeline", tier=1, kind="book", batch_capable=True),
             EC(),
-            adapter=BookPipelineAdapter("kimi"),
+            adapter=BookPipelineAdapter("kimi", temperature=0.0),
         )
     # Tier 2: 云端 VLM（SenseNova）
     if cfg.sensenova_api_key:
@@ -69,7 +69,7 @@ def _init_v07_registry(cfg) -> EngineRegistry:
         reg.register_adapter(
             AdapterMeta(name="sensenova", label="SenseNova", tier=2, requires_network=True),
             EC(api_key_env="KZOCR_SENSENOVA_API_KEY", base_url=cfg.sensenova_base_url),
-            adapter=VlmPageAdapter("sensenova"),
+            adapter=VlmPageAdapter("sensenova", temperature=0.0),
         )
     probe_engines(reg)
     return reg
@@ -160,7 +160,7 @@ def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
     if str(engine_dir) not in sys.path:
         sys.path.insert(0, str(engine_dir))
 
-    from tcm_ocr.pipeline.book_pipeline import BookPipeline
+    from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
 
     engine_config = _build_engine_config()
     book_id = book_code or "KZOCR-real"
@@ -269,7 +269,7 @@ def _init_vlm_adapter(cfg) -> object:
 
     if try_sensenova:
         try:
-            from tcm_ocr.core.engines.sensenova_adapter import SenseNovaAdapter
+            from kzocr.tcm_ocr.core.engines.sensenova_adapter import SenseNovaAdapter
 
             adapter = SenseNovaAdapter(
                 api_key=cfg.sensenova_api_key,
@@ -284,7 +284,7 @@ def _init_vlm_adapter(cfg) -> object:
             logger.warning("[VLM] SenseNova 不可用，降级到 PaddleOCR-VL：%s", exc)
 
     # 降级到 PaddleOCR-VL-1.6（本地 llama-server）
-    from tcm_ocr.core.engines.paddleocr_vl16_adapter import PaddleOCRVl16Adapter
+    from kzocr.tcm_ocr.core.engines.paddleocr_vl16_adapter import PaddleOCRVl16Adapter
 
     adapter = PaddleOCRVl16Adapter(
         host=cfg.vlm_host,

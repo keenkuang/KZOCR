@@ -1,20 +1,76 @@
 {% extends "base.html" %}
-{% block breadcrumb %}运营中心 / Prompt 管理{% endblock %}
-{% block title %}Prompt 管理{% endblock %}
+{% from "_macros.html" import section_title, empty_state, status_badge %}
+{% block breadcrumb %}运营中心 / Prompt 模板{% endblock %}
+{% block title %}Prompt 模板{% endblock %}
 {% block content %}
-<div class="bg-white rounded-lg border">
-    <div class="px-4 py-3 border-b"><h3 class="text-sm font-medium">质检 Prompt 模板（{{ prompts|length }} 个）</h3></div>
-    <table class="w-full text-sm">
-        <thead><tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase"><th class="px-4 py-3">名称</th><th class="px-4 py-3">预览</th><th class="px-4 py-3">操作</th></tr></thead>
-        <tbody>{% for p in prompts %}<tr class="border-t hover:bg-gray-50">
-            <td class="px-4 py-3 font-medium">{{ p.name }}</td>
-            <td class="px-4 py-3 text-xs text-gray-500 max-w-md truncate">{{ p.text[:80] }}</td>
-            <td class="px-4 py-3">
-                <a href="/prompts/{{ p.name }}" class="text-blue-600 hover:underline text-xs">编辑</a>
-                <a href="/prompts/{{ p.name }}/delete" class="text-red-500 hover:underline text-xs ml-2">删除</a>
-            </td>
-        </tr>{% else %}<tr><td colspan="3" class="px-4 py-8 text-center text-gray-400">暂无 prompt 模板</td></tr>{% endfor %}
-        </tbody>
-    </table>
+
+{% set pnames = prompts|map(attribute='name')|list %}
+
+<div class="space-y-5 animate-fade-in-up">
+    <!-- 组装预览 -->
+    <div class="rounded-lg border overflow-hidden"
+         style="background:var(--card);border-color:var(--primary);border-width:2px;">
+        <div class="px-5 py-3" style="background:oklch(0.42 0.11 158 / 0.05);border-bottom:1px solid oklch(0.42 0.11 158 / 0.15);">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="section-title-deco text-sm font-semibold" style="color:oklch(0.22 0.02 50);">Prompt 组装预览</h3>
+                    <p class="text-xs mt-0.5" style="color:oklch(0.52 0.02 60);">发送给 LLM 的最终提示词文本</p>
+                </div>
+                {{ status_badge('blue', '只读预览') }}
+            </div>
+        </div>
+        <div class="p-5">
+            {% if prompts %}
+            <pre class="text-xs leading-relaxed font-mono" style="color:oklch(0.32 0.02 55);white-space:pre-wrap;max-height:400px;overflow-y:auto;">
+{%- for p in prompts %}
+=== {{ p.name }} ===
+{% if p.text %}
+{{- p.text -}}
+{% else %}
+<span style="color:oklch(0.6 0.02 70);font-style:italic;">(空)</span>
+{% endif %}
+
+{% endfor -%}
+            </pre>
+            {% else %}
+            {{ empty_state('📝', '暂无 Prompt', '添加 Prompt 后在此查看组装结果') }}
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Prompt 片段卡片网格 -->
+    <div class="rounded-lg border overflow-hidden" style="background:var(--card);border-color:oklch(0.88 0.02 80);">
+        {{ section_title('Prompt 片段', '各段原始值（只读预览，编辑需进入详情页）') }}
+
+        {% if prompts %}
+        <div class="p-4 grid gap-3 sm:grid-cols-2">
+            {% for p in prompts %}
+            <div class="rounded-lg border h-100" style="border-color:oklch(0.88 0.02 80);">
+                <div class="px-4 py-2.5 border-b text-xs font-medium" style="border-color:oklch(0.88 0.02 80);background:oklch(0.97 0.01 85);">
+                    {{ p.name }}
+                    <span class="text-[10px]" style="color:oklch(0.52 0.02 60);">({{ p.text|length }}字)</span>
+                </div>
+                <div class="p-3">
+                    <pre class="text-xs font-mono leading-relaxed" style="color:oklch(0.32 0.02 55);white-space:pre-wrap;max-height:200px;overflow-y:auto;">{{ p.text or '' }}</pre>
+                    {% if not p.text %}
+                    <span style="color:oklch(0.6 0.02 70);font-style:italic;font-size:0.75rem;">(空)</span>
+                    {% endif %}
+                </div>
+                <div class="px-4 py-2 border-t flex justify-end gap-2" style="border-color:oklch(0.88 0.02 80);">
+                    <a href="/prompts/{{ p.name }}" class="text-xs px-2.5 py-1 rounded transition-colors"
+                       style="color:var(--primary);"
+                       onmouseover="this.style.background='oklch(0.42 0.11 158 / 0.1)'" onmouseout="this.style.background='transparent'">编辑</a>
+                    <a href="/prompts/{{ p.name }}/delete" class="text-xs px-2.5 py-1 rounded transition-colors"
+                       style="color:var(--destructive);"
+                       onmouseover="this.style.background='oklch(0.55 0.20 28 / 0.1)'" onmouseout="this.style.background='transparent'"
+                       onclick="return confirm('确定删除 Prompt {{ p.name }}？')">删除</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="p-8">{{ empty_state('📝', '暂无 Prompt 模板', '系统将在首次访问时自动创建默认 Prompt，或手动添加') }}</div>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}

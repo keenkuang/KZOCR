@@ -134,43 +134,35 @@ def test_tier1_success(monkeypatch):
     assert b_adapter.calls == 1
 
 
-# ── 2. Tier1 失败 → Tier2 成功 ──
-def test_tier1_fail_tier2_success(monkeypatch):
+# ── 2. Tier1 失败 → Tier3 成功（跳过 Tier2）──
+def test_tier1_fail_tier3_success(monkeypatch):
     txt_toxic = "附子 20g"  # 触发 ToxinDose FAIL(critical)
     txt_ok = "黄芪补气，方用萆薢分清饮"
     reg = _reg(
         tier1_pages=_text_pages(txt_toxic),
-        tier2_texts=[txt_ok],
-        cloud_base_url="https://token.sensenova.cn/v1/chat/completions",
+        tier3_texts=[txt_ok],
     )
-    result = orchestrate_book("/fp", "bk02", StubConfig(allow_cloud_vision=True), reg)
+    result = orchestrate_book("/fp", "bk02", StubConfig(), reg)
     assert len(result.pages) == 1
-    assert "萆薢" in result.pages[0].text  # Tier2 文本被采纳
+    assert "萆薢" in result.pages[0].text  # Tier3 文本被采纳
     assert not result.failed_pages
 
 
-# ── 3. Tier2 云端 egress 拦截 → Tier3 兜底 ──
-def test_egress_blocked_falls_to_tier3(monkeypatch):
+# ── 3. Tier1 失败 → Tier3 兜底（跳过 Tier2 云端）──
+def test_tier1_fail_tier3_success(monkeypatch):
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气固表 T3"
     reg = _reg(
         tier1_pages=_text_pages(txt_toxic),
-        tier2_texts=["不会执行的文本"],
         tier3_texts=[txt_t3],
-        cloud_base_url="https://blocked.invalid/v1",
     )
-    # blocked.invalid → egress 拒绝，Tier2 被排除 → Tier3 兜底
-    # block.invalid 域名不在 egress allowlist → raise ValueError
-    result = orchestrate_book("/fp", "bk03", StubConfig(allow_cloud_vision=True), reg)
+    result = orchestrate_book("/fp", "bk03", StubConfig(), reg)
     assert len(result.pages) == 1
     assert "T3" in result.pages[0].text
-    # t2 should be marked UNAVAILABLE
-    assert reg.get("t2") is not None
-    assert reg.get("t2").status == "UNAVAILABLE"
 
 
-# ── 4. Tier2 超时 → Tier3 兜底 ──
-def test_tier2_fail_tier3_success(monkeypatch):
+# ── 4. Tier3 成功（无 Tier2）──
+def test_tier3_success_no_tier2(monkeypatch):
     """Tier2 失败文本 -> Tier3 成功文本。"""
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气 T3"
@@ -204,13 +196,9 @@ def test_all_tiers_fail_human_gate(monkeypatch):
     txt_toxic = "附子 20g"
     reg = _reg(
         tier1_pages=_text_pages(txt_toxic),
-        tier2_texts=[txt_toxic],   # T2 也 FAIL
         tier3_texts=[txt_toxic],   # T3 也 FAIL
-        cloud_base_url="https://blocked.invalid/v1",
     )
-    # 把 blocked invalid 改为有效 URL 以让 T2 执行（而非被 egress 拦截）
-    reg.get("t2").config.base_url = "https://api.deepseek.com/v1"
-    result = orchestrate_book("/fp", "bk06", StubConfig(allow_cloud_vision=True), reg)
+    result = orchestrate_book("/fp", "bk06", StubConfig(), reg)
     assert 0 in result.failed_pages
     assert "All tiers failed" in result.failed_pages[0]
 
@@ -243,24 +231,23 @@ def test_budget_exhaustion(monkeypatch):
     assert len(result.pages) == 2
 
 
-# ── 9. 竖排页跳过 Tier1（§4.1 / §11.6）──
+# ── 9. 竖排页跳过 Tier1（§4.1 / §11.6）→ Tier3 兜底 ──
 def test_vertical_page_skips_tier1_text(monkeypatch):
     tier1_text = "TIER1_ONLY"
-    tier2_text = "TIER2_RESULT"
+    tier3_text = "TIER3_RESULT"
     monkeypatch.setattr(_orc, "render_pages", lambda pdf, cfg, dpi=150: (
         PageInput(page_num=i, img=None, layout=PageLayout(page_num=i, is_vertical=True if i == 0 else False))
         for i in range(1)
     ))
     reg = _reg(
         tier1_pages=_text_pages(tier1_text),
-        tier2_texts=[tier2_text],
-        cloud_base_url="https://api.deepseek.com/v1",
+        tier3_texts=[tier3_text],
     )
-    result = orchestrate_book("/fp", "bk09", StubConfig(allow_cloud_vision=True), reg)
+    result = orchestrate_book("/fp", "bk09", StubConfig(), reg)
     # 竖排页不应采纳 Tier1 文本
     assert len(result.pages) == 1
     assert "TIER1_ONLY" not in result.pages[0].text
-    assert "TIER2_RESULT" in result.pages[0].text
+    assert "TIER3_RESULT" in result.pages[0].text
 
 
 # ── 10. pinned_engine 覆盖 ──

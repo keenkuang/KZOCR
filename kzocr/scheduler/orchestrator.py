@@ -33,10 +33,9 @@ from kzocr.engine.types import (
 )
 from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
 from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
-from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier
+from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionRecheckAdapter
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
-from kzocr.security.egress import validate_url
 
 _logger = logging.getLogger(__name__)
 
@@ -179,6 +178,32 @@ def orchestrate_book(
         allow_cloud_vision=bool(getattr(config, "allow_cloud_vision", False)),
     )
     verifier = GlyphVerifier()
+    # 视觉回看适配器（惰性初始化，仅在需要时创建）
+    vision_adapter: Optional[VisionRecheckAdapter] = None
+    _vision_adapter_attempted = False
+
+    def _get_vision_adapter() -> Optional[VisionRecheckAdapter]:
+        nonlocal vision_adapter, _vision_adapter_attempted
+        if _vision_adapter_attempted:
+            return vision_adapter
+        _vision_adapter_attempted = True
+        if getattr(config, "allow_cloud_vision", False):
+            # 视觉回看 MUST use a DIFFERENT model/provider from the OCR engine
+            # to ensure independent verification. OCR uses SenseNova, so recheck
+            # prefers ModelScope Qwen first (different provider/model family).
+            try:
+                vision_adapter = VisionRecheckAdapter.modelscope_default()
+                if vision_adapter.api_key:
+                    return vision_adapter
+            except Exception:
+                pass
+            try:
+                vision_adapter = VisionRecheckAdapter.sensenova_default()
+                if vision_adapter.api_key:
+                    return vision_adapter
+            except Exception:
+                pass
+        return None
     scheduler = EngineScheduler()
     trace: list[EngineCallRecord] = []
     start_time = time.monotonic()
@@ -308,7 +333,11 @@ def orchestrate_book(
                 pub_era=pub_era,
                 resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
             )
-            verdict = verifier.verify(cur_text, context)
+            verdict = verifier.verify_with_vision(
+                cur_text, context,
+                page_img=page_input.img if page_input.img is not None else None,
+                vision_adapter=_get_vision_adapter(),
+            )
             page_trace.append(
                 EngineCallRecord(
                     page=page_num, tier=1, engine=t1_engine_name,
@@ -330,63 +359,7 @@ def orchestrate_book(
                 trace.extend(page_trace)
                 continue
 
-        # ── Tier2：云端视觉 LLM（并发执行，取最快成功结果）──
-        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") and not budget.exhausted:
-            tier2 = _safe_select_candidates(
-                scheduler, registry, 2, page_input, budget, page_layout, overrides
-            )
-            # 过滤：egress 校验不通过的引擎排除
-            valid_tier2 = []
-            for e in tier2:
-                if e.meta.requires_network:
-                    try:
-                        validate_url(e.config.base_url or "")
-                        valid_tier2.append(e)
-                    except ValueError:
-                        _logger.warning("egress blocked for %s, excluded from concurrent", e.meta.name)
-                        registry.mark_unavailable(e.meta.name)
-                    except Exception:
-                        _logger.warning("egress check failed for %s (non-critical), continuing", e.meta.name)
-                        valid_tier2.append(e)
-                else:
-                    valid_tier2.append(e)
-            # 并发执行 Tier2 引擎
-            timeout_t2 = getattr(config, "max_time_per_page_ms", 120000) / 1000 * 2
-            result, engine_name = run_engines_concurrent(
-                valid_tier2, page_input, timeout_s=timeout_t2,
-                max_workers=concurrency_ctrl.workers,
-            )
-            if result is not None and engine_name is not None:
-                t_elapsed = int(time.monotonic() * 0) + 500  # placeholder latency
-                vctx = DetectorContext(
-                    page_num=page_num, engine_label=engine_name,
-                    book_type=book_type, pub_era=pub_era,
-                    resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
-                )
-                verdict = verifier.verify(result.text, vctx)
-                # find engine registration for record keeping
-                _eng = None
-                for e in valid_tier2:
-                    if e.meta.name == engine_name:
-                        _eng = e
-                        break
-                if _eng:
-                    page_trace.append(
-                        EngineCallRecord(
-                            page=page_num, tier=2, engine=engine_name,
-                            latency_ms=t_elapsed, glyph_status=verdict.status,
-                            detector_chain=list(verifier.last_detector_chain),
-                        )
-                    )
-                    _record_engine_usage(registry, _eng, verdict, t_elapsed, engine_usage_counter)
-                concurrency_ctrl.record_result(success=True)
-                if verdict.status in ("PASS", "RARE"):
-                    final_text = result.text
-                    pages_text.append(final_text)
-            else:
-                concurrency_ctrl.record_result(success=False)
-
-        # ── Tier3：本地中医 LLM（并发执行）──
+        # ── Tier3：本地中医 LLM（跳过 Tier2 云端，直接到此）──
         if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") and not budget.exhausted:
             tier3 = _safe_select_candidates(
                 scheduler, registry, 3, page_input, budget, page_layout, overrides
@@ -403,7 +376,11 @@ def orchestrate_book(
                     book_type=book_type, pub_era=pub_era,
                     resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
                 )
-                verdict = verifier.verify(result.text, vctx)
+                verdict = verifier.verify_with_vision(
+                    result.text, vctx,
+                    page_img=page_input.img if page_input.img is not None else None,
+                    vision_adapter=_get_vision_adapter(),
+                )
                 _eng = next((e for e in tier3 if e.meta.name == engine_name), None)
                 if _eng:
                     page_trace.append(

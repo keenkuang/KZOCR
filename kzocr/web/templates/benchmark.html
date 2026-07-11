@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stat_card, status_badge, section_title, empty_state %}
+{% block breadcrumb %}运营中心 / 基准测试{% endblock %}
+{% block title %}基准测试{% endblock %}
+{% block content %}
+
+{% set engine_count = summary|length %}
+{% set total_pages = summary.values()|sum(attribute='total_pages') %}
+{% set total_fails = summary.values()|sum(attribute='fail_pages') %}
+{% set total_runs = summary.values()|sum(attribute='runs') %}
+
+<div class="space-y-5 animate-fade-in-up">
+    <!-- 统计卡片 -->
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {{ stat_card('引擎数', engine_count, '有基准数据', '🔧', 'primary') }}
+        {{ stat_card('总页数', total_pages, '累计处理', '📄', 'chart-2') }}
+        {{ stat_card('失败页数', total_fails, '需关注', '❌', 'chart-3' if total_fails > 0 else 'chart-4') }}
+        {{ stat_card('运行次数', total_runs, '总 benchmark 数', '📊', 'chart-5') }}
+    </div>
+
+    <!-- 引擎汇总卡片 -->
+    {% if summary %}
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {% for ename, a in summary.items()|sort %}
+        {% set err_rate = (a.fail_pages / (a.total_pages if a.total_pages > 0 else 1) * 100)|round(1) %}
+        {% set avg_p95 = (a.p95s|sum / (a.p95s|length if a.p95s|length > 0 else 1))|round %}
+        {% set avg_ppm = (a.ppms|sum / (a.ppms|length if a.ppms|length > 0 else 1))|round(1) %}
+        <div class="rounded-lg border card-hover p-3 text-center animate-fade-in-up"
+             style="background:var(--card);border-color:oklch(0.88 0.02 80);"
+             style="animation-delay:{{ '%.2f'|format(0.03 * loop.index0) }}s">
+            <strong class="text-sm" style="color:var(--primary);">{{ ename }}</strong><br>
+            <small style="color:oklch(0.52 0.02 60);">
+                运行 {{ a.runs }} 次 | 总请求 {{ a.total_pages }} | 
+                {% if err_rate > 10 %}
+                <span style="color:var(--chart-3);">错误率 {{ err_rate }}%</span>
+                {% else %}
+                错误率 {{ err_rate }}%
+                {% endif %}
+            </small><br>
+            <small class="font-mono text-xs" style="color:oklch(0.42 0.02 55);">
+                P95 {{ avg_p95 }}ms | 吞吐 {{ avg_ppm }}页/分
+            </small>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- 明细表格 -->
+    <div class="rounded-lg border overflow-hidden" style="background:var(--card);border-color:oklch(0.88 0.02 80);">
+        {{ section_title('基准测试明细', '最近 ' ~ total ~ ' 条记录（跨书聚合）') }}
+        {% if rows %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr style="background:var(--primary);color:oklch(0.985 0.01 85);">
+                        <th class="px-4 py-3 text-left text-xs font-medium">书号</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">引擎</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">页数</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">成功</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">失败</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">错误率</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">平均延迟</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">P95</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">页/分</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium">时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in rows %}
+                <tr class="border-t transition-colors hover:bg-opacity-50" style="border-color:oklch(0.88 0.02 80);">
+                    <td class="px-4 py-2 font-mono text-xs">{{ r.book_code }}</td>
+                    <td class="px-4 py-2"><code class="text-xs">{{ r.engine }}</code></td>
+                    <td class="px-4 py-2 font-mono text-xs">{{ r.total_pages }}</td>
+                    <td class="px-4 py-2 font-mono text-xs" style="color:var(--chart-4);">{{ r.success_pages }}</td>
+                    <td class="px-4 py-2 font-mono text-xs" {% if r.fail_pages > 0 %}style="color:var(--chart-3);"{% endif %}>{{ r.fail_pages }}</td>
+                    <td class="px-4 py-2 font-mono text-xs">{{ '%.1f'|format(r.error_rate * 100) if r.error_rate is not none else '-' }}%</td>
+                    <td class="px-4 py-2 font-mono text-xs">{% if r.total_latency_ms and r.total_pages %}{{ (r.total_latency_ms / r.total_pages)|int }}ms{% else %}-{% endif %}</td>
+                    <td class="px-4 py-2 font-mono text-xs">{{ r.latency_p95_ms|int if r.latency_p95_ms else '-' }}</td>
+                    <td class="px-4 py-2 font-mono text-xs">{{ '%.1f'|format(r.pages_per_min) if r.pages_per_min else '-' }}</td>
+                    <td class="px-4 py-2 text-[10px]" style="color:oklch(0.52 0.02 60);">{{ (r.created_at or '')[:19] }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="px-4 py-2 text-[10px] border-t" style="border-color:oklch(0.88 0.02 80);color:oklch(0.6 0.02 70);">
+            数据来源: db/*.db 的 benchmark_results 表 | 最近 {{ total }} 条记录
+        </div>
+        {% else %}
+        <div class="p-8">{{ empty_state('📈', '暂无基准测试数据', '运行 OCR 后自动采集 benchmark 数据') }}</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

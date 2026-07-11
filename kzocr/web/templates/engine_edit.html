@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% from "_macros.html" import section_title, status_badge, engine_status_dot %}
+{% block breadcrumb %}运营中心 / 引擎管理 / {{ name }}{% endblock %}
+{% block title %}编辑 {{ name }}{% endblock %}
+{% block content %}
+
+<div class="max-w-2xl mx-auto space-y-5 animate-fade-in-up">
+    <!-- 引擎信息卡片 -->
+    <div class="rounded-lg border overflow-hidden" style="background:var(--card);border-color:oklch(0.88 0.02 80);">
+        <div class="px-5 py-4 border-b flex items-center justify-between" style="border-color:oklch(0.88 0.02 80);">
+            <div>
+                <h3 class="section-title-deco text-sm font-semibold" style="color:oklch(0.22 0.02 50);">编辑引擎: {{ name }}</h3>
+                <p class="text-xs mt-0.5" style="color:oklch(0.52 0.02 60);">配置引擎的 API 连接、并发参数与 Prompt 覆盖</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="edit-status-dot">{{ engine_status_dot('gray', '') }}</span>
+                {% if cfg.enabled %}{{ status_badge('green', '已启用') }}{% else %}{{ status_badge('gray', '已禁用') }}{% endif %}
+            </div>
+        </div>
+
+        <form method="post" action="/engines/{{ name }}/save" class="p-5 space-y-5">
+            <!-- 启用开关 -->
+            <div class="flex items-center justify-between p-3 rounded-lg" style="background:oklch(0.95 0.01 85);">
+                <div>
+                    <p class="text-sm font-medium">引擎已启用</p>
+                    <p class="text-xs" style="color:oklch(0.52 0.02 60);">关闭后不会参与 OCR 调度</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" name="enabled" value="true" class="sr-only peer"
+                           {% if cfg.enabled %}checked{% endif %}>
+                    <div class="w-9 h-5 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"
+                         style="background:oklch(0.85 0.02 80);">
+                    </div>
+                    <div class="w-9 h-5 rounded-full absolute inset-0 peer-checked:opacity-100 opacity-0 transition-opacity"
+                         style="background:var(--chart-2);"></div>
+                </label>
+            </div>
+
+            <!-- API 连接 -->
+            <div>
+                <h4 class="text-sm font-medium mb-3" style="color:oklch(0.22 0.02 50);">API 连接</h4>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">Base URL</label>
+                        <input name="base_url" value="{{ cfg.base_url or '' }}" required
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">模型名称</label>
+                        <input name="model_name" value="{{ cfg.model_name or '' }}" placeholder="可选，默认同引擎名"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">API Key 环境变量</label>
+                        <input name="api_key_env" value="{{ cfg.api_key_env or '' }}" placeholder="如 OPENAI_API_KEY"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 并发参数 -->
+            <div>
+                <h4 class="text-sm font-medium mb-3" style="color:oklch(0.22 0.02 50);">并发参数</h4>
+                <div class="grid gap-3 sm:grid-cols-3">
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">Workers</label>
+                        <input name="workers" type="number" value="{{ cfg.workers or 2 }}" min="1"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">Rate Limit <span class="text-[10px]" style="color:oklch(0.6 0.02 70);">(/min)</span></label>
+                        <input name="rate_limit" type="number" value="{{ cfg.rate_limit or 5 }}" min="1"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">Batch Size</label>
+                        <input name="batch_size" type="number" value="{{ cfg.batch_size or 10 }}" min="1"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 自适应调速 -->
+            <div class="rounded-lg border p-4" style="border-color:oklch(0.88 0.02 80);">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h4 class="text-sm font-medium">自适应调速</h4>
+                        <p class="text-xs" style="color:oklch(0.52 0.02 60);">根据负载自动调整并发 Worker 数</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" name="adaptive_enabled" value="true" class="sr-only peer"
+                               {% if cfg.adaptive and cfg.adaptive.enabled %}checked{% endif %}>
+                        <div class="w-9 h-5 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"
+                             style="background:oklch(0.85 0.02 80);">
+                        </div>
+                        <div class="w-9 h-5 rounded-full absolute inset-0 peer-checked:opacity-100 opacity-0 transition-opacity"
+                             style="background:var(--chart-2);"></div>
+                    </label>
+                </div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">最小 Workers</label>
+                        <input name="min_workers" type="number"
+                               value="{{ cfg.adaptive.min_workers if cfg.adaptive else 1 }}" min="1"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium mb-1" style="color:oklch(0.42 0.02 55);">最大 Workers</label>
+                        <input name="max_workers" type="number"
+                               value="{{ cfg.adaptive.max_workers if cfg.adaptive else 6 }}" min="1"
+                               class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                               style="border-color:oklch(0.88 0.02 80);"
+                               onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prompt 覆盖 -->
+            <div>
+                <h4 class="text-sm font-medium mb-1" style="color:oklch(0.22 0.02 50);">Prompt 覆盖</h4>
+                <p class="text-xs mb-2" style="color:oklch(0.52 0.02 60);">可选，覆盖默认的 book_context 提示词</p>
+                <textarea name="prompt_override_book" rows="3" placeholder="留空则使用全局默认值"
+                          class="w-full border rounded-md px-3 py-2 text-sm transition-all font-mono"
+                          style="border-color:oklch(0.88 0.02 80);"
+                          onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor=''">{{ cfg.prompt_overrides.book_context if cfg.prompt_overrides else '' }}</textarea>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex justify-end gap-3 pt-2 border-t" style="border-color:oklch(0.88 0.02 80);">
+                <a href="/engines"
+                   class="text-xs px-4 py-2 rounded-md border transition-all"
+                   style="border-color:oklch(0.88 0.02 80);color:oklch(0.52 0.02 60);"
+                   onmouseover="this.style.background='oklch(0.95 0.01 85)'" onmouseout="this.style.background=''">取消</a>
+                <button type="submit"
+                        class="text-xs px-5 py-2 rounded-md transition-all"
+                        style="background:var(--primary);color:oklch(0.985 0.01 85);"
+                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">保存配置</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 页面加载后测试引擎连通性
+document.addEventListener('DOMContentLoaded', function() {
+    var dot = document.getElementById('edit-status-dot');
+    if (!dot) return;
+    dot.innerHTML = '<span class="status-dot yellow animate-ping-slow" title="检测中"></span>';
+    fetch('/engines/{{ name }}/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'online') {
+                var ms = data.latency_ms ? ' (' + data.latency_ms + 'ms)' : '';
+                dot.innerHTML = '<span class="status-dot green" title="在线' + ms + '"></span>';
+            } else if (data.status === 'auth_required') {
+                dot.innerHTML = '<span class="status-dot yellow" title="需认证 (401/403)"></span>';
+            } else {
+                var err = data.error || '未知';
+                dot.innerHTML = '<span class="status-dot red" title="离线: ' + err + '"></span>';
+            }
+        })
+        .catch(function() {
+            dot.innerHTML = '<span class="status-dot red" title="检测失败"></span>';
+        });
+});
+</script>
+{% endblock %}

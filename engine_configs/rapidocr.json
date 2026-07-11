@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "model_name": null,
+  "base_url": "",
+  "api_key_env": "",
+  "workers": 2,
+  "rate_limit": 5,
+  "batch_size": 10,
+  "adaptive": {
+    "enabled": true,
+    "min_workers": 1,
+    "max_workers": 6
+  },
+  "prompt_overrides": null,
+  "name": "rapidocr"
+}

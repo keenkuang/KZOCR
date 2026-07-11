@@ -55,14 +55,15 @@ class BookPipelineAdapter:
     加载失败。
     """
 
-    def __init__(self, engine_name: str = "kimi") -> None:
+    def __init__(self, engine_name: str = "kimi", temperature: float = 0.0) -> None:
         self.engine_name = engine_name
+        self.temperature = temperature
         self._pipeline = None
 
     def _ensure_pipeline(self, config: dict) -> None:
         if self._pipeline is not None:
             return
-        from tcm_ocr.pipeline.book_pipeline import BookPipeline
+        from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
         self._pipeline = BookPipeline(config)
 
     def run_book(self, pdf_path: str, pipeline_config: Optional[dict] = None) -> BookResult:
@@ -84,8 +85,9 @@ class VlmPageAdapter:
     注意：VLM 引擎是逐页处理的（run_page），不支持 run_book。
     """
 
-    def __init__(self, engine_name: str) -> None:
+    def __init__(self, engine_name: str, temperature: float = 0.0) -> None:
         self.engine_name = engine_name
+        self.temperature = temperature
 
     def run_book(self, pdf_path: str) -> BookResult:
         raise NotImplementedError(
