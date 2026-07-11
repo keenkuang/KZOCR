@@ -1,17 +1,119 @@
-"""cv2 投影分析 + 行检测 + 特征过滤版心裁剪。"""
+"""版心裁剪：PP-DocLayoutV3 语义检测（优先）+ cv2 投影法（降级）。
+
+主入口 `crop_by_layout`：
+- 优先用 PP-DocLayoutV3 检测版面，取 text/vertical_text/标题并集为版心，
+  固定 padding（左右上 15 / 下 10）；
+- 模型不可用或推理失败时，降级到 cv2 水平投影 + 行检测 + 纯投影三级方案。
+
+PP-DocLayoutV3 依赖 paddle/paddlex（重模型，真实引擎依赖），懒加载，
+未安装时自动降级，不影响无依赖环境（CI / 轻量部署）。
+"""
 
 from __future__ import annotations
 
 import logging
 
-import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# --- PP-DocLayoutV3 类别定义 ---
+# 组成版心的正文/标题类
+_BODY_LABELS = frozenset({"text", "vertical_text", "doc_title", "paragraph_title"})
+# 需排除的页眉/页脚/侧栏/页码类（仅作说明，不参与版心并集）
+_MARGIN_LABELS = frozenset(
+    {"aside_text", "header", "header_image", "footer", "footer_image", "number"}
+)
+
+# 版心 padding（用户设定）：左右上 15px，下 10px
+_DOC_LAYOUT_PAD_LR_T = 15
+_DOC_LAYOUT_PAD_B = 10
+
+# 懒加载模型缓存
+_DOC_LAYOUT_MODEL = None
+_DOC_LAYOUT_MODEL_TRIED = False
+
+
+def _get_doclayout_model():
+    """懒加载 PP-DocLayoutV3 模型（仅 paddlex 可用时）。失败返回 None。"""
+    global _DOC_LAYOUT_MODEL, _DOC_LAYOUT_MODEL_TRIED
+    if _DOC_LAYOUT_MODEL_TRIED:
+        return _DOC_LAYOUT_MODEL
+    _DOC_LAYOUT_MODEL_TRIED = True
+    try:
+        from paddlex import create_model
+    except ImportError:
+        logger.info("paddlex 未安装，跳过 PP-DocLayoutV3 版心裁剪，使用 cv2 降级")
+        return None
+    try:
+        _DOC_LAYOUT_MODEL = create_model(model_name="PP-DocLayoutV3")
+    except Exception as exc:  # 模型文件缺失/下载失败等
+        logger.warning("PP-DocLayoutV3 模型加载失败，降级 cv2：%s", exc)
+        return None
+    return _DOC_LAYOUT_MODEL
+
+
+def _extract_doclayout_boxes(res) -> list[dict]:
+    """兼容不同 paddlex 版本结果结构，抽出 boxes 列表。"""
+    raw = res.json if hasattr(res, "json") else res
+    if isinstance(raw, dict):
+        if "boxes" in raw:
+            return raw["boxes"]
+        if "res" in raw and isinstance(raw["res"], dict) and "boxes" in raw["res"]:
+            return raw["res"]["boxes"]
+    if isinstance(raw, list):
+        return raw
+    raise RuntimeError(f"无法识别 PP-DocLayoutV3 预测结果结构: {type(raw)}")
+
+
+def crop_by_doclayout(
+    img: np.ndarray,
+    pad_lr_t: int = _DOC_LAYOUT_PAD_LR_T,
+    pad_b: int = _DOC_LAYOUT_PAD_B,
+) -> np.ndarray | None:
+    """用 PP-DocLayoutV3 检测版心并裁剪。
+
+    取 label ∈ {text, vertical_text, doc_title, paragraph_title} 的检测框并集，
+    外扩 pad_lr_t（左右上）/ pad_b（下）得到版心，返回裁切后的 RGB 数组。
+    模型不可用或推理/解析失败时返回 None（交由 cv2 降级）。
+    """
+    model = _get_doclayout_model()
+    if model is None:
+        return None
+    try:
+        results = list(model.predict(img, batch_size=1))
+    except Exception as exc:  # 推理异常
+        logger.warning("PP-DocLayoutV3 推理失败，降级 cv2：%s", exc)
+        return None
+    if not results:
+        return None
+    try:
+        boxes = _extract_doclayout_boxes(results[0])
+    except Exception as exc:  # 结果解析异常
+        logger.warning("PP-DocLayoutV3 结果解析失败，降级 cv2：%s", exc)
+        return None
+
+    body_boxes = [b for b in boxes if b.get("label") in _BODY_LABELS]
+    if not body_boxes:
+        logger.info("PP-DocLayoutV3 未检出正文框，降级 cv2")
+        return None
+
+    h, w = img.shape[:2]
+    xs = [b["coordinate"][0] for b in body_boxes]
+    ys = [b["coordinate"][1] for b in body_boxes]
+    xe = [b["coordinate"][2] for b in body_boxes]
+    ye = [b["coordinate"][3] for b in body_boxes]
+    left = max(0, int(min(xs)) - pad_lr_t)
+    top = max(0, int(min(ys)) - pad_lr_t)
+    right = min(w, int(max(xe)) + pad_lr_t)
+    bottom = min(h, int(max(ye)) + pad_b)
+    return img[top:bottom, left:right].copy()
+
 
 def _detect_text_lines(img: np.ndarray) -> list[tuple[int, int, int, int]]:
     """水平投影检测文字行。"""
+    import cv2
+
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     h, w = binary.shape
@@ -191,7 +293,17 @@ def _post_trim_borders(img: np.ndarray) -> np.ndarray:
 
 def crop_by_layout(img: np.ndarray, padding: int = 10,
                    page_num: int = 0) -> np.ndarray | None:
-    """版心裁剪：行检测 → 跳过页眉 → 左右中位数 → 安全扩展。"""
+    """版心裁剪：优先 PP-DocLayoutV3，失败降级 cv2 三级方案。
+
+    - PP-DocLayoutV3 可用时：版心由其检测框(text/vertical_text/标题)并集决定，
+      使用固定 padding（左右上 15 / 下 10），不受 padding 参数影响。
+    - 不可用时：降级到 cv2 行检测 → 纯投影（使用 padding 参数）。
+    """
+    doc = crop_by_doclayout(img, pad_lr_t=15, pad_b=10)
+    if doc is not None:
+        return doc
+
+    # --- cv2 降级路径 ---
     h, w = img.shape[:2]
     lines = _detect_text_lines(img)
     if not lines:
