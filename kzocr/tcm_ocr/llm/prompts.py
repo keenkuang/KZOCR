@@ -598,7 +598,7 @@ def build_batch_proofread_prompt(
     sections: List[str] = []
 
     for idx, group in enumerate(paragraph_groups):
-        para_lines = group.get("para_lines", [])
+        group.get("para_lines", [])
         consensus_text = group.get("consensus_text", "")
         page_num = group.get("page_number", idx + 1)
 

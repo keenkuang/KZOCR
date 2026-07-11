@@ -15,11 +15,8 @@ ShizhenGPT 本地多模态大模型客户端。
 from __future__ import annotations
 
 import gc
-import json
 import logging
-import os
 import threading
-import time
 import traceback
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -86,7 +83,6 @@ class ShizhenGPTClient:
             from transformers import (
                 AutoModelForVision2Seq,
                 AutoTokenizer,
-                BitsAndBytesConfig,
             )
         except ImportError as exc:
             raise ImportError(

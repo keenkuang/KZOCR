@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from kzocr.tcm_ocr.knowledge.term.auto_classifier import AutoClassifier
 

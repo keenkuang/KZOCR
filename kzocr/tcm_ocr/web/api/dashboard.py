@@ -571,7 +571,7 @@ async def get_quality_metrics() -> Dict[str, Any]:
     decisions = DEMO_PUSH_DECISIONS
     total = len(decisions)
     p0_count = sum(1 for d in decisions if d["priority"] == "P0")
-    p1_count = sum(1 for d in decisions if d["priority"] == "P1")
+    sum(1 for d in decisions if d["priority"] == "P1")
 
     # 模拟历史数据用于计算趋势
     return {

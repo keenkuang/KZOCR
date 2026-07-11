@@ -16,7 +16,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set
 
 from kzocr.tcm_ocr.config.constants import (
     OUTPUT_SUBDIR_ASSETS,
@@ -728,7 +728,6 @@ def archive_images_for_final_doc(
 
         try:
             shutil.copy2(src, dst)
-            rel_path = f"{OUTPUT_SUBDIR_ASSETS}/{dst_name}"
             path_map[str(src.resolve())] = str(dst)
             logger.debug("归档图片: %s -> %s", src, dst)
         except OSError as e:

@@ -11,21 +11,15 @@ TCM-Modern-OCR 系统集成测试
 
 from __future__ import annotations
 
-import gc
-import os
-import sys
-import tempfile
 import threading
 import time
-import tracemalloc
-from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, Mock, patch
+from typing import Any, Dict, List
+from unittest.mock import MagicMock
 
 import pytest
 
 from kzocr.tcm_ocr.knowledge.cache.pattern_cache_v2 import PatternCacheV2
 from kzocr.tcm_ocr.knowledge.term.auto_classifier import AutoClassifier
-from kzocr.tcm_ocr.knowledge.term.importer import TermImporter
 from kzocr.tcm_ocr.knowledge.term.normalized_maps import HerbNormalizedMaps
 from kzocr.tcm_ocr.pipeline.book_type_detector import BookTypeDetector
 from kzocr.tcm_ocr.pipeline.push_decision_logger import PushDecisionLogger
@@ -101,7 +95,6 @@ class TestFullPipelineMock:
 
         # Step 6: Push decision logging
         mock_cursor = mock_db.get_cursor.return_value
-        orig_fetchone = mock_cursor.fetchone
         call_count = [0]
         def _fetchone():
             call_count[0] += 1
@@ -120,7 +113,7 @@ class TestFullPipelineMock:
 
     def test_full_pipeline_acupuncture_book(self, pipeline_components: Dict[str, Any]) -> None:
         """Test complete pipeline for an acupuncture book."""
-        mock_db = pipeline_components["mock_db"]
+        pipeline_components["mock_db"]
         detector = pipeline_components["detector"]
         cache = pipeline_components["cache"]
 
@@ -154,7 +147,7 @@ class TestFullPipelineMock:
         cache.warm_up("formula")
 
         # Classify herb name
-        result = classifier.classify("附子")
+        classifier.classify("附子")
 
         # Check if critical (use built-in critical herb)
         is_critical = cache.is_critical_field("砒霜")
@@ -766,7 +759,7 @@ class TestCrossModuleEndToEnd:
         classifier = AutoClassifier()
 
         # Classify a toxic herb
-        herb_result = classifier.classify("附子")
+        classifier.classify("附子")
 
         # Verify safety implications
         mock_db = MagicMock()

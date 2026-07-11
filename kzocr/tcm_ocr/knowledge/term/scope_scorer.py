@@ -7,7 +7,7 @@ Scope 优先级评分模块
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 
 # Scope 优先级映射表，数值越大优先级越高

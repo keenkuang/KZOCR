@@ -121,7 +121,10 @@ async def engine_new(request: Request):
 async def all_engine_status():
     """批量检测所有引擎状态。"""
     from kzocr.engine.engine_config import list_engine_configs
-    import asyncio, urllib.request, time, os
+    import asyncio
+    import urllib.request
+    import time
+    import os
     from fastapi.responses import JSONResponse
     configs = list_engine_configs()
     async def _check_one(cfg):
@@ -138,10 +141,10 @@ async def all_engine_status():
                     if api_key:
                         req.add_header("Authorization", f"Bearer {api_key}")
                     t0 = time.time()
-                    resp = urllib.request.urlopen(req, timeout=8)
+                    urllib.request.urlopen(req, timeout=8)
                     ms = int((time.time() - t0) * 1000)
                     return {"status": "online", "latency_ms": ms}
-                except urllib.error.HTTPError as e:
+                except urllib.error.HTTPError:
                     ms = int((time.time() - t0) * 1000)
                     return {"status": "online", "latency_ms": ms}
                 except Exception:
@@ -223,7 +226,10 @@ async def engine_toggle(name: str):
 async def engine_status(name: str):
     """检测单个引擎连通性。"""
     from kzocr.engine.engine_config import load_engine_config
-    import asyncio, urllib.request, time, os
+    import asyncio
+    import urllib.request
+    import time
+    import os
     from fastapi.responses import JSONResponse
     cfg = load_engine_config(name)
     if not cfg:
@@ -256,7 +262,7 @@ async def engine_status(name: str):
                         return {"status": "auth_required", "latency_ms": ms, "code": e.code, "note": f"HTTP {e.code}，需要认证"}
                     # 其他 4xx/5xx = 服务不可用
                     return {"status": "offline", "error": f"HTTP {e.code}", "latency_ms": ms, "code": e.code}
-                except Exception as exc:
+                except Exception:
                     continue
             return {"status": "offline", "error": "无法连接"}
         return await asyncio.get_event_loop().run_in_executor(None, _sync)
@@ -264,42 +270,6 @@ async def engine_status(name: str):
     result["name"] = name
     return JSONResponse(result)
 
-
-@app.get("/engines/status/all")
-async def all_engine_status():
-    """批量检测所有引擎状态。"""
-    from kzocr.engine.engine_config import list_engine_configs
-    import asyncio, urllib.request, time, os
-    from fastapi.responses import JSONResponse
-    configs = list_engine_configs()
-    async def _check_one(cfg):
-        name = cfg["name"]
-        base_url = cfg.get("base_url", "")
-        api_key_env = cfg.get("api_key_env", "")
-        api_key = os.environ.get(api_key_env, "") if api_key_env else ""
-        if not base_url or not base_url.startswith(("http://", "https://")):
-            return name, {"status": "offline", "error": "无效 base_url"}
-        def _sync():
-            for url in [base_url.rstrip("/") + "/v1/models", base_url.rstrip("/")]:
-                try:
-                    req = urllib.request.Request(url, method="GET")
-                    if api_key:
-                        req.add_header("Authorization", f"Bearer {api_key}")
-                    t0 = time.time()
-                    resp = urllib.request.urlopen(req, timeout=8)
-                    ms = int((time.time() - t0) * 1000)
-                    return {"status": "online", "latency_ms": ms}
-                except urllib.error.HTTPError as e:
-                    ms = int((time.time() - t0) * 1000)
-                    return {"status": "online", "latency_ms": ms}
-                except Exception:
-                    continue
-            return {"status": "offline", "error": "无法连接"}
-        return name, await asyncio.get_event_loop().run_in_executor(None, _sync)
-    tasks = [_check_one(c) for c in configs]
-    results_list = await asyncio.gather(*tasks)
-    output = dict(results_list)
-    return JSONResponse(output)
 
 
 # =============================================================================
@@ -311,7 +281,7 @@ async def all_engine_status():
 async def monitor_page(request: Request):
     """实时监控：引擎状态卡 + 全局汇总。"""
     from kzocr.engine.engine_config import list_engine_configs
-    import os, json
+    import os
     configs = list_engine_configs()
     dbd = _db_dir()
 

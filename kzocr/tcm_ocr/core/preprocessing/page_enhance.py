@@ -201,8 +201,8 @@ def detect_skew_angle(
     def _variance_at_angle(img_bin: np.ndarray, angle: float) -> float:
         """计算给定角度下水平投影的方差。"""
         rad = math.radians(angle)
-        cos_a = math.cos(rad)
-        sin_a = math.sin(rad)
+        math.cos(rad)
+        math.sin(rad)
 
         ih, iw = img_bin.shape[:2]
         cx, cy = iw / 2.0, ih / 2.0
@@ -336,8 +336,8 @@ def remove_shadow(page_img: np.ndarray) -> np.ndarray:
         # 转换到 LAB 空间，仅对 L 通道处理
         lab = cv2.cvtColor(page_img, cv2.COLOR_BGR2LAB)
         l_channel = lab[:, :, 0]
-        a_channel = lab[:, :, 1]
-        b_channel = lab[:, :, 2]
+        lab[:, :, 1]
+        lab[:, :, 2]
 
         # 形态学闭运算提取背景（大核）
         kernel_size = max(25, int(max(page_img.shape[:2]) * 0.02))

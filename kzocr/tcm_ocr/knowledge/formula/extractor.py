@@ -21,9 +21,8 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 from kzocr.tcm_ocr.database.sqlite.book_db import BookDB
 
 logger = logging.getLogger(__name__)

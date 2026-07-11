@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 from kzocr.tcm_ocr.database.sqlite.book_db import BookDB
@@ -403,7 +403,7 @@ def _is_acupuncture_related(text: str) -> bool:
         '取穴', '配穴', '主穴', '辅穴', '刺法', '灸法', '得气',
         '补泻', '提插', '捻转', '留针', ' acupuncture', ' meridian',
     }
-    text_lower = text.lower()
+    text.lower()
     return any(kw in text for kw in keywords)
 
 
@@ -513,7 +513,7 @@ def auto_discover_meridian_patterns(
 
                 cache_key = f"{corr_point}|{orig_point}"
 
-                error_type = _infer_meridian_error_type(orig_point, corr_point)
+                _infer_meridian_error_type(orig_point, corr_point)
                 entity_type = infer_entity_type(corr_point)
                 meridian_belonging = get_meridian_belonging(corr_point)
 

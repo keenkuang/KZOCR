@@ -182,7 +182,7 @@ class UniRecAdapter:
                 {"pixel_values": pixel_values},
             )
             enc_hidden, cross_k, cross_v = enc_out
-            seq_len = enc_hidden.shape[1]
+            enc_hidden.shape[1]
 
             # Prepare decoder state
             past_initial = np.zeros((1, 6, 0, 128), dtype=np.float32)
@@ -192,6 +192,8 @@ class UniRecAdapter:
             position_ids = np.array([[0]], dtype=np.int64)
 
             decoded_ids = []
+            past_keys = None
+            past_values = None
             for step in range(_MAX_DECODE_STEPS):
                 dec_input = {
                     "input_ids": input_ids,

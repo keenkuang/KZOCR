@@ -461,7 +461,7 @@ class PaddleOCRAdapter:
             # Calculate scaling factor
             scale = orig_line_h / rec_input_h if rec_input_h > 0 else 1.0
             det_x1, det_y1, det_x2, det_y2 = det_box[:4]
-            det_height = det_y2 - det_y1
+            det_y2 - det_y1
 
             for char_info in char_details:
                 ch = char_info.get('char', '')

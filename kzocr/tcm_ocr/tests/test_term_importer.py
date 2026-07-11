@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict, List, Set
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict, List
+from unittest.mock import MagicMock
 
 import pytest
 

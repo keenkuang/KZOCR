@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Optional, Set
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 

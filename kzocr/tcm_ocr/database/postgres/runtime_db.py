@@ -17,10 +17,21 @@ import logging
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from datetime import datetime
+from typing import Any, Dict, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# psycopg2 为可选依赖，运行时惰性导入；此处声明名称以满足类型注解解析
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+try:
+    from psycopg2.extras import Json, RealDictCursor
+except ImportError:
+    Json = None
+    RealDictCursor = None
 
 
 # =============================================================================
@@ -991,7 +1002,7 @@ class RuntimeDB:
         if pattern_type not in valid_types:
             raise ValueError(f"Invalid pattern_type: {pattern_type}")
 
-        source_books_json = json.dumps(source_books or [])
+        json.dumps(source_books or [])
 
         with self.get_cursor() as cursor:
             cursor.execute(

@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
@@ -410,7 +409,7 @@ def soft_split_long_paragraph(
     if total_chars <= max_chars:
         return [para]
 
-    para_lines: List[Dict[str, Any]] = para.get("para_lines", [])
+    para.get("para_lines", [])
 
     # 按行拆分并尝试在句末标点处切割
     lines = consensus_text.split("\n")

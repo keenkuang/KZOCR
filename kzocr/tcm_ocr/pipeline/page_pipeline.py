@@ -293,8 +293,8 @@ class PagePipeline:
             if lines is None:
                 return 0.0
 
-            h_lines = sum(1 for l in lines if abs(l[0][3] - l[0][1]) < 5)
-            v_lines = sum(1 for l in lines if abs(l[0][2] - l[0][0]) < 5)
+            h_lines = sum(1 for seg in lines if abs(seg[0][3] - seg[0][1]) < 5)
+            v_lines = sum(1 for seg in lines if abs(seg[0][2] - seg[0][0]) < 5)
 
             return min((h_lines + v_lines) / 20.0, 1.0)
         except Exception:
@@ -384,7 +384,6 @@ class PagePipeline:
             版面块列表
         """
         try:
-            import cv2
 
             gray = self._to_gray(page_img)
             h, w = gray.shape
@@ -973,7 +972,7 @@ class PagePipeline:
         engine_results = line.get("engine_results", {})
 
         # 构建 prompt
-        prompt = f"""你是一位中医文献 OCR 校对专家。请根据以下多引擎识别结果，
+        prompt = """你是一位中医文献 OCR 校对专家。请根据以下多引擎识别结果，
 选择或修正最准确的文本。
 
 各引擎识别结果：
@@ -992,7 +991,6 @@ class PagePipeline:
 
         # 尝试调用 LLM
         try:
-            from kzocr.tcm_ocr.utils.common import parse_llm_json_with_retry
 
             # 优先使用本地 LLM
             local_llm = self.engines.get("shizhengpt")

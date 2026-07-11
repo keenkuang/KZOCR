@@ -15,7 +15,7 @@
 置信度 < 0.9 时建议并行运行双管线。
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import cv2
 import numpy as np
@@ -153,7 +153,7 @@ class LayoutClassifier:
             cv2.MORPH_RECT, (h_kernel_len, 1)
         )
         h_lines = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, h_kernel)
-        h_line_area = np.sum(h_lines > 0)
+        np.sum(h_lines > 0)
 
         # 检测垂直线
         v_kernel_len = max(page_h // 30, 15)
@@ -161,7 +161,7 @@ class LayoutClassifier:
             cv2.MORPH_RECT, (1, v_kernel_len)
         )
         v_lines = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, v_kernel)
-        v_line_area = np.sum(v_lines > 0)
+        np.sum(v_lines > 0)
 
         # 合并直线区域
         combined_lines = cv2.bitwise_or(h_lines, v_lines)

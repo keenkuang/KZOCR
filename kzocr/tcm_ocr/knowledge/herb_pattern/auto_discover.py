@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 from kzocr.tcm_ocr.database.sqlite.book_db import BookDB
@@ -182,7 +182,7 @@ def infer_error_type(original: str, corrected: str) -> str:
 
     # 使用简化差异分析
     diff_positions = []
-    max_len = max(len(original), len(corrected))
+    max(len(original), len(corrected))
     min_len = min(len(original), len(corrected))
 
     for i in range(min_len):
@@ -549,13 +549,12 @@ def _is_same_glyph_variant(text_a: str, text_b: str) -> bool:
     traditional_to_simplified = {
         '黨': '党', '參': '参', '麥': '麦', '龍': '龙',
         '龜': '龟', '魚': '鱼', '連': '连', '術': '术',
-        '黃': '黄', '連': '连', '黃': '黄', '蓮': '莲',
-        '黃': '黄', '黨': '党', '黃': '黄', '黃': '黄',
+        '黃': '黄', '蓮': '莲',
         '當': '当', '歸': '归', '藥': '药', '車': '车',
         '蔭': '荫', '頭': '头', '門': '门', '貝': '贝',
         '膽': '胆', '礬': '矾', '蘇': '苏', '葉': '叶',
         '陳': '陈', '東': '东', '極': '极', '來': '来',
-        '馬': '马', '鳥': '鸟', '龍': '龙', '龜': '龟',
+        '馬': '马', '鳥': '鸟',
     }
 
     # 将 text_a 转换为简化形式后比较

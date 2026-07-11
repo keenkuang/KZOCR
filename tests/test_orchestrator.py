@@ -149,7 +149,7 @@ def test_tier1_fail_tier3_success(monkeypatch):
 
 
 # ── 3. Tier1 失败 → Tier3 兜底（跳过 Tier2 云端）──
-def test_tier1_fail_tier3_success(monkeypatch):
+def test_tier1_fail_tier3_cloud_fallback(monkeypatch):
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气固表 T3"
     reg = _reg(
@@ -178,7 +178,7 @@ def test_tier3_success_no_tier2(monkeypatch):
     assert "T3" in result.pages[0].text
 
 
-def test_tier3_success_no_tier2(monkeypatch):
+def test_tier3_only_success(monkeypatch):
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气 T3"
     reg = _reg(

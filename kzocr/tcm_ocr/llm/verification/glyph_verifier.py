@@ -16,10 +16,9 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
 import pickle
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cv2
 import numpy as np

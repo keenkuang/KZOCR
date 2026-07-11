@@ -21,7 +21,6 @@ import json
 import logging
 import os
 import time
-import traceback
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 from kzocr.tcm_ocr.database.sqlite.book_db import BookDB

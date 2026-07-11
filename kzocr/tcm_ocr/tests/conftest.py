@@ -11,12 +11,9 @@ Provides shared fixtures for all test modules including:
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
-from contextlib import contextmanager
-from typing import Any, Dict, Generator, List, Optional, Set
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict, Generator, List, Optional
 
 import pytest
 

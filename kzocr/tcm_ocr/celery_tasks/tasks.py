@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import sqlite3
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,10 +23,8 @@ from celery import Celery, Task
 from celery.exceptions import MaxRetriesError, SoftTimeLimitExceeded
 
 from kzocr.tcm_ocr.celery_tasks import config as celery_config
-from kzocr.tcm_ocr.pipeline.archival import archive_to_postgresql, cleanup_book_directory
-from kzocr.tcm_ocr.pipeline.auto_discovery import _run_auto_discovery
+from kzocr.tcm_ocr.pipeline.archival import archive_to_postgresql
 from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
-from kzocr.tcm_ocr.pipeline.deliverables import export_final_outputs, verify_deliverables
 
 logger = logging.getLogger(__name__)
 

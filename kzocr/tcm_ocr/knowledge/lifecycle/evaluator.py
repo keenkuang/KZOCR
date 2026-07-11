@@ -20,8 +20,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 
