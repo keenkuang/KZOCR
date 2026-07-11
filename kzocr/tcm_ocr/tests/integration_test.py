@@ -113,7 +113,6 @@ class TestFullPipelineMock:
 
     def test_full_pipeline_acupuncture_book(self, pipeline_components: Dict[str, Any]) -> None:
         """Test complete pipeline for an acupuncture book."""
-        pipeline_components["mock_db"]
         detector = pipeline_components["detector"]
         cache = pipeline_components["cache"]
 

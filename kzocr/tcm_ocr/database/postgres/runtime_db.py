@@ -239,7 +239,7 @@ class RuntimeDB:
                 self._connection_pool.putconn(conn)
 
     @contextmanager
-    def get_connection(self) -> Iterator[psycopg2.extensions.connection]:
+    def get_connection(self) -> Iterator["psycopg2.extensions.connection"]:
         """
         获取原始数据库连接的 context manager
 
@@ -1002,8 +1002,6 @@ class RuntimeDB:
         if pattern_type not in valid_types:
             raise ValueError(f"Invalid pattern_type: {pattern_type}")
 
-        json.dumps(source_books or [])
-
         with self.get_cursor() as cursor:
             cursor.execute(
                 """
@@ -1013,7 +1011,7 @@ class RuntimeDB:
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
-                (original_text, corrected_text, pattern_type, Json(source_books) if source_books else '[]'),
+                (original_text, corrected_text, pattern_type, self._Json(source_books) if source_books else '[]'),
             )
             result = cursor.fetchone()
             if result:
@@ -1134,7 +1132,7 @@ class RuntimeDB:
                 VALUES (%s, NOW())
                 RETURNING id
                 """,
-                (Json(rule_data),),
+                (self._Json(rule_data),),
             )
             result = cursor.fetchone()
             return result['id']
@@ -1148,7 +1146,7 @@ class RuntimeDB:
                 VALUES (%s, NOW())
                 RETURNING id
                 """,
-                (Json(term_data),),
+                (self._Json(term_data),),
             )
             result = cursor.fetchone()
             return result['id']
@@ -1252,7 +1250,7 @@ class RuntimeDB:
                 VALUES (%s, %s, %s, NOW())
                 RETURNING id
                 """,
-                (line_id, alert_type, Json(alert_detail)),
+                (line_id, alert_type, self._Json(alert_detail)),
             )
             result = cursor.fetchone()
             return result['id']
@@ -1318,7 +1316,7 @@ class RuntimeDB:
                 VALUES (%s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
-                (knowledge_type, action, Json(details), reviewer_id),
+                (knowledge_type, action, self._Json(details), reviewer_id),
             )
             result = cursor.fetchone()
             return result['id']
@@ -1473,7 +1471,7 @@ class RuntimeDB:
                     description = COALESCE(EXCLUDED.description, Config.description),
                     updated_at = NOW()
                 """,
-                (key, Json(value), description),
+                (key, self._Json(value), description),
             )
             return cursor.rowcount > 0
 
@@ -1622,7 +1620,7 @@ class RuntimeDB:
                 VALUES (%s, %s, NOW())
                 RETURNING id
                 """,
-                (book_registry_id, Json(content_tree)),
+                (book_registry_id, self._Json(content_tree)),
             )
             result = cursor.fetchone()
             return result['id']
@@ -1703,7 +1701,7 @@ class RuntimeDB:
 
         # 处理 JSONB 字段
         if 'pages' in fields and isinstance(fields['pages'], (list, dict)):
-            values[columns.index('pages')] = Json(fields['pages'])
+            values[columns.index('pages')] = self._Json(fields['pages'])
 
         with self.get_cursor() as cursor:
             cursor.execute(
@@ -1813,7 +1811,7 @@ class RuntimeDB:
 
         # 处理 JSONB 字段
         if 'source_books' in fields and isinstance(fields['source_books'], (list, dict)):
-            values[columns.index('source_books')] = Json(fields['source_books'])
+            values[columns.index('source_books')] = self._Json(fields['source_books'])
 
         with self.get_cursor() as cursor:
             cursor.execute(
@@ -1923,7 +1921,7 @@ class RuntimeDB:
         values = list(fields.values())
 
         if 'source_books' in fields and isinstance(fields['source_books'], (list, dict)):
-            values[columns.index('source_books')] = Json(fields['source_books'])
+            values[columns.index('source_books')] = self._Json(fields['source_books'])
 
         with self.get_cursor() as cursor:
             cursor.execute(
@@ -1979,7 +1977,7 @@ class RuntimeDB:
         values = list(fields.values())
 
         if 'source_books' in fields and isinstance(fields['source_books'], (list, dict)):
-            values[columns.index('source_books')] = Json(fields['source_books'])
+            values[columns.index('source_books')] = self._Json(fields['source_books'])
 
         with self.get_cursor() as cursor:
             cursor.execute(
