@@ -97,8 +97,9 @@ def test_crop_by_layout_falls_back_to_cv2_when_model_none():
 
 
 def test_crop_by_layout_doclayout_then_no_cv2_fallback_none():
-    """doclayout 无正文框返回 None 后，cv2 也因无文字行返回 None（纯白图）。"""
+    """doclayout 无正文框返回 None，且 cv2 也无文字行时整体返回 None（纯白图，不依赖 cv2）。"""
     img = _make_img(400, 400)
     boxes = [_box("aside_text", 10, 10, 30, 30)]
-    with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
+    with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)), \
+         mock.patch.object(layout_crop, "_detect_text_lines", return_value=[]):
         assert crop_by_layout(img, padding=10, page_num=1) is None
