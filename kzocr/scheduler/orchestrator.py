@@ -36,6 +36,7 @@ from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionRecheckAdapter
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
+import numpy as np
 
 _logger = logging.getLogger(__name__)
 
@@ -43,15 +44,28 @@ _logger = logging.getLogger(__name__)
 def render_pages(pdf_path: str, config=None, dpi: int = 150):
     """流式生成逐页 PageInput（N2）。真实渲染复用 engine/run.py:_pdf_page_to_numpy。
 
+    预处理：版心裁剪（去页眉/页脚/侧边空白）+ 尺寸缩放（适配 VL 模型限制 2048px）。
+
     测试可 monkeypatch 本函数以 mock 渲染，避免依赖真实 PDF/网络。
     """
     import fitz  # 懒加载，避免无 PDF 场景下强制依赖
-    from kzocr.engine.run import _pdf_page_to_numpy
+    from kzocr.engine.run import _pdf_page_to_numpy, _crop_to_body
 
+    max_pixels = getattr(config, "max_image_pixels", 2048) if config else 2048
     doc = fitz.open(pdf_path)
     try:
         for i, page in enumerate(doc):
             img = _pdf_page_to_numpy(page, dpi=dpi)
+            # 版心裁剪：传入页码支持奇偶对称
+            img = _crop_to_body(img, page_num=i)
+            # 尺寸缩放：适配 VL 模型限制，最长边 ≤ max_pixels
+            h, w = img.shape[:2]
+            scale = min(max_pixels / max(h, w), 1.0)
+            if scale < 1.0:
+                from PIL import Image as PILImage
+                pil = PILImage.fromarray(img)
+                pil = pil.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
+                img = np.array(pil)
             yield PageInput(page_num=i, img=img)
     finally:
         doc.close()

@@ -309,41 +309,127 @@ def _pdf_page_to_numpy(page, dpi: int = 150) -> np.ndarray:
     return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
 
 
-def _crop_to_body(img: np.ndarray) -> np.ndarray:
-    """通过水平投影裁剪版心，去除页眉/页脚/侧边空白。
+def _crop_to_body(img: np.ndarray, padding: int = 10, page_num: int = 0) -> np.ndarray:
+    """两级降级版心裁剪：cv2 文字区域检测 → 纯投影法。
 
-    使用 numpy 做投影分析，轻量无额外依赖。
-    返回裁剪后的 (H', W', 3) RGB 数组。
+    1. cv2 连通区域分析 + 行合并 + 特征过滤（首选）
+       - 检测所有文字块，合并为行
+       - 过滤侧眉(窄高列)、顶部装饰、底部页码
+    2. 纯投影法（cv2 不可用时的降级）
     """
-    h, w = img.shape[:2]
-    gray = np.mean(img, axis=2)  # 灰度
-    # 每行暗像素比例（文字区域）
-    row_dark = np.mean(gray < 128, axis=1)
+    from kzocr.engine.layout_crop import crop_by_layout
+    result = crop_by_layout(img, padding, page_num=page_num)
+    if result is not None:
+        return result
+    return _crop_to_body_fallback(img, padding)
 
-    # 找正文上下边界：跳过顶部/底部稀疏行
+
+def _crop_to_body_cv2(img: np.ndarray, padding: int = 10) -> np.ndarray:
+    """cv2 行检测版心裁剪（MinerU 不可用时的降级方案）。
+
+    检测文字行区域，合并相邻行，过滤孤立小行（页码等）。
+    """
+    try:
+        import cv2
+    except ImportError:
+        return _crop_to_body_fallback(img, padding)
+
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.shape[2] == 3 else img
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    h_proj = np.sum(binary < 128, axis=1)
+    h_thresh = np.max(h_proj) * 0.05
+
+    text_rows = []
+    in_row = False
+    row_start = 0
+    for y in range(h):
+        if h_proj[y] > h_thresh and not in_row:
+            in_row = True
+            row_start = y
+        elif h_proj[y] <= h_thresh and in_row:
+            in_row = False
+            if y - row_start >= 5:
+                text_rows.append((row_start, y))
+    if in_row:
+        text_rows.append((row_start, h))
+
+    if not text_rows or not _merge_text_rows(text_rows, padding):
+        return _crop_to_body_fallback(img, padding)
+
+    merged = _merge_text_rows(text_rows, padding)
+
+    # 跳过顶部和底部的孤立行
+    if len(merged) > 2:
+        heights = [end - start for start, end in merged]
+        median_h = sorted(heights)[len(heights) // 2]
+        merged = [(start, end) for start, end in merged if end - start > median_h / 3]
+
+    if not merged:
+        return _crop_to_body_fallback(img, padding)
+
+    top = max(0, merged[0][0] - padding)
+    bottom = min(h, merged[-1][1] + padding)
+
+    col_proj = np.sum(binary[top:bottom, :] < 128, axis=0)
+    col_thresh = np.max(col_proj) * 0.02
+    left = 0
+    for x in range(w):
+        if col_proj[x] > col_thresh:
+            left = max(0, x - padding)
+            break
+    right = w
+    for x in range(w - 1, -1, -1):
+        if col_proj[x] > col_thresh:
+            right = min(w, x + padding)
+            break
+
+    return img[top:bottom, left:right]
+
+
+def _merge_text_rows(text_rows: list, padding: int = 10) -> list:
+    """合并相邻文字行。"""
+    if not text_rows:
+        return []
+    merged = [text_rows[0]]
+    for row_start, row_end in text_rows[1:]:
+        prev_rs, prev_re = merged[-1]
+        if row_start - prev_re < max(3, padding * 2):
+            merged[-1] = (prev_rs, row_end)
+        else:
+            merged.append((row_start, row_end))
+    return merged
+
+
+def _crop_to_body_fallback(img: np.ndarray, padding: int = 10) -> np.ndarray:
+    """纯投影法版心裁剪（cv2 不可用时的降级方案）。"""
+    h, w = img.shape[:2]
+    gray = np.mean(img, axis=2)
+    row_dark = np.mean(gray < 128, axis=1)
     threshold = 0.01
+
     top = 0
     for y in range(h):
         if row_dark[y] > threshold:
-            top = max(0, y - int(h * 0.02))  # 留 2% 上边距
+            top = max(0, y - padding)
             break
     bottom = h
     for y in range(h - 1, -1, -1):
         if row_dark[y] > threshold:
-            bottom = min(h, y + int(h * 0.02))  # 留 2% 下边距
+            bottom = min(h, y + padding)
             break
 
-    # 垂直投影找左右边界
     col_dark = np.mean(gray[top:bottom, :] < 128, axis=0)
     left = 0
     for x in range(w):
         if col_dark[x] > threshold:
-            left = max(0, x - int(w * 0.02))
+            left = max(0, x - padding)
             break
     right = w
     for x in range(w - 1, -1, -1):
         if col_dark[x] > threshold:
-            right = min(w, x + int(w * 0.02))
+            right = min(w, x + padding)
             break
 
     return img[top:bottom, left:right]
