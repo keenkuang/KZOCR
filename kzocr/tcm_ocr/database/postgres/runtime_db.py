@@ -12,7 +12,6 @@ PostgreSQL 运行库连接层 - RuntimeDB 类
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from contextlib import contextmanager
