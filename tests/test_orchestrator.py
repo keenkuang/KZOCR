@@ -135,7 +135,7 @@ def test_tier1_success(monkeypatch):
 
 
 # ── 2. Tier1 失败 → Tier3 成功（跳过 Tier2）──
-def test_tier1_fail_tier3_success(monkeypatch):
+def test_tier1_fail_tier3_success_herb(monkeypatch):
     txt_toxic = "附子 20g"  # 触发 ToxinDose FAIL(critical)
     txt_ok = "黄芪补气，方用萆薢分清饮"
     reg = _reg(
@@ -162,7 +162,7 @@ def test_tier1_fail_tier3_cloud_fallback(monkeypatch):
 
 
 # ── 4. Tier3 成功（无 Tier2）──
-def test_tier3_success_no_tier2(monkeypatch):
+def test_tier3_success_no_tier2_blocked_cloud(monkeypatch):
     """Tier2 失败文本 -> Tier3 成功文本。"""
     txt_toxic = "附子 20g"
     txt_t3 = "黄芪补气 T3"
