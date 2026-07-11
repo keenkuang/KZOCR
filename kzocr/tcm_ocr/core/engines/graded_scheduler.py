@@ -16,9 +16,8 @@ Features:
 
 import logging
 import re
-from collections import Counter
 from difflib import SequenceMatcher
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cv2
 import numpy as np
@@ -148,7 +147,6 @@ class GradedScheduler:
                 import pytesseract
                 return {'type': 'tesseract', 'engine': pytesseract}
             elif engine_type == 'doctr':
-                from doctr.io import DocumentFile
                 from doctr.models import ocr_predictor
                 return {
                     'type': 'doctr',
@@ -457,10 +455,10 @@ class GradedScheduler:
 
         # Adaptive contrast enhancement
         lab = cv2.cvtColor(line_img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
+        l_channel, a, b = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        lab = cv2.merge([l, a, b])
+        l_channel = clahe.apply(l_channel)
+        lab = cv2.merge([l_channel, a, b])
         line_img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
         return line_img

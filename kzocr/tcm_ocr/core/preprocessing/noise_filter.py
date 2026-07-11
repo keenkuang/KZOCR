@@ -18,8 +18,6 @@
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import cv2
-import numpy as np
 
 
 # --------------------------------------------------------------------------- #

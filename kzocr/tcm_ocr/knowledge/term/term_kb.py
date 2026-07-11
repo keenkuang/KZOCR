@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 

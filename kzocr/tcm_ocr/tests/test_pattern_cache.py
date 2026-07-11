@@ -13,12 +13,9 @@ PatternCacheV2 全面测试
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
-from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Set
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -239,7 +236,6 @@ class TestResolveHerbAlias:
 
     def test_resolve_alias_performance(self) -> None:
         """Benchmark: alias resolution should be O(1) fast."""
-        import time
 
         mock_db = _create_mock_db()
         cache = PatternCacheV2(mock_db, book_type="formula")

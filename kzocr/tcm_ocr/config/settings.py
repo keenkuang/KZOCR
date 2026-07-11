@@ -5,7 +5,6 @@
 包含数据库连接、Redis、GPU、模型路径、LLM API、输出目录、Celery 等配置。
 """
 
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 

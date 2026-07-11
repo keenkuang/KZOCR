@@ -15,7 +15,7 @@ import logging
 import sys
 import threading
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional, Set
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 

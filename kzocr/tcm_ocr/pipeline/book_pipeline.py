@@ -18,23 +18,18 @@ BookPipeline 是中医现代出版物 OCR 校对系统的核心编排器，
 11. 清理书籍库
 """
 
-import json
 import logging
 import os
 import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from kzocr.tcm_ocr.config.constants import (
-    BASE_THRESHOLD,
     DPI,
-    get_era_group,
-    get_preprocess_params,
-    get_threshold_with_bonus,
 )
 from kzocr.tcm_ocr.pipeline.archival import archive_to_postgresql, cleanup_book_directory
 from kzocr.tcm_ocr.pipeline.auto_discovery import _run_auto_discovery
@@ -1205,7 +1200,7 @@ class BookPipeline:
 
         # 使用 SequenceMatcher 计算编辑距离
         sm = difflib.SequenceMatcher(None, reference, hypothesis)
-        edits = sum(
+        sum(
             max(tag.count("replace") + tag.count("delete") + tag.count("insert"), 0)
             for tag, _, _, _, _ in sm.get_opcodes()
         )

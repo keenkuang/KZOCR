@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ class BookTypeDetector:
             各类型分数字典
         """
         scores: Dict[str, float] = {}
-        title_lower = title.lower()
+        title.lower()
 
         for book_type, keywords in cls.TYPE_KEYWORDS.items():
             score = 0.0

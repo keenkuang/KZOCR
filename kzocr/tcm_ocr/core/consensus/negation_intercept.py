@@ -95,7 +95,7 @@ def extract_negation_bigrams(text: str) -> Set[Tuple[int, str]]:
         return set()
 
     negations: Set[Tuple[int, str]] = set()
-    text_len = len(text)
+    len(text)
 
     # Check for multi-character negations first
     for neg_word in sorted(NEGATION_WORDS_EXTENDED, key=len, reverse=True):
@@ -161,7 +161,7 @@ def check_negation_integrity(
     original_negations = extract_negation_bigrams(original_text)
     modified_negations = extract_negation_bigrams(llm_modified_text)
 
-    modified_positions = {pos for pos, _ in modified_negations}
+    {pos for pos, _ in modified_negations}
     modified_words = {word for _, word in modified_negations}
 
     for orig_pos, orig_word in original_negations:

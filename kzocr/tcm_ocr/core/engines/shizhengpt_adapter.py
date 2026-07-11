@@ -10,12 +10,11 @@ Inference via OpenAI-compatible HTTP API (llama-server).
 import base64
 import io
 import logging
-import os
 import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import requests

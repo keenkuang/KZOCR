@@ -12,12 +12,11 @@
 
 import json
 import logging
-import os
 import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from kzocr.tcm_ocr.config.constants import (
     TABLE_BOOK_CONTENT_TREE,

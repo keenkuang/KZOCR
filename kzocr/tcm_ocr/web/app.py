@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import time
-import json
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -215,7 +214,7 @@ app.add_middleware(
 )
 
 # --- 注册异常处理器 ---
-from fastapi.exceptions import HTTPException
+from fastapi.exceptions import HTTPException  # noqa: E402
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, http_exception_handler)
 
@@ -233,7 +232,7 @@ except ImportError as e:
     logger.warning("Failed to import push_decisions router: %s", e)
 
 # Dashboard API
-from kzocr.tcm_ocr.web.api.dashboard import router as dashboard_router
+from kzocr.tcm_ocr.web.api.dashboard import router as dashboard_router  # noqa: E402
 app.include_router(dashboard_router)
 logger.info("Registered dashboard router")
 

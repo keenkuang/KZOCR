@@ -12,8 +12,6 @@ BookTypeDetector 全面测试
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
 
 import pytest
 

@@ -10,7 +10,6 @@ Implements multi-engine consensus algorithms for combining OCR results:
 """
 
 import logging
-from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -152,7 +151,7 @@ def multi_engine_consensus(
     book_meta = book_meta or {}
 
     # Step 1: Select base text (longest text preferred)
-    engine_names = list(engine_results.keys())
+    list(engine_results.keys())
     texts = list(engine_results.values())
 
     # Find the longest text as base

@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import base64
 import io
-import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import requests
@@ -191,7 +190,6 @@ class SenseNovaAdapter:
 
 def _extract_reasoning_output(reasoning: str) -> str:
     """从 reasoning 字段中提取最终的 OCR 输出正文。"""
-    import re
     text = ""
     # 1. 尝试找"最终输出"标记后的正文
     for marker in ("**最终输出**", "最终输出结构规划", "最终输出："):

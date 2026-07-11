@@ -7,7 +7,7 @@ Provides fast inference via ONNX Runtime with cached models.
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 

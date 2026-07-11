@@ -451,7 +451,7 @@ def extract_dosages_with_herb(text: str) -> List[Dict[str, Any]]:
 
     # Pattern: herb_name + optional space + number (Arabic or Chinese) + unit
     # This regex handles: 黄芪15g, 黄芪 15 g, 黄芪十五克, 黄芪1两5钱
-    dosage_pattern = re.compile(
+    re.compile(
         r'(' + '|'.join(re.escape(h) for h in HERB_DOSAGE.keys()) + r')'  # herb name
         r'\s*'  # optional whitespace
         r'('  # dosage value group

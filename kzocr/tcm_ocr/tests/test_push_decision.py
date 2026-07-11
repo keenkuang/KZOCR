@@ -16,8 +16,8 @@ PushDecisionLogger 全面测试
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock, call, patch
+from typing import Tuple
+from unittest.mock import MagicMock
 
 import pytest
 
