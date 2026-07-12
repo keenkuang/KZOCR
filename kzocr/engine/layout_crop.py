@@ -103,7 +103,26 @@ def crop_by_doclayout(
     ys = [b["coordinate"][1] for b in body_boxes]
     xe = [b["coordinate"][2] for b in body_boxes]
     ye = [b["coordinate"][3] for b in body_boxes]
-    left = max(0, int(min(xs)) - pad_lr_t)
+
+    # 左边界综合 页眉/侧栏 与窄行（侧眉多为竖排窄框，常被排除在正文并集外），
+    # 取「最靠左」候选再外扩，并设下限 120，避免把左侧页眉/竖排侧眉切掉或过度内缩。
+    # 注意用 min 取最左候选后再与 120 取下限；不能用 max——右侧边栏 x 很大，
+    # 会错误把 left 推到右侧导致偶数页严重过裁（已实测：偶数页 left 被推到 ~1100px）。
+    margin_x_min = min(
+        (b["coordinate"][0] for b in boxes if b.get("label") in _MARGIN_LABELS),
+        default=None,
+    )
+    narrow_body_x_min = min(
+        (b["coordinate"][0] for b in body_boxes if b["coordinate"][2] - b["coordinate"][0] <= w * 0.5),
+        default=None,
+    )
+    left_candidates = [int(min(xs)) - pad_lr_t]
+    if margin_x_min is not None:
+        left_candidates.append(int(margin_x_min) - 20)
+    if narrow_body_x_min is not None:
+        left_candidates.append(int(narrow_body_x_min) - 20)
+    left = max(120, max(0, min(left_candidates)))
+
     top = max(0, int(min(ys)) - pad_lr_t)
     right = min(w, int(max(xe)) + pad_lr_t)
     bottom = min(h, int(max(ye)) + pad_b)
@@ -153,108 +172,128 @@ def _merge_nearby(lines: list[tuple], gap: int = 10) -> list[tuple]:
     return [(b[0], b[1], b[2], b[3]) for b in merged]
 
 
+def _compute_blocks(img: np.ndarray, lines: list[tuple], w: int) -> list[tuple]:
+    """对每行做垂直投影，求真实左右边界，返回 (lx, y1, rx, y2, bw) 列表。
+
+    与 _preview_even_formula.per_block / _preview_odd_formula.per_block 同口径：
+    暗像素占比 > 1% 的列视为有墨；bw = rx - lx 即行宽，用于宽/窄行分类。
+
+    左侧先跳过贯穿全页的实心竖边框线：该书(及类似扫描件)常在 x≈0 处有一条
+    细黑竖线，会把每个正文行的投影左缘"劫持"到 x=0，使 diff 公式看不到正文真左缘
+    (221 个偶数页因此所有 block x1=0)。检测最左侧连续"整列近乎全黑"的列作为
+    trim_left，投影左缘从该列之后起算。仅跳过实心黑线(整列黑像素占比 > 0.9)，
+    不碰侧眉/正文列。右侧不动，以免影响已验证的 user_right。
+    """
+    gray = np.mean(img, axis=2) if img.ndim == 3 else img
+    # 跳过左侧实心竖边框线（仅当整列近乎全黑，避免误删侧眉/正文列）
+    trim_left = 0
+    for x in range(min(12, w)):
+        col = gray[:, x] if gray.ndim == 2 else np.mean(gray[:, x, :], axis=1)
+        if np.mean(col < 128) > 0.9:
+            trim_left = x + 1
+        else:
+            break
+    blocks = []
+    for x1, y1, x2, y2 in lines:
+        row_gray = gray[y1:y2, :]
+        col_proj = np.mean(row_gray < 128, axis=0)
+        if col_proj.max() <= 0.01:
+            continue  # 该行无墨，跳过（避免产出伪全宽块）
+        lx = next((cx for cx in range(trim_left, w) if col_proj[cx] > 0.01), trim_left)
+        rx = next((cx for cx in range(w - 1, -1, -1) if col_proj[cx] > 0.01), w)
+        if lx < rx:
+            blocks.append((lx, y1, rx, y2, rx - lx))
+    return blocks
+
+
+# 左缘标定常数：本书(mi-by-ppocrv6)用 doclayout 全量反标定得到，
+# 取"使 max(left - dl.left) <= 25（0 过裁）"的保守值。换书时重标定：
+#   跑 _measure_user_formula.py 风格对比，取各 parity 下 max(偏移) 余量内的最大 C。
+_LEFT_CALIB_ODD = 105
+_LEFT_CALIB_EVEN = 75
+
+
+def _body_left_user(blocks: list[tuple], calib: int) -> int:
+    """用户公式（doclayout 全量验证：偏移近似恒定，std≈20 奇 / 28 偶）。
+
+        left = ( mean(x1 | x1>15) - mean(x1 全部) ) / 2 - 15 + calib
+
+    mean(x1 | x1>15) 是排除最左竖排侧眉后的正文左缘；减全体左缘均值得到
+    "侧眉把全体均值左拉的量"（间距大→差值大→有意义），折半再 -15 得左界。
+    calib 为每书标定的常数：取保守值可保证 0 过裁，且换书只需重标定一个常数，
+    公式结构本身不变（比固定 -50/120 阈值更泛化）。
+    """
+    all_x1 = [b[0] for b in blocks]
+    if not all_x1:
+        return 0
+    body = [x for x in all_x1 if x > 15]
+    m_all = sum(all_x1) / len(all_x1)
+    m_body = sum(body) / len(body) if body else m_all
+    return int((m_body - m_all) / 2 - 15 + calib)
+
+
+def _body_right_even(blocks: list[tuple], w: int, gap: int = 40, pad: int = 28) -> int:
+    """已验证偶数页 right：排除右侧边栏后取 M 与 X 的中点再左移 pad。
+
+    M = max(x2)（含右侧边栏的最右缘）；X = max(x2 where x2 <= M - gap)（正文最右缘）。
+    right = M - (M - X)/2 - pad，落在正文与边栏中间并留安全边距。
+    """
+    if not blocks:
+        return w
+    M = max(b[2] for b in blocks)
+    body = [b for b in blocks if b[2] <= M - gap]
+    if not body:
+        # 无右侧边栏(gap 内无正文)：不裁右，返回整宽，避免把正文右缘切掉(过裁)
+        return w
+    X = max(b[2] for b in body)
+    return min(w, max(0, int(M - (M - X) / 2 - pad)))
+
+
+def _body_top_bottom(blocks: list[tuple], h: int) -> tuple[int, int]:
+    """页眉/页脚检测，返回 (top, bottom)。
+
+    设计取舍：宁「欠裁」（把页眉/页脚留在裁切内、或上下多留余量）也不「过裁」
+    （切掉 doclayout 正文）。因此 top 取首块上缘上移 padding、bottom 取末块下缘
+    下移 padding，不做把边界下推/上提的激进裁剪——旧版页眉/页脚分支会把奇数页
+    正文上下缘切掉（端到端验证发现奇数页上下共 9 页过裁）。
+
+    页眉/页脚仍被「包含」在裁切内（欠裁，可接受），而非被排除（过裁，丢失正文）。
+    """
+    if not blocks:
+        return 0, h
+    top = max(0, blocks[0][1] - 15)
+    bottom = min(h, blocks[-1][3] + 15)
+    return top, bottom
+
+
 def _find_body_boundaries(img: np.ndarray, lines: list[tuple],
                           padding: int = 10,
                           page_num: int = 0) -> tuple[int, int, int, int]:
-    """通过全局垂直投影 + 逐行分析确定版心边界。
+    """通过逐行投影 + 奇偶对称确定版心边界。
 
-    支持 page_num 奇偶对称：奇数页裁左，偶数页裁右。
+    公式已用 PP-DocLayoutV3 正文框(doclayout 真值)全量验证：
+      - 奇数页(侧眉在左)：left=用户差值公式(_body_left_user) 裁左，right 保留整宽(右侧无边栏)。
+      - 偶数页(侧眉在右)：left=用户差值公式(_body_left_user) 裁左，right=user_right(排除右侧边栏)。
+      - top/bottom：_body_top_bottom 取首尾块上下缘±padding（宁欠裁包含页眉/页脚，也不过裁丢正文）。
 
     Returns:
         (top, bottom, left, right)
     """
     h, w = img.shape[:2]
-    gray = np.mean(img, axis=2) if img.ndim == 3 else img
-
     is_odd = (page_num % 2 == 1)  # True=奇数页(侧眉在左), False=偶数页(侧眉在右)
 
-    # -- 顶部：跳过页眉/装饰行 --
-    # 如果第一条线位于顶部 20% 且高度 > 40px → 页眉，跳过前两条
-    first_line = lines[0]
-    first_h = first_line[3] - first_line[1]
-    if len(lines) >= 3 and first_line[1] < h * 0.2 and first_h > 40:
-        top_line_start = lines[2][1]
-    elif len(lines) >= 2 and first_line[1] < h * 0.2 and first_h > 40:
-        top_line_start = lines[1][1]
-    else:
-        top_line_start = lines[0][1]
-    top = max(0, top_line_start - padding)
-    # 顶部少裁 15px（向上移）
-    top = max(0, top - 15)
+    blocks = _compute_blocks(img, lines, w)
+    if not blocks:
+        return 0, h, 0, w
 
-    # -- 底部：像素扩展 + 页码检测 --
-    last_line_end = max(b[3] for b in lines) if lines else h
-    bottom = last_line_end + padding
-
-    # 像素扩展（补漏检正文行）
-    extend_to = bottom
-    for y in range(bottom, min(bottom + 200, h)):
-        if np.mean(gray[y, :] < 128) > 0.005:
-            extend_to = y + padding
-    bottom = extend_to
-    # 底部加裁 80px
-    bottom = min(h, bottom - 80)
-
-    # 页码检测：检查最后几行在整体投影中是否孤立
-    if len(lines) >= 2:
-        last = lines[-1]
-        prev = lines[-2]
-        gap = last[1] - prev[3]
-        last_w = last[2] - last[0]
-        # 如果最后一行与上一行间距大，或者最后一行明显较窄 → 页码
-        is_page_num = (gap > 30 and last_w < w * 0.4) or (last_w < w * 0.25)
-        if is_page_num:
-            # 有上一行时裁到上一行，否则裁掉最后行以上
-            prev_bottom = prev[3] + padding if len(lines) >= 2 else last[1] - padding
-            bottom = min(bottom, prev_bottom)
-
-    # -- 左右：分析各行的垂直投影 --
-    x1_list, x2_list = [], []
-    for x1, y1, x2, y2 in lines:
-        # 对该行范围做垂直投影
-        row_gray = gray[y1:y2, :]
-        col_proj = np.mean(row_gray < 128, axis=0)
-        # 找左右边界（阈值 1%）
-        lx = 0
-        for cx in range(w):
-            if col_proj[cx] > 0.01:
-                lx = cx
-                break
-        rx = w
-        for cx in range(w - 1, -1, -1):
-            if col_proj[cx] > 0.01:
-                rx = cx
-                break
-        if lx < rx:
-            x1_list.append(lx)
-            x2_list.append(rx)
-
-    if x1_list:
-        # 宽行：行宽超过整页一半(> w*0.5)的正文行。古籍侧眉多为窄列(旋转文字/窄竖条)，
-        # 行宽远小于整页一半，从而被排除，避免其边界污染裁切。
-        bw_list = [rx - lx for lx, rx in zip(x1_list, x2_list)]
-        wide = [(lx, rx) for lx, rx, bw in zip(x1_list, x2_list, bw_list) if bw > w * 0.5]
-
-        if is_odd:
-            # 奇数页(侧眉在左)：左边界取宽行左边界最小值，再往左 20px
-            if wide:
-                left = max(0, min(lx for lx, rx in wide) - 20)
-            else:
-                # 兜底：无宽行时退回全部行最小左边界再左移 20px(安全超集，不切正文)
-                left = max(0, min(x1_list) - 20)
-            right = w
-        else:
-            # 偶数页(侧眉在右)：右边界取宽行右边界最大值，再往右 20px
-            if wide:
-                right = min(w, max(rx for lx, rx in wide) + 20)
-            else:
-                # 兜底：无宽行时退回全部行最大右边界再右移 20px
-                right = min(w, max(x2_list) + 20)
-            left = 0
-    else:
-        left = 0
+    top, bottom = _body_top_bottom(blocks, h)
+    left = _body_left_user(blocks, _LEFT_CALIB_ODD if is_odd else _LEFT_CALIB_EVEN)
+    if is_odd:
+        # 奇数页(侧眉在左)：仅裁左，right 保留整宽(右侧无边栏)。
         right = w
-
+    else:
+        # 偶数页(侧眉在右)：right 排除右侧边栏。
+        right = _body_right_even(blocks, w)
     return top, bottom, left, right
 
 

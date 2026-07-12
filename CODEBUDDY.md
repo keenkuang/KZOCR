@@ -6,6 +6,13 @@ This file provides guidance to CodeBuddy Code when working with code in this rep
 
 KZOCR 是**中医古籍 OCR 编排工具**：将 kimi OCR（BookPipeline）对 PDF 的识别结果写入 zai 人工校对台（SQLite），导出经人工终校的 Markdown 后推送 kHUB，形成「扫描 → OCR → 校对 → 发布」闭环。当前发布版本 v0.6.0。
 
+## 会话上下文恢复（失忆防护，必须遵守）
+每个新会话开始处理任何任务前，**必须**先读取跨会话记忆以恢复上下文，不要问用户"我们现在要做什么"：
+1. Read `memory/MEMORY.md`（路径：`/home/keen/.codebuddy/projects/home-keen-KZOCR/memory/MEMORY.md`）。它顶部有「当前进行中」块，可直接重新定位。
+2. 若「当前进行中」指向某专题文件（如 `project_crop_formula.md`），且当前任务相关，**主动 Read 该文件**再动手，不要只看了索引就问"要做什么"。
+3. 若 MEMORY.md 显示有未结任务，先确认要继续的方向再执行，优先沿用已落地的决策而非重新提议。
+4. 任务有进展/转向时，用 `/context-management:context-save` 或手动更新 MEMORY.md 的「当前进行中」与对应专题文件，保证下次会话可续。
+
 ## 常用命令
 
 ### 安装 / 构建
