@@ -242,7 +242,10 @@ def _body_right_even(blocks: list[tuple], w: int, gap: int = 40, pad: int = 28) 
         return w
     M = max(b[2] for b in blocks)
     body = [b for b in blocks if b[2] <= M - gap]
-    X = max(b[2] for b in body) if body else M
+    if not body:
+        # 无右侧边栏(gap 内无正文)：不裁右，返回整宽，避免把正文右缘切掉(过裁)
+        return w
+    X = max(b[2] for b in body)
     return min(w, max(0, int(M - (M - X) / 2 - pad)))
 
 

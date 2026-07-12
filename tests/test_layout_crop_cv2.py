@@ -46,10 +46,10 @@ def test_body_right_even_midpoint():
     assert lc._body_right_even(blocks, w=2000) == 1352
 
 
-def test_body_right_even_no_gap_falls_back_to_m():
-    # 所有块右缘都接近 M → body 空 → X=M → right=M-pad
+def test_body_right_even_no_gap_falls_back_to_w():
+    # 所有块右缘都接近 M(无右侧边栏) → 不裁右，返回整宽 w（不过裁正文）
     blocks = [(100, 0, 1410, 10, 1310), (100, 20, 1410, 30, 1310)]
-    assert lc._body_right_even(blocks, w=2000) == 1410 - 28
+    assert lc._body_right_even(blocks, w=2000) == 2000
 
 
 def test_body_top_bottom_no_header_footer():
