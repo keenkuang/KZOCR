@@ -105,8 +105,9 @@ def crop_by_doclayout(
     ye = [b["coordinate"][3] for b in body_boxes]
 
     # 左边界综合 页眉/侧栏 与窄行（侧眉多为竖排窄框，常被排除在正文并集外），
-    # 取最靠左再外扩 20px，并设下限 120，避免把左侧页眉/竖排侧眉切掉或过度内缩。
-    # left = max(页眉x_min-20, 窄行x_min-20, 120)
+    # 取「最靠左」候选再外扩，并设下限 120，避免把左侧页眉/竖排侧眉切掉或过度内缩。
+    # 注意用 min 取最左候选后再与 120 取下限；不能用 max——右侧边栏 x 很大，
+    # 会错误把 left 推到右侧导致偶数页严重过裁（已实测：偶数页 left 被推到 ~1100px）。
     margin_x_min = min(
         (b["coordinate"][0] for b in boxes if b.get("label") in _MARGIN_LABELS),
         default=None,
@@ -115,13 +116,12 @@ def crop_by_doclayout(
         (b["coordinate"][0] for b in body_boxes if b["coordinate"][2] - b["coordinate"][0] <= w * 0.5),
         default=None,
     )
-    left_candidates = [120]
+    left_candidates = [int(min(xs)) - pad_lr_t]
     if margin_x_min is not None:
         left_candidates.append(int(margin_x_min) - 20)
     if narrow_body_x_min is not None:
         left_candidates.append(int(narrow_body_x_min) - 20)
-    left_candidates.append(int(min(xs)) - pad_lr_t)
-    left = max(0, max(left_candidates))
+    left = max(120, max(0, min(left_candidates)))
 
     top = max(0, int(min(ys)) - pad_lr_t)
     right = min(w, int(max(xe)) + pad_lr_t)
@@ -271,7 +271,7 @@ def _find_body_boundaries(img: np.ndarray, lines: list[tuple],
     公式已用 PP-DocLayoutV3 正文框(doclayout 真值)全量验证：
       - 奇数页(侧眉在左)：left=用户差值公式(_body_left_user) 裁左，right 保留整宽(右侧无边栏)。
       - 偶数页(侧眉在右)：left=用户差值公式(_body_left_user) 裁左，right=user_right(排除右侧边栏)。
-      - top/bottom：页眉页脚检测(_body_top_bottom)，排除页眉/页脚/页码。
+      - top/bottom：_body_top_bottom 取首尾块上下缘±padding（宁欠裁包含页眉/页脚，也不过裁丢正文）。
 
     Returns:
         (top, bottom, left, right)

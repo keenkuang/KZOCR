@@ -54,12 +54,30 @@ def test_crop_by_doclayout_union_with_padding():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_doclayout(img)
     assert out is not None
-    # 左边界 = max(正文min-15, 页眉/侧眉x_min-20, 120)：本例正文 min x=100→85，但 120 下限生效 → left=120
+    # 左边界 = 最左候选(正文min-15=85 / 侧眉x_min-20=-10 / 页眉x_min-20=80) 取最左再与 120 取下限 → 120
     # body 并集 y∈[200,850]; padding 左右上 15 / 下 10
     left, top = 120, 200 - 15
     right, bottom = 620 + 15, 850 + 10
     assert out.shape[1] == right - left
     assert out.shape[0] == bottom - top
+
+
+def test_crop_by_doclayout_right_margin_does_not_push_left():
+    """回归测试：右侧边栏(aside_text x 很大)不应把 left 推到右侧导致偶数页过裁。
+
+    修复前 left = max(0, max(left_candidates))，右侧边栏 x≈1300 会使 left≈1280，
+    偶数页左界被推到 ~1100px（实测 crop 宽度仅 461 远低于奇数页 1157）。
+    """
+    img = _make_img(1000, 1500)
+    boxes = [
+        _box("text", 100, 200, 620, 850),
+        _box("aside_text", 1300, 200, 1410, 850),  # 右侧边栏，x 很大
+    ]
+    with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
+        out = crop_by_doclayout(img)
+    assert out is not None
+    # 最左候选 = 正文 min x=100-15=85，与 120 取下限 → left=120（不是 1280）
+    assert out.shape[1] == (620 + 15) - 120
 
 
 def test_crop_by_doclayout_no_body_returns_none():
@@ -81,7 +99,7 @@ def test_crop_by_layout_prefers_doclayout():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_layout(img, padding=10, page_num=1)
     assert out is not None
-    # 左边界 = max(正文min-15, 页眉/侧眉x_min-20, 120)：本例正文 min x=100→85，但 120 下限生效 → left=120
+    # 左边界 = 最左候选(正文min-15=85) 与 120 取下限 → left=120
     assert out.shape[1] == (620 + 15) - 120
 
 
