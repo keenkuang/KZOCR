@@ -54,8 +54,9 @@ def test_crop_by_doclayout_union_with_padding():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_doclayout(img)
     assert out is not None
-    # body 并集: x∈[100,620], y∈[200,850]; padding 左右上 15 / 下 10
-    left, top = 100 - 15, 200 - 15
+    # 左边界 = max(正文min-15, 页眉/侧眉x_min-20, 120)：本例正文 min x=100→85，但 120 下限生效 → left=120
+    # body 并集 y∈[200,850]; padding 左右上 15 / 下 10
+    left, top = 120, 200 - 15
     right, bottom = 620 + 15, 850 + 10
     assert out.shape[1] == right - left
     assert out.shape[0] == bottom - top
@@ -80,7 +81,8 @@ def test_crop_by_layout_prefers_doclayout():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_layout(img, padding=10, page_num=1)
     assert out is not None
-    assert out.shape[1] == (620 + 15) - (100 - 15)
+    # 左边界 = max(正文min-15, 页眉/侧眉x_min-20, 120)：本例正文 min x=100→85，但 120 下限生效 → left=120
+    assert out.shape[1] == (620 + 15) - 120
 
 
 def test_crop_by_layout_falls_back_to_cv2_when_model_none():
