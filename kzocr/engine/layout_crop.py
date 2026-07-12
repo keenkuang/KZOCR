@@ -197,6 +197,8 @@ def _compute_blocks(img: np.ndarray, lines: list[tuple], w: int) -> list[tuple]:
     for x1, y1, x2, y2 in lines:
         row_gray = gray[y1:y2, :]
         col_proj = np.mean(row_gray < 128, axis=0)
+        if col_proj.max() <= 0.01:
+            continue  # 该行无墨，跳过（避免产出伪全宽块）
         lx = next((cx for cx in range(trim_left, w) if col_proj[cx] > 0.01), trim_left)
         rx = next((cx for cx in range(w - 1, -1, -1) if col_proj[cx] > 0.01), w)
         if lx < rx:
@@ -283,9 +285,9 @@ def _find_body_boundaries(img: np.ndarray, lines: list[tuple],
     """通过逐行投影 + 奇偶对称确定版心边界。
 
     公式已用 PP-DocLayoutV3 正文框(doclayout 真值)全量验证：
-      - 奇数页(侧眉在左)：left=(a) 裁左，right 保留整宽(右侧无边栏)。
-      - 偶数页(侧眉在右)：left=(a) 裁左，right=user_right(排除右侧边栏)。
-      - top/bottom：页眉页脚检测，排除页眉/页脚/页码。
+      - 奇数页(侧眉在左)：left=用户差值公式(_body_left_user) 裁左，right 保留整宽(右侧无边栏)。
+      - 偶数页(侧眉在右)：left=用户差值公式(_body_left_user) 裁左，right=user_right(排除右侧边栏)。
+      - top/bottom：页眉页脚检测(_body_top_bottom)，排除页眉/页脚/页码。
 
     Returns:
         (top, bottom, left, right)
