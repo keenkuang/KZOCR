@@ -62,13 +62,14 @@ def test_body_top_bottom_no_header_footer():
     assert bottom == 820 + 15
 
 
-def test_body_top_bottom_header_excluded():
+def test_body_top_bottom_includes_header_undercrop():
     h = 1000
-    # 首块在顶部 15%(y<150) 且高度>30 → 页眉；与下一块间距<=20 → 合并
+    # 首块在顶部 15%(y<150) 且高度>30，形似页眉；但为「宁欠裁不过裁」，
+    # 不把它排除，top 直接取首块上缘上移 padding（含页眉，安全）
     blocks = [(50, 50, 500, 90, 450), (50, 100, 500, 120, 450), (50, 300, 500, 320, 450)]
     top, bottom = lc._body_top_bottom(blocks, h)
-    # top = 合并后页眉底边(120)+20 = 140
-    assert top == 120 + 20
+    assert top == 50 - 15  # 首块 y1-15，不向下推
+    assert bottom == 320 + 15  # 末块 y2+15，不向上提
 
 
 def test_compute_blocks_skips_left_frame_line():

@@ -249,33 +249,17 @@ def _body_right_even(blocks: list[tuple], w: int, gap: int = 40, pad: int = 28) 
 def _body_top_bottom(blocks: list[tuple], h: int) -> tuple[int, int]:
     """页眉/页脚检测，返回 (top, bottom)。
 
-    页眉：首块位于顶部 15% 且高度 > 30；与下一块间距 <= 20 则合并首两行。
-    页脚：末块位于页底 15%；与上一块间距 <= 20 则合并末两行。
-    top = 页眉块底边 + 20（排除页眉）；bottom = 页脚块顶边 - 15（排除页脚）。
-    """
-    headers = []
-    if blocks and blocks[0][1] < h * 0.15 and (blocks[0][3] - blocks[0][1]) > 30:
-        if len(blocks) >= 2:
-            gap = blocks[1][1] - blocks[0][3]
-            headers = [blocks[0], blocks[1]] if gap <= 20 else [blocks[0]]
-        else:
-            headers = [blocks[0]]
-    footers = []
-    if blocks and blocks[-1][3] > h * 0.85:
-        if len(blocks) >= 2:
-            gap = blocks[-1][1] - blocks[-2][3]
-            footers = [blocks[-2], blocks[-1]] if gap <= 20 else [blocks[-1]]
-        else:
-            footers = [blocks[-1]]
+    设计取舍：宁「欠裁」（把页眉/页脚留在裁切内、或上下多留余量）也不「过裁」
+    （切掉 doclayout 正文）。因此 top 取首块上缘上移 padding、bottom 取末块下缘
+    下移 padding，不做把边界下推/上提的激进裁剪——旧版页眉/页脚分支会把奇数页
+    正文上下缘切掉（端到端验证发现奇数页上下共 9 页过裁）。
 
-    if headers:
-        top = max(0, max(b[3] for b in headers) + 20)
-    else:
-        top = max(0, blocks[0][1] - 15) if blocks else 0
-    if footers:
-        bottom = min(h, min(b[1] for b in footers) - 15)
-    else:
-        bottom = min(h, blocks[-1][3] + 15) if blocks else h
+    页眉/页脚仍被「包含」在裁切内（欠裁，可接受），而非被排除（过裁，丢失正文）。
+    """
+    if not blocks:
+        return 0, h
+    top = max(0, blocks[0][1] - 15)
+    bottom = min(h, blocks[-1][3] + 15)
     return top, bottom
 
 
