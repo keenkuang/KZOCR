@@ -88,3 +88,34 @@ def test_compute_blocks_skips_inkless_line():
     img = _white(h, w)         # 全白，无墨
     blocks = lc._compute_blocks(img, [(0, 20, 80, 30)], w)
     assert blocks == [], "无墨行不应产出伪全宽块"
+
+
+def test_cv2_auto_calibrate_aligns_to_doclayout():
+    """前若干页用 dl 真值自动标定 _cv2_calib；校准后 cv2 左界不应过裁 dl 真值。"""
+    import pytest
+    from unittest import mock
+
+    pytest.importorskip("cv2")
+    lc.reset_cv2_calib()
+    try:
+        h, w = 1400, 1000
+        # 正文宽行：左界 200、右界 760（cv2 检测后 blocks x1≈200）
+        img = _white(h, w)
+        for y in range(400, 1200, 100):
+            img[y : y + 30, 200:760] = 0
+        # dl 真值左界 = 171（模拟已裁侧眉后的版心）
+        fake_rect = (171, 0, w, h)
+        with mock.patch.object(lc, "_doclayout_rect", return_value=fake_rect):
+            lc.calibrate_cv2_left(
+                [img] * lc._CV2_CALIB_SAMPLE,
+                page_nums=list(range(1, lc._CV2_CALIB_SAMPLE + 1)),
+            )
+        # 校准后：cv2 用新 calib 算 left，应 ≤ dl_left(171) + 安全阈值（不切字）
+        raw = lc._detect_text_lines(img)
+        filt = [b for b in raw if b[3] - b[1] >= 8]
+        merged = lc._merge_nearby(filt, gap=8)
+        _t, _b, cv_left, _r = lc._find_body_boundaries(img, merged, page_num=1)
+        assert cv_left <= 171 + 10, f"cv2 左界 {cv_left} 不应过裁 dl 真值 171"
+        assert lc._CV2_CALIB_LOCKED is True, "采样满后应锁定标定"
+    finally:
+        lc.reset_cv2_calib()

@@ -54,9 +54,10 @@ def test_crop_by_doclayout_union_with_padding():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_doclayout(img)
     assert out is not None
-    # 左边界 = 最左候选(正文min-15=85 / 侧眉x_min-20=-10 / 页眉x_min-20=80) 取最左再与 120 取下限 → 120
+    # 左边界 = 最左候选(正文 min x1=100 -15=85)；侧眉(aside_text)不在 _BODY_LABELS 已排除，
+    # 不再用 margin_x_min-20，下限 0 → left=85（侧眉 x[10,60] 被裁掉）
     # body 并集 y∈[200,850]; padding 左右上 15 / 下 10
-    left, top = 120, 200 - 15
+    left, top = 85, 200 - 15
     right, bottom = 620 + 15, 850 + 10
     assert out.shape[1] == right - left
     assert out.shape[0] == bottom - top
@@ -76,8 +77,26 @@ def test_crop_by_doclayout_right_margin_does_not_push_left():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_doclayout(img)
     assert out is not None
-    # 最左候选 = 正文 min x=100-15=85，与 120 取下限 → left=120（不是 1280）
-    assert out.shape[1] == (620 + 15) - 120
+    # 最左候选 = min(正文 x1 -15=85, 窄正文 x1 -20=80) → left=80（不是 1280）
+    assert out.shape[1] == (620 + 15) - 80
+
+
+def test_crop_by_doclayout_trims_left_side_eyebrow():
+    """dl 左界应排除左侧竖眉(aside_text)，且不再被 120 下限兜死。"""
+    img = _make_img(2055, 1430)
+    boxes = [
+        _box("text", 186, 300, 1280, 400),     # 正文（最左 x1=186）
+        _box("aside_text", 50, 307, 92, 885),  # 左侧竖眉 x[50,92]
+        _box("text", 188, 900, 1280, 1000),
+    ]
+    with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
+        out = crop_by_doclayout(img)
+    assert out is not None
+    # min(正文 x1)=186 → left=186-15=171；侧眉(aside_text)已排除，右缘 92 < 171 → 被裁
+    left = 171
+    assert out.shape[1] == (1280 + 15) - left
+    assert left > 92, "左侧竖眉(50-92)应被裁掉"
+    assert left != 120, "不应再被 120 下限兜死"
 
 
 def test_crop_by_doclayout_no_body_returns_none():
@@ -99,8 +118,8 @@ def test_crop_by_layout_prefers_doclayout():
     with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=_FakeModel(boxes)):
         out = crop_by_layout(img, padding=10, page_num=1)
     assert out is not None
-    # 左边界 = 最左候选(正文min-15=85) 与 120 取下限 → left=120
-    assert out.shape[1] == (620 + 15) - 120
+    # 左边界 = 最左候选(正文min-15=85)，下限 0 → left=85
+    assert out.shape[1] == (620 + 15) - 85
 
 
 def test_crop_by_layout_falls_back_to_cv2_when_model_none():

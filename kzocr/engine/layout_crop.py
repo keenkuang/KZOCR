@@ -66,16 +66,17 @@ def _extract_doclayout_boxes(res) -> list[dict]:
     raise RuntimeError(f"无法识别 PP-DocLayoutV3 预测结果结构: {type(raw)}")
 
 
-def crop_by_doclayout(
+def _doclayout_rect(
     img: np.ndarray,
     pad_lr_t: int = _DOC_LAYOUT_PAD_LR_T,
     pad_b: int = _DOC_LAYOUT_PAD_B,
-) -> np.ndarray | None:
-    """用 PP-DocLayoutV3 检测版心并裁剪。
+) -> tuple[int, int, int, int] | None:
+    """用 PP-DocLayoutV3 求版心矩形 (left, top, right, bottom)，失败返回 None。
 
-    取 label ∈ {text, vertical_text, doc_title, paragraph_title} 的检测框并集，
-    外扩 pad_lr_t（左右上）/ pad_b（下）得到版心，返回裁切后的 RGB 数组。
-    模型不可用或推理/解析失败时返回 None（交由 cv2 降级）。
+    取 label ∈ _BODY_LABELS 的检测框并集外扩 padding。左侧竖眉(aside_text，属
+    _MARGIN_LABELS)本就不在 _BODY_LABELS，故 min(正文 x1) 已排除侧眉；左界不再用
+    margin_x_min-20（会把左界拉到侧眉左边、反而保留侧眉），下限由 120 降至 0——
+    min(正文 x1)-pad 永远位于正文最左**左侧**，绝不切到正文（宁欠裁不过裁）。
     """
     model = _get_doclayout_model()
     if model is None:
@@ -104,28 +105,33 @@ def crop_by_doclayout(
     xe = [b["coordinate"][2] for b in body_boxes]
     ye = [b["coordinate"][3] for b in body_boxes]
 
-    # 左边界综合 页眉/侧栏 与窄行（侧眉多为竖排窄框，常被排除在正文并集外），
-    # 取「最靠左」候选再外扩，并设下限 120，避免把左侧页眉/竖排侧眉切掉或过度内缩。
-    # 注意用 min 取最左候选后再与 120 取下限；不能用 max——右侧边栏 x 很大，
-    # 会错误把 left 推到右侧导致偶数页严重过裁（已实测：偶数页 left 被推到 ~1100px）。
-    margin_x_min = min(
-        (b["coordinate"][0] for b in boxes if b.get("label") in _MARGIN_LABELS),
-        default=None,
-    )
+    # 左界候选：正文并集最左 - pad；窄正文(≤半宽)最左 - 20。
+    # 不再加入 margin_x_min-20（会保留侧眉），下限 0（见函数 docstring）。
+    left_candidates = [int(min(xs)) - pad_lr_t]
     narrow_body_x_min = min(
         (b["coordinate"][0] for b in body_boxes if b["coordinate"][2] - b["coordinate"][0] <= w * 0.5),
         default=None,
     )
-    left_candidates = [int(min(xs)) - pad_lr_t]
-    if margin_x_min is not None:
-        left_candidates.append(int(margin_x_min) - 20)
     if narrow_body_x_min is not None:
         left_candidates.append(int(narrow_body_x_min) - 20)
-    left = max(120, max(0, min(left_candidates)))
+    left = max(0, min(left_candidates))
 
     top = max(0, int(min(ys)) - pad_lr_t)
     right = min(w, int(max(xe)) + pad_lr_t)
     bottom = min(h, int(max(ye)) + pad_b)
+    return (left, top, right, bottom)
+
+
+def crop_by_doclayout(
+    img: np.ndarray,
+    pad_lr_t: int = _DOC_LAYOUT_PAD_LR_T,
+    pad_b: int = _DOC_LAYOUT_PAD_B,
+) -> np.ndarray | None:
+    """用 PP-DocLayoutV3 检测版心并裁剪（取框逻辑见 _doclayout_rect）。"""
+    rect = _doclayout_rect(img, pad_lr_t=pad_lr_t, pad_b=pad_b)
+    if rect is None:
+        return None
+    left, top, right, bottom = rect
     return img[top:bottom, left:right].copy()
 
 
@@ -213,16 +219,118 @@ _LEFT_CALIB_ODD = 105
 _LEFT_CALIB_EVEN = 75
 
 
-def _body_left_user(blocks: list[tuple], calib: int) -> int:
+# --- cv2 左界 calib 在线自动标定（换书零人工；仅 dl 可用时生效） ---
+# 按奇偶(parity: 1=奇, 0=偶) 存储 calib，默认用本书反标定常数；dl 可用时前
+# _CV2_CALIB_SAMPLE 页用 dl 真值采样每页「安全 calib 候选」并取最小值锁定。
+# dl_left = 正文左缘 - 15，故正文左缘 = dl_left + 15。安全候选令校准后
+#   cv2_left = diff_term + calib <= (dl_left + 15) - _CV2_CALIB_BODY_MARGIN
+#   = dl_left + (15 - _CV2_CALIB_BODY_MARGIN)
+# 即 cv2 左界恒在正文左缘内侧 _CV2_CALIB_BODY_MARGIN px（绝不过裁正文）；
+# 对奇页(侧眉在左，diff_term≈-15)该候选同时把 calib 抬高，使 cv2 左界推到 dl 水平
+# （≈ dl_left+5 > 侧眉右缘~85），侧眉因此被裁。取各页候选最小值 = 「最坏页也安全」。
+# 无 paddle(dl 不可用) 时回落默认常数（CI/降级场景）。
+_CV2_CALIB_SAMPLE = 60
+_CV2_CALIB_BODY_MARGIN = 10
+_cv2_calib: dict[int, int] = {1: _LEFT_CALIB_ODD, 0: _LEFT_CALIB_EVEN}
+_cv2_calib_buf: dict[int, list[int]] = {1: [], 0: []}
+_cv2_calib_count = 0
+_CV2_CALIB_LOCKED = False
+
+
+def _diff_term(blocks: list[tuple]) -> float:
+    """用户差值公式的 calib 无关部分：(mean(x1|x1>15) - mean(x1 全部))/2 - 15。"""
+    all_x1 = [b[0] for b in blocks]
+    if not all_x1:
+        return -15.0
+    body = [x for x in all_x1 if x > 15]
+    m_all = sum(all_x1) / len(all_x1)
+    m_body = sum(body) / len(body) if body else m_all
+    return (m_body - m_all) / 2 - 15
+
+
+def _maybe_calibrate_cv2(img: np.ndarray, page_num: int, dl_left: int | None = None) -> None:
+    """dl 可用时，前 _CV2_CALIB_SAMPLE 页采样每页安全 calib 候选并锁定 _cv2_calib。
+
+    每页候选令校准后 cv2_left = diff_term + calib <= (dl_left + 15) - _CV2_CALIB_BODY_MARGIN
+    （正文左缘内侧 _CV2_CALIB_BODY_MARGIN px，绝不切正文）；奇页(侧眉在左，diff_term≈-15)
+    此候选同时抬高 calib，使 cv2 左界推到 dl 水平、侧眉被裁。取各页候选最小值即「最坏页也安全」。
+    """
+    global _cv2_calib_count, _CV2_CALIB_LOCKED
+    if _CV2_CALIB_LOCKED or _cv2_calib_count >= _CV2_CALIB_SAMPLE:
+        return
+    if dl_left is None:
+        rect = _doclayout_rect(img)
+        if rect is None:
+            return
+        dl_left = rect[0]
+    h, w = img.shape[:2]
+    raw = _detect_text_lines(img)
+    filt = [b for b in raw if b[3] - b[1] >= 8]
+    merged = _merge_nearby(filt, gap=8) if filt else []
+    if not merged:
+        return
+    blocks = _compute_blocks(img, merged, w)
+    if not blocks:
+        return
+    parity = 1 if page_num % 2 == 1 else 0
+    dt = _diff_term(blocks)
+    # 候选 calib：校准后 cv2_left <= 正文左缘内侧 _CV2_CALIB_BODY_MARGIN px（绝不过裁正文）
+    cand = int(max(0, min(200, dl_left + (15 - _CV2_CALIB_BODY_MARGIN) - dt)))
+    _cv2_calib_buf[parity].append(cand)
+    _cv2_calib_count += 1
+    if _cv2_calib_count >= _CV2_CALIB_SAMPLE:
+        _finalize_cv2_calib()
+
+
+def _finalize_cv2_calib() -> None:
+    """按 parity 取候选 calib 最小值：最坏页也安全（cv2_left <= dl_left - _CV2_CALIB_MARGIN）。"""
+    global _CV2_CALIB_LOCKED
+    for parity in (1, 0):
+        buf = _cv2_calib_buf[parity]
+        if not buf:
+            continue
+        _cv2_calib[parity] = int(max(0, min(200, min(buf))))
+    _CV2_CALIB_LOCKED = True
+
+
+def calibrate_cv2_left(
+    images: list[np.ndarray],
+    page_nums: list[int] | None = None,
+    n_sample: int = _CV2_CALIB_SAMPLE,
+) -> None:
+    """显式标定：对前 n_sample 页采样 dl/cv2 左界偏移并锁定 _cv2_calib（需提前标定时用）。"""
+    if _CV2_CALIB_LOCKED:
+        return
+    for i, im in enumerate(images):
+        if _CV2_CALIB_LOCKED or _cv2_calib_count >= n_sample:
+            break
+        _maybe_calibrate_cv2(im, page_nums[i] if page_nums else i)
+
+
+def reset_cv2_calib() -> None:
+    """测试/换进程时重置标定状态到默认常数。"""
+    global _cv2_calib_count, _CV2_CALIB_LOCKED
+    _cv2_calib[1] = _LEFT_CALIB_ODD
+    _cv2_calib[0] = _LEFT_CALIB_EVEN
+    _cv2_calib_buf[1].clear()
+    _cv2_calib_buf[0].clear()
+    _cv2_calib_count = 0
+    _CV2_CALIB_LOCKED = False
+
+
+def _body_left_user(blocks: list[tuple], calib: int | None = None, parity: int = 1) -> int:
     """用户公式（doclayout 全量验证：偏移近似恒定，std≈20 奇 / 28 偶）。
 
         left = ( mean(x1 | x1>15) - mean(x1 全部) ) / 2 - 15 + calib
 
     mean(x1 | x1>15) 是排除最左竖排侧眉后的正文左缘；减全体左缘均值得到
     "侧眉把全体均值左拉的量"（间距大→差值大→有意义），折半再 -15 得左界。
-    calib 为每书标定的常数：取保守值可保证 0 过裁，且换书只需重标定一个常数，
+    calib 为每书标定的常数：默认从 _cv2_calib[parity] 读取（已由 dl 自动标定，
+    换书零人工），也可显式传入。取保守值可保证 0 过裁，且换书只需重标定一个常数，
     公式结构本身不变（比固定 -50/120 阈值更泛化）。
     """
+    if calib is None:
+        calib = _cv2_calib.get(parity, _LEFT_CALIB_ODD if parity == 1 else _LEFT_CALIB_EVEN)
     all_x1 = [b[0] for b in blocks]
     if not all_x1:
         return 0
@@ -287,7 +395,8 @@ def _find_body_boundaries(img: np.ndarray, lines: list[tuple],
         return 0, h, 0, w
 
     top, bottom = _body_top_bottom(blocks, h)
-    left = _body_left_user(blocks, _LEFT_CALIB_ODD if is_odd else _LEFT_CALIB_EVEN)
+    parity = 1 if is_odd else 0
+    left = _body_left_user(blocks, parity=parity)
     if is_odd:
         # 奇数页(侧眉在左)：仅裁左，right 保留整宽(右侧无边栏)。
         right = w
@@ -331,16 +440,21 @@ def _post_trim_borders(img: np.ndarray) -> np.ndarray:
 
 
 def crop_by_layout(img: np.ndarray, padding: int = 10,
-                   page_num: int = 0) -> np.ndarray | None:
+                   page_num: int = 0, auto_calibrate: bool = True) -> np.ndarray | None:
     """版心裁剪：优先 PP-DocLayoutV3，失败降级 cv2 三级方案。
 
     - PP-DocLayoutV3 可用时：版心由其检测框(text/vertical_text/标题)并集决定，
       使用固定 padding（左右上 15 / 下 10），不受 padding 参数影响。
     - 不可用时：降级到 cv2 行检测 → 纯投影（使用 padding 参数）。
+    - auto_calibrate=True 且 dl 可用时，前若干页自动用 dl 真值标定 cv2 左界
+      calib（换书零人工；详见 _maybe_calibrate_cv2）。
     """
-    doc = crop_by_doclayout(img, pad_lr_t=15, pad_b=10)
-    if doc is not None:
-        return doc
+    rect = _doclayout_rect(img)
+    if rect is not None:
+        if auto_calibrate:
+            _maybe_calibrate_cv2(img, page_num, dl_left=rect[0])
+        left, top, right, bottom = rect
+        return img[top:bottom, left:right].copy()
 
     # --- cv2 降级路径 ---
     h, w = img.shape[:2]
