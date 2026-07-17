@@ -372,3 +372,38 @@ def test_consensus_sampling_vision_pass_skips_anomaly(tmp_path, monkeypatch):
     anomalies = _read_anomalies("bkc11", str(tmp_path))
     consensus = [a for a in anomalies if "ConsensusErrorArbitration" in (a["detector_chain"] or "")]
     assert len(consensus) == 0, "VL 确认 PASS 不应产生仲裁 anomaly"
+
+
+def test_consensus_sampling_vision_fail_triggers_anomaly(tmp_path, monkeypatch):
+    """VL recheck 返回 FAIL → anomaly 产生，含 ConsensusErrorArbitration。"""
+    monkeypatch.setattr("random.random", lambda: 0.0)  # 100% 中签
+    monkeypatch.setenv("KZOCR_MODELSCOPE_API_KEY", "testkey")
+    monkeypatch.setattr(
+        _orc.VisionRecheckAdapter, "recheck",
+        lambda self, text, page_img, bbox=None, engine_label="":
+            GlyphVerdict(
+                status="FAIL" if engine_label == "consensus-check" else "PASS",
+                confidence=0.3 if engine_label == "consensus-check" else 0.9,
+                details="stub_fail;mismatch_detected",
+                detector_name="VisionRecheckAdapter",
+            ),
+    )
+
+    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"))
+    reg.register_adapter(
+        AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
+        EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补气，方用萆薢分清饮")]),
+    )
+
+    def _render_gen_img(n):
+        for i in range(n):
+            yield PageInput(page_num=i, img=np.zeros((100, 100, 3), dtype=np.uint8))
+
+    monkeypatch.setattr(_orc, "render_pages", lambda pdf, cfg, dpi=150: _render_gen_img(1))
+    cfg = StubConfig(allow_cloud_vision=True, db_dir=str(tmp_path))
+    overrides = EngineOverrides(enable_cross_check=True, consensus_sample_rate=1.0)
+    orchestrate_book("/fp", "bkc12", cfg, reg, overrides=overrides)
+
+    anomalies = _read_anomalies("bkc12", str(tmp_path))
+    assert len(anomalies) >= 1, "VL 判定 FAIL 应触发 anomaly"
+    assert any("ConsensusErrorArbitration" in (a["detector_chain"] or "") for a in anomalies)
