@@ -85,6 +85,7 @@ class PageResult:
     paragraphs: list[ParagraphResult] = field(default_factory=list)
     text: str = ""              # 整页文本（段落聚合结果；v0.7 E4 _build_pages_result 填充）
     confidence: float = 0.9     # 引擎识别置信度（供 conf≤0.90 门控使用，默认 0.9=放行）
+    char_boxes: Optional[list[list[list[int]]]] = None  # 字符级 bbox：每行 → 该行逐字 [x1,y1,x2,y2]（None=引擎不支持，如 RapidOCR）
 
 
 @dataclass
@@ -239,6 +240,7 @@ class AdapterPageResult:
     confidence: float = 0.9
     char_confidences: Optional[list[float]] = None   # 字级置信度，与 text 等长（None=不支持）
     boxes: Optional[list[list[int]]] = None           # 行级边界框列表，每项 [x1,y1,x2,y2]（None=不支持）
+    char_boxes: Optional[list[list[list[int]]]] = None  # 字符级边界框：每行 → 该行逐字 [x1,y1,x2,y2]（None=引擎不支持，如 RapidOCR）
     crop_img_path: Optional[str] = None              # B7：裁剪图路径引用，不存像素
     meta: Optional[AdapterMeta] = None
 

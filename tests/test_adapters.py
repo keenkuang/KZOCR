@@ -15,10 +15,10 @@ def test_quad_to_rect():
 
 def test_parse_ppocr_empty():
     r = _parse_ppocr_result(None)
-    assert r.text == "" and r.boxes == [] and r.confidence == 0.0
+    assert r.text == "" and r.boxes is None and r.char_boxes is None and r.confidence == 0.0
 
     r = _parse_ppocr_result([])
-    assert r.text == "" and r.boxes == []
+    assert r.text == "" and r.boxes is None and r.char_boxes is None
 
 
 def test_parse_ppocr_tuple_format():
@@ -43,16 +43,32 @@ def test_parse_ppocr_list_format():
     assert r.boxes == [[10, 20, 30, 40]]
 
 
-def test_parse_ppocr_dict_format():
-    """PaddleX 新格式 dict。"""
-    data = [
-        {"rec_text": "补气", "rec_score": 0.95, "poly": [[10, 20], [30, 20], [30, 40], [10, 40]]},
-        {"rec_text": "方用", "rec_score": 0.90},
-    ]
+def test_parse_ppocr_paddlex_page_format():
+    """PaddleX 页面级 OCRResult（dict 子类）：rec_texts / rec_polys / text_word_boxes。
+
+    对应真实引擎 eng.ocr(img, return_word_box=True) 的输出结构。
+    """
+    data = [{
+        "rec_texts": ["补气", "方用"],
+        "rec_scores": [0.95, 0.90],
+        "rec_polys": [
+            [[10, 20], [30, 20], [30, 40], [10, 40]],
+            [[50, 20], [70, 20], [70, 40], [50, 40]],
+        ],
+        "text_word": [["补", "气"], ["方", "用"]],
+        "text_word_boxes": [
+            [[10, 20, 30, 40], [12, 20, 28, 40]],
+            [[50, 20, 70, 40], [52, 20, 68, 40]],
+        ],
+    }]
     r = _parse_ppocr_result(data)
     assert r.text == "补气方用"
-    assert r.boxes == [[10, 20, 30, 40]]
+    assert r.boxes == [[10, 20, 30, 40], [50, 20, 70, 40]]
     assert abs(r.confidence - 0.925) < 0.01
+    # 字符级 bbox：每行逐字 [x1,y1,x2,y2]
+    assert r.char_boxes is not None
+    assert r.char_boxes[0] == [[10, 20, 30, 40], [12, 20, 28, 40]]
+    assert r.char_boxes[1] == [[50, 20, 70, 40], [52, 20, 68, 40]]
 
 
 def test_parse_rapidocr_empty():

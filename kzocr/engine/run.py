@@ -126,6 +126,17 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
         enrich_book_result(book)
     except Exception:
         logger.warning("[engine] TOC enrich 失败，跳过", exc_info=True)
+    # Phase 2：落库到 BookDB（按书分库，系统 of record）。
+    # 默认关闭，仅当 KZOCR_PERSIST_DB=1 时启用，避免影响既有调用方/测试。
+    if os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True"):
+        try:
+            from kzocr.storage.db import BookDB
+            BookDB.persist_book_result(
+                book,
+                db_dir=os.environ.get("KZOCR_DB_DIR", ""),
+            )
+        except Exception:
+            logger.warning("[engine] BookDB 落库失败，跳过", exc_info=True)
     return book
 
 

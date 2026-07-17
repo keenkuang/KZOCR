@@ -268,6 +268,23 @@ def _build_pages_result(
     return [PageResult(page_num=i, text=t) for i, t in enumerate(pages_text)]
 
 
+def _merge_tier1_char_boxes(
+    final_pages: list[PageResult],
+    tier1_result: Optional[BookResult],
+) -> None:
+    """把 Tier1 适配器（adapter.run_book）产出的字符级 bbox 按 page_num 合并进最终页。
+
+    最终 BookResult 由 pages_text 重建（无 char_boxes），而 Tier1 适配器已产出
+    字符级 bbox，此处按 page_num 原地回填，保证字符级坐标不丢失。
+    """
+    if not tier1_result or not tier1_result.pages:
+        return
+    _cb_by_page = {p.page_num: p.char_boxes for p in tier1_result.pages}
+    for pg in final_pages:
+        if pg.page_num in _cb_by_page:
+            pg.char_boxes = _cb_by_page[pg.page_num]
+
+
 def _write_trace(trace_dir: str, book_code: str, trace: list[EngineCallRecord]) -> None:
     """写出逐引擎调用 trace（默认 $KZOCR_OUTPUT_DIR/trace；空字符串则禁用）。"""
     if not trace_dir:
@@ -704,10 +721,15 @@ def orchestrate_book(
     # F2: 关闭 DB
     db.close()
 
+    final_pages = _build_pages_result(pages_text, len(pages_text))
+    # 把 Tier1 适配器产出的字符级 bbox 带回最终页（adapter.run_book 已产出 char_boxes，
+    # 但上面用 pages_text 重建页时丢弃了；按 page_num 合并回来）
+    _merge_tier1_char_boxes(final_pages, tier1_result)
+
     return BookResult(
         book_code=book_code or "unknown",
         title=title,
-        pages=_build_pages_result(pages_text, len(pages_text)),
+        pages=final_pages,
         failed_pages=failed_pages,
         uncertain_pages=uncertain_pages,
         engine_trace=trace,

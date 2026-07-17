@@ -171,10 +171,11 @@ class TestCmdPipeline:
 
         mock_push_zai.return_value = {"book_code": "TCM-001", "counts": "5 页 / 12 行"}
 
-        args = MagicMock(spec=["pdf", "book_code", "db"])
+        args = MagicMock(spec=["pdf", "book_code", "db", "cross_check"])
         args.pdf = "/tmp/test.pdf"
         args.book_code = None
         args.db = None
+        args.cross_check = None
         rc = cmd_pipeline(args)
 
         assert rc == 0
@@ -194,10 +195,11 @@ class TestCmdPipeline:
         mock_run_engine.return_value = mock_book
         mock_push_zai.return_value = {"book_code": "TCM-002", "counts": "3 页"}
 
-        args = MagicMock(spec=["pdf", "book_code", "db"])
+        args = MagicMock(spec=["pdf", "book_code", "db", "cross_check"])
         args.pdf = "/tmp/test.pdf"
         args.book_code = "TCM-002"
         args.db = "/custom/zai.db"
+        args.cross_check = None
         rc = cmd_pipeline(args)
 
         assert rc == 0
@@ -219,10 +221,11 @@ class TestCmdPipeline:
         mock_run_engine.return_value = mock_book
         mock_push_zai.return_value = {"book_code": "TCM-003", "counts": "1 页"}
 
-        args = MagicMock(spec=["pdf", "book_code", "db"])
+        args = MagicMock(spec=["pdf", "book_code", "db", "cross_check"])
         args.pdf = "/tmp/test.pdf"
         args.book_code = None
         args.db = None
+        args.cross_check = None
         rc = cmd_pipeline(args)
 
         assert rc == 0

@@ -43,14 +43,17 @@ def main() -> int:
 
         r1 = po_adapter.run_page(page)
         dt1 = time.time() - t0
-        print(f"  page {i}: PaddleOCR={len(r1.text)}字 boxes={len(r1.boxes or [])} {dt1:.1f}s")
+        po_chars = sum(len(line) for line in (r1.char_boxes or []))
+        print(f"  page {i}: PaddleOCR={len(r1.text)}字 boxes={len(r1.boxes or [])} "
+              f"char_boxes={po_chars} {dt1:.1f}s")
 
         r2 = ro_adapter.run_page(page)
         dt2 = time.time() - t0
-        print(f"  page {i}: RapidOCR={len(r2.text)}字 boxes={len(r2.boxes or [])} {dt2:.1f}s")
+        print(f"  page {i}: RapidOCR={len(r2.text)}字 boxes={len(r2.boxes or [])} "
+              f"char_boxes=None(不支持) {dt2:.1f}s")
 
-        if r1.boxes and r2.boxes:
-            print(f"      bbox 样例: PaddleOCR={r1.boxes[0]} RapidOCR={r2.boxes[0]}")
+        if r1.boxes:
+            print(f"      bbox 样例: PaddleOCR行级={r1.boxes[0]} 字符级={r1.char_boxes[0][:2] if r1.char_boxes else 'N/A'}")
 
     print("[ok] 适配器冒烟完成")
     return 0

@@ -40,7 +40,7 @@ def export_book_markdown(book_code: str, db_path: Optional[str] = None) -> str:
             lines_out.append("")
             for human, final, consensus in cur.execute(
                 "SELECT humanFinal, final, consensus FROM Line "
-                "WHERE bookCode=? AND pageNum=? ORDER BY seqInPara",
+                "WHERE bookCode=? AND pageNum=? ORDER BY paraSeq, seqInPara",
                 (book_code, page_num),
             ).fetchall():
                 text = human or final or consensus or ""

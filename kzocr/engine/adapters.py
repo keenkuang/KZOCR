@@ -56,8 +56,8 @@ class PaddleOCRAdapter:
     def run_page(self, page: PageInput) -> AdapterPageResult:
         engine = self._get_engine()
         img = page.img
-        # PaddleOCR.ocr 返回 list[list[[quad, (text, score)]]]
-        res = engine.ocr(img)
+        # return_word_box=True → 额外返回逐字 text_word / text_word_boxes（字符级 bbox）
+        res = engine.ocr(img, return_word_box=True)
         return _parse_ppocr_result(res)
 
     def run_book(self, pdf_path: str) -> BookResult:
@@ -73,7 +73,10 @@ class PaddleOCRAdapter:
                 )
                 pi = PageInput(page_num=i, img=img)
                 result = self.run_page(pi)
-                pages.append(PageResult(page_num=i, text=result.text, confidence=result.confidence))
+                pages.append(PageResult(
+                    page_num=i, text=result.text, confidence=result.confidence,
+                    char_boxes=result.char_boxes,
+                ))
             return BookResult(book_code="", title="", pages=pages)
         finally:
             doc.close()
@@ -89,47 +92,68 @@ def _quad_to_rect(quad) -> list[int]:
 def _parse_ppocr_result(res) -> AdapterPageResult:
     """将 PaddleOCR 原始输出解析为 AdapterPageResult。
 
-    PaddleOCR 旧格式：res = [(quad, (text, score)), ...]（tuple 列表）
-    新格式（PaddleX）：       res = [{'rec_text': ..., 'rec_score': ..., ...}]（dict 列表）
+    支持两种格式：
+    1. PaddleX 页面级 OCRResult（dict 子类）：res = [page_result]，含
+       rec_texts / rec_scores / rec_polys（行级）以及 return_word_box=True 时的
+       text_word（逐字）/ text_word_boxes（逐字矩形 [x1,y1,x2,y2]）。
+    2. 旧格式：res = [(quad, (text, score)), ...]（每行一个 block）。
     """
     if not res:
-        return AdapterPageResult(text="", confidence=0.0, boxes=[], char_confidences=[])
+        return AdapterPageResult(text="", confidence=0.0, boxes=None,
+                                 char_boxes=None, char_confidences=None)
 
+    # ---- PaddleX 页面级格式 ----
+    first = res[0]
+    if isinstance(first, dict) and "rec_texts" in first:
+        texts = [str(t) for t in (first.get("rec_texts") or [])]
+        scores = [float(s) for s in (first.get("rec_scores") or [])]
+        line_polys = first.get("rec_polys") or first.get("dt_polys") or []
+        boxes = [_quad_to_rect(p) for p in line_polys if p is not None] if line_polys else None
+
+        # 字符级 bbox：text_word_boxes[i] 形状 (N,4)，每行逐字矩形
+        char_boxes = None
+        twb = first.get("text_word_boxes")
+        if twb:
+            char_boxes = []
+            for lw in twb:
+                if lw is None:
+                    char_boxes.append([])
+                    continue
+                arr = np.array(lw) if not isinstance(lw, np.ndarray) else lw
+                char_boxes.append([[int(v) for v in row] for row in arr])
+
+        return AdapterPageResult(
+            text="".join(texts),
+            confidence=sum(scores) / len(scores) if scores else 0.0,
+            boxes=boxes,
+            char_boxes=char_boxes,
+            char_confidences=scores if scores else None,
+        )
+
+    # ---- 旧格式：list of (quad, (text, score)) ----
     texts: list[str] = []
     boxes: list[list[int]] = []
     confs: list[float] = []
     for blk in res:
-        if isinstance(blk, dict):
-            # PaddleX 新格式：{'rec_text': '...', 'rec_score': 0.95, 'poly': [[...]]}
-            text = str(blk.get("rec_text", blk.get("rec_texts", "")))
-            score = float(blk.get("rec_score", blk.get("rec_text_score", 0.0)))
-            poly = blk.get("poly") or blk.get("points")
-            if not text:
-                continue
-            texts.append(text)
-            confs.append(score)
-            if poly and isinstance(poly, (list, tuple)) and len(poly) >= 4:
-                boxes.append(_quad_to_rect(poly[:4]))
-        elif isinstance(blk, (list, tuple)):
-            # 旧格式：blk = (quad, (text, score)) — 直接取两个元素，不迭代
-            if len(blk) < 2:
-                continue
-            quad, rec = blk[0], blk[1]
-            try:
-                text = str(rec[0]) if isinstance(rec, (list, tuple)) else ""
-                score = float(rec[1]) if isinstance(rec, (list, tuple)) else 0.0
-            except (IndexError, TypeError, ValueError):
-                continue
-            if not text:
-                continue
-            texts.append(text)
-            if quad and isinstance(quad, (list, tuple)) and len(quad) == 4:
-                boxes.append(_quad_to_rect(quad))
-            confs.append(score)
+        if not isinstance(blk, (list, tuple)) or len(blk) < 2:
+            continue
+        quad, rec = blk[0], blk[1]
+        try:
+            text = str(rec[0]) if isinstance(rec, (list, tuple)) else ""
+            score = float(rec[1]) if isinstance(rec, (list, tuple)) else 0.0
+        except (IndexError, TypeError, ValueError):
+            continue
+        if not text:
+            continue
+        texts.append(text)
+        if quad and isinstance(quad, (list, tuple)) and len(quad) == 4:
+            boxes.append(_quad_to_rect(quad))
+        confs.append(score)
     return AdapterPageResult(
         text="".join(texts),
         confidence=sum(confs) / len(confs) if confs else 0.0,
         boxes=boxes if boxes else None,
+        char_boxes=None,
         char_confidences=confs if confs else None,
     )
 
@@ -169,7 +193,10 @@ class RapidOCRAdapter:
                 )
                 pi = PageInput(page_num=i, img=img)
                 result = self.run_page(pi)
-                pages.append(PageResult(page_num=i, text=result.text, confidence=result.confidence))
+                pages.append(PageResult(
+                    page_num=i, text=result.text, confidence=result.confidence,
+                    char_boxes=result.char_boxes,
+                ))
             return BookResult(book_code="", title="", pages=pages)
         finally:
             doc.close()
