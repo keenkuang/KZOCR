@@ -35,6 +35,8 @@ from kzocr.engines.atomic import atomic_write
 _DEFAULT_CONFUSION_PATH = Path(__file__).resolve().parent.parent / "resources" / "confusion_set.json"
 # 自学习混淆集：运行时由人工/仲裁确认的新混淆对追加于此，叠加在静态集之上（可进化）
 _LEARNED_CONFUSION_PATH = Path(__file__).resolve().parent.parent / "resources" / "learned_confusion.json"
+# 语义级错词对黑名单（Layer2：方剂词组/同音/语义错，交给 M6 语义校验）
+_DEFAULT_PHRASE_PATH = Path(__file__).resolve().parent.parent / "resources" / "confusion_phrase.json"
 
 # 标点 + 空白：对齐前统一剥离，避免标点差异淹没真实字符分歧
 _PUNCT = set("，。、；：！？“”‘’（）《》—…·「」『』〈〉【】〔〕,.!?;:\"'`()[]{}<>~·—-…")
@@ -49,31 +51,56 @@ def strip_punct(s: str) -> str:
     return "".join(ch for ch in s if ch not in _PUNCT and ch not in _WS)
 
 
-def _load_confusion_file(path: Path) -> dict:
-    """从单个 JSON 文件加载形近字黑名单为 {wrong: correct}（跳过 category=='正确'/wrong==correct）。
+def _load_confusion_file(path: Path, *, raw: bool = False):
+    """从单个 JSON 文件加载形近字黑名单。
 
-    文件缺失/解析失败返回空字典（不影响对齐主流程）。
+    raw=False（默认）：返回 {wrong: correct}（跳过 category=='正确'/wrong==correct）。
+    raw=True：返回原始 list[dict]（保留 level/category 等字段，供 load_confusion_keys 使用）。
+    文件缺失/解析失败返回空字典/空列表（不影响主流程）。
     """
     if not path.is_file():
-        return {}
+        return {} if not raw else []
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw_data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return {}
+        return {} if not raw else []
+    if not isinstance(raw_data, list):
+        return {} if not raw else []
+    validate_confusion_rows(raw_data)  # 程序启动自检：捕获自匹配/结构错误
+    if raw:
+        return raw_data
     out: dict = {}
-    if isinstance(raw, list):
-        for row in raw:
-            if not isinstance(row, dict):
-                continue
-            wrong = row.get("wrong")
-            correct = row.get("correct")
-            category = row.get("category", "")
-            if not wrong or not correct:
-                continue
-            if category == "正确" or wrong == correct:
-                continue
-            out[wrong] = correct
+    for row in raw_data:
+        if not isinstance(row, dict):
+            continue
+        wrong = row.get("wrong")
+        correct = row.get("correct")
+        category = row.get("category", "")
+        if not wrong or not correct:
+            continue
+        if category == "正确" or wrong == correct:
+            continue
+        out[wrong] = correct
     return out
+
+
+def validate_confusion_rows(rows):
+    """运行时自检黑名单（用户规范）：捕获自匹配(no-op)与结构错误。
+
+    每次加载黑名单时自动调用（程序启动即执行），发现异常仅告警不中断主流程，
+    防止后续人工扩充清单引入无效条目（如 "麻黄":["麻黄"] 自环）。
+    """
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            print(f"黑名单异常：第 {i} 行不是对象，已跳过: {row!r}")
+            continue
+        wrong = row.get("wrong")
+        correct = row.get("correct")
+        if not wrong or not correct:
+            print(f"黑名单异常：第 {i} 行缺少 wrong/correct 字段，已跳过: {row!r}")
+            continue
+        if wrong == correct:
+            print(f"黑名单异常：{wrong}: 包含自身 {correct}（自匹配无效，应删除）")
 
 
 # 内存常驻缓存：黑名单"静态呆在内存里"供快速调用，内容则经 add_learned_confusion 动态优化
@@ -104,6 +131,79 @@ def load_confusion_set(path: Optional[Path] = None, *, reload: bool = False) -> 
 def reload_confusion_set() -> dict:
     """强制从磁盘重读并刷新内存缓存（例如在外部修改静态集后）。"""
     return load_confusion_set(reload=True)
+
+
+# ── 两层黑名单辅助：Layer1 字符级（confusion_set.json）+ Layer2 词级（confusion_phrase.json） ──
+# Layer1：字形相近误识别，强制 M4 复核；Layer2：词组/同音/语义错，交 M6 语义校验。
+_LEVEL_RANK = {"一级高危": 1, "二级中频": 2, "三级通用": 3}
+_LEVEL_PATH = {1: "一级高危", 2: "二级中频", 3: "三级通用"}
+
+_KEYS_CACHE: Optional[dict] = None
+_PHRASE_CACHE: Optional[list] = None
+
+
+def load_confusion_keys(path: Optional[Path] = None, *, reload: bool = False) -> dict:
+    """Layer1 字符级：返回 {字符: 最高级 level}。
+
+    任一字符只要参与某个混淆对（无论作 wrong 还是 correct/基准字），都视为高风险字形，
+    供 ConfusionKeyPresenceDetector 做"前置静态筛查（零算力）"——输出含一级高危基准字即强制 M4。
+    缓存常驻内存，reload=True 强制重读。
+    """
+    global _KEYS_CACHE
+    if not reload and _KEYS_CACHE is not None:
+        return _KEYS_CACHE
+    rows = _load_confusion_file(Path(path) if path else _DEFAULT_CONFUSION_PATH, raw=True)
+    out: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        wrong, correct = row.get("wrong"), row.get("correct")
+        level = row.get("level", "三级通用")
+        rank = _LEVEL_RANK.get(level, 3)
+        if not wrong or not correct or wrong == correct:
+            continue
+        for ch in (wrong, correct):
+            prev = out.get(ch)
+            if prev is None or rank < prev:
+                out[ch] = rank
+    _KEYS_CACHE = {ch: _LEVEL_PATH[r] for ch, r in out.items()}
+    return _KEYS_CACHE
+
+
+def load_confusion_phrases(path: Optional[Path] = None, *, reload: bool = False) -> list:
+    """Layer2 词级：返回 confusion_phrase.json 的 list[{wrong, correct, level, category, note}]。"""
+    global _PHRASE_CACHE
+    if not reload and _PHRASE_CACHE is not None:
+        return _PHRASE_CACHE
+    p = Path(path) if path else _DEFAULT_PHRASE_PATH
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else []
+    except (json.JSONDecodeError, OSError):
+        data = []
+    data = data if isinstance(data, list) else []
+    validate_confusion_rows(data)  # 程序启动自检：捕获自匹配/结构错误
+    _PHRASE_CACHE = data
+    return _PHRASE_CACHE
+
+
+def search_phrase_errors(text: str, phrases: Optional[list] = None) -> list:
+    """Layer2 词级：扫描文本命中哪些错词对。返回 [{wrong, correct, level, category}]。"""
+    if not text:
+        return []
+    phrases = phrases if phrases is not None else load_confusion_phrases()
+    hits = []
+    for row in phrases:
+        if not isinstance(row, dict):
+            continue
+        wrong = row.get("wrong")
+        if wrong and wrong in text:
+            hits.append({
+                "wrong": wrong,
+                "correct": row.get("correct"),
+                "level": row.get("level", ""),
+                "category": row.get("category", ""),
+            })
+    return hits
 
 
 def add_learned_confusion(wrong: str, correct: str, source: str = "") -> bool:

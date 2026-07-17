@@ -25,7 +25,12 @@ import numpy as np
 
 from kzocr.engine.types import GlyphVerdict
 from kzocr.engines import leakage as _leakage
-from kzocr.scheduler.cross_align import Divergence, DivergenceArbitration
+from kzocr.scheduler.cross_align import (
+    Divergence,
+    DivergenceArbitration,
+    load_confusion_keys,
+    load_confusion_phrases,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -224,6 +229,76 @@ class ConfusionSetDetector:
         return None
 
 
+class ConfusionKeyPresenceDetector:
+    """Layer1 前置静态筛查（零算力，最先执行）：OCR 输出含一级高危基准字 → 强制 M4 复核。
+
+    仅对"一级高危"字符无条件强制（SPEC#1 的"强制复核"语义）。二/三级字符不 blanket 强制，
+    交由跨引擎分歧 + Box-Guided VL 拦截——否则日/目、人/入、土/士等高频通用字会淹没 M4 队列。
+    基准字（correct）与误认字（wrong）都纳入 key 集：两者皆为高风险字形。
+    """
+
+    name = "ConfusionKeyPresence"
+    priority = 45
+
+    def __init__(self, confusion_keys: dict | None = None) -> None:
+        # confusion_keys: char -> level（"一级高危"/"二级中频"/"三级通用"）
+        self.confusion_keys = confusion_keys or {}
+        self._l1 = {ch for ch, lvl in self.confusion_keys.items() if lvl == "一级高危"}
+        self._enabled = bool(self._l1)
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def check(self, text: str, context: DetectorContext) -> Optional[GlyphVerdict]:
+        if not self._enabled or not text:
+            return None
+        hits = sorted({ch for ch in text if ch in self._l1})
+        if not hits:
+            return None
+        return GlyphVerdict(
+            status="UNKNOWN",
+            confidence=0.55,
+            details=f"confusion_key_presence;chars={''.join(hits)};强制M4",
+            detector_name=self.name,
+        )
+
+
+class PhraseErrorDetector:
+    """Layer2 语义级错词对筛查：扫描 OCR 输出命中错词对 → 标记 M6 待语义校验。
+
+    词组错（黄苓→黄芩、吴萸臾→吴茱萸…）多为同音/语义错，需中医语义 LLM 判定上下文是否合理，
+    故不在文本级直接放行/否决，而是路由到 M6 队列（details 标 `m6=待语义校验`）。
+    无 M6 LLM 时，该标记作为复核队列中的语义待办项。
+    """
+
+    name = "PhraseErrorDetector"
+    priority = 41
+
+    def __init__(self, phrases: list | None = None) -> None:
+        self.phrases = phrases or []
+        self._enabled = bool(self.phrases)
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def check(self, text: str, context: DetectorContext) -> Optional[GlyphVerdict]:
+        if not self._enabled or not text:
+            return None
+        hits = [f"{row.get('wrong')}→{row.get('correct')}"
+                for row in self.phrases
+                if isinstance(row, dict) and row.get("wrong") and row["wrong"] in text]
+        if not hits:
+            return None
+        return GlyphVerdict(
+            status="UNKNOWN",
+            confidence=0.5,
+            details="phrase_error;m6=待语义校验;" + ";".join(hits[:8]),
+            detector_name=self.name,
+        )
+
+
 class TermKBMatcher:
     """匹配知识库术语（rare_allowlist + variant_map），命中 PASS/RARE。优先级 50。"""
 
@@ -330,6 +405,12 @@ class GlyphVerifier:
                     continue
                 confusion_set[wrong] = correct
         detectors.append(ConfusionSetDetector(confusion_set))
+
+        # ConfusionKeyPresenceDetector（Layer1 基准字侧预筛，一级高危强制 M4 — SPEC#1）
+        detectors.append(ConfusionKeyPresenceDetector(load_confusion_keys()))
+
+        # PhraseErrorDetector（Layer2 词组错扫描，标记 M6 待语义校验）
+        detectors.append(PhraseErrorDetector(load_confusion_phrases()))
 
         # TermKBMatcher：rare_allowlist.json（list）+ variant_map.json（dict）
         rare_raw = _load_resource("rare_allowlist.json")
@@ -497,6 +578,13 @@ _ARB_CONF_GATE = 0.65   # conf<0.65 → 强制人工
 _ARB_BOX_PAD = 8        # 裁框外扩 8px（防墨迹晕染）
 _ARB_MIN_BOX = 12       # 框边长下限（px），过小跳过 VL 强制人工
 
+# SPEC#2：Box-Guided VL 内置重点形近清单（一级高危，强化模型区分意识，墨迹磨损也不混淆）
+_ARB_KEY_CONFUSION_HINTS = (
+    "炙≠灸", "芩≠苓", "未≠末", "己≠已≠巳", "朴≠补", "萸≠臾", "加≠剂",
+    "菀≠苑", "抟≠搏", "裹≠裏", "蘖≠孽", "附≠咐", "茋≠芪", "桂≠柱",
+    "芍≠勺", "芎≠弓", "羌≠姜", "藁≠槁", "菖≠昌", "蒲≠浦", "防≠妨",
+)
+
 
 def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
     """构造分歧级仲裁 prompt：只让 VL 核对候选字字形，强制 JSON 输出。
@@ -510,7 +598,10 @@ def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
         for wrong, correct in confusion_set.items():
             if wrong in (a, b) or correct in (a, b):
                 confusion_hints.append(f"{wrong}≠{correct}")
-    confusion_line = "；".join(confusion_hints[:12]) if confusion_hints else "（无）"
+    # 内置一级高危重点清单始终存在，强化 VL 区分意识（SPEC#2）
+    builtin = "；".join(_ARB_KEY_CONFUSION_HINTS)
+    extra = "；".join(confusion_hints[:12])
+    confusion_line = builtin + ("；" + extra if extra else "")
 
     if mode == "box_guided":
         head = (

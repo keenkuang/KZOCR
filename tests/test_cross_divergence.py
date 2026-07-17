@@ -134,14 +134,19 @@ def _read_db(book_code, db_dir):
 
 
 def test_cross_align_writes_on_tier1_fail_tier3_success(tmp_path):
-    """Tier1 触发毒性剂量 FAIL → Tier3 不同文本（剂量数字分歧）→ cross_divergence 落库。"""
+    """Tier1 触发毒性剂量 FAIL → Tier3 不同文本（剂量数字分歧）→ cross_divergence 落库。
+
+    注：Tier3 文本含一级高危基准字「附」（附子→附，SPEC#1 强制 M4 复核），按设计不自动采纳、
+    转入人工复核队列（pending）；但跨引擎剂量分歧仍须落库供复核。
+    """
     reg = _reg(
         tier1_pages=_text_pages("附子20g"),   # ToxinDose FAIL(critical)
         tier3_texts=["附子二钱"],             # 数字/剂量分歧：20g ↔ 二钱
     )
     cfg = StubConfig(db_dir=str(tmp_path))
     result = orchestrate_book("/fp", "bkc1", cfg, reg)
-    assert len(result.pages) == 1  # Tier3 文本被采纳
+    # 含一级高危字 → 强制 M4（不自动采纳）
+    assert len(result.pages) == 0
 
     rows = _read_db("bkc1", str(tmp_path))
     assert len(rows) >= 1
