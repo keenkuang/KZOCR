@@ -644,7 +644,10 @@ def orchestrate_book(
             char_count=char_count, latency_ms=last_latency,
         )
         db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
-        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") or getattr(verdict, "force_review", False):
+        # 异常入队条件：验证未通过 / 强制复核 / 引擎置信度 ≤ 0.90
+        _page_conf = (tier1_result.pages[page_num].confidence
+                      if tier1_result and page_num < len(tier1_result.pages) else 0.9)
+        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") or getattr(verdict, "force_review", False) or _page_conf <= 0.90:
             db.record_anomaly(page_num, verdict=verdict, detector_chain=verifier.last_detector_chain)
         db.update_import(
             page_num, status="imported" if verdict.status in ("PASS", "RARE") else "pending", count=1,

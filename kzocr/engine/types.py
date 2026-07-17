@@ -84,6 +84,7 @@ class PageResult:
     layout_type: str = "text"   # text/table/multi_column/formula_list
     paragraphs: list[ParagraphResult] = field(default_factory=list)
     text: str = ""              # 整页文本（段落聚合结果；v0.7 E4 _build_pages_result 填充）
+    confidence: float = 0.9     # 引擎识别置信度（供 conf≤0.90 门控使用，默认 0.9=放行）
 
 
 @dataclass
