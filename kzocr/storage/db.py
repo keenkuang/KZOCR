@@ -278,6 +278,28 @@ class BookDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def update_cross_divergence_status(
+        self,
+        page_no: int,
+        div_type: str,
+        a_seg: str,
+        b_seg: str,
+        status: str,
+    ) -> int:
+        """更新某分歧点状态（视觉仲裁后持久化裁决：accepted_a/accepted_b/both_wrong/manual 等）。
+
+        以 (page_no, div_type, a_seg, b_seg) 定位（同页同类型同片段歧视为同一处）；
+        返回更新的行数（同页多引擎比对写多条时按片段匹配，通常 1）。
+        """
+        cur = self._conn.execute(
+            """UPDATE cross_divergence
+               SET status=?
+               WHERE page_no=? AND div_type=? AND a_seg=? AND b_seg=?""",
+            (status, page_no, div_type, a_seg, b_seg),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def get_anomalies(
         self, *, status_filter: str = "pending"
     ) -> list[dict[str, Any]]:

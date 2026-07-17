@@ -37,6 +37,7 @@ from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionReche
 from kzocr.scheduler.cross_align import run_cross_align, load_confusion_set
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
+from kzocr.engines.ratelimit import MultiTokenRateLimiter
 import numpy as np
 
 _logger = logging.getLogger(__name__)
@@ -221,6 +222,18 @@ def orchestrate_book(
             except Exception:
                 pass
         return None
+
+    # 视觉仲裁共享进程级限流（复用 MultiTokenRateLimiter；默认关，仅 allow_cloud_vision 时用到）
+    vision_bucket: Optional[MultiTokenRateLimiter] = None
+
+    def _get_vision_bucket() -> Optional[MultiTokenRateLimiter]:
+        nonlocal vision_bucket
+        if vision_bucket is None:
+            vision_bucket = MultiTokenRateLimiter(
+                tokens=30, window_seconds=60, key="vision_recheck"
+            )
+        return vision_bucket
+
     scheduler = EngineScheduler()
     trace: list[EngineCallRecord] = []
     start_time = time.monotonic()
@@ -418,6 +431,27 @@ def orchestrate_book(
                                 ),
                                 detector_chain=["CrossAlign"],
                             )
+                            # 4.3 分歧级视觉仲裁（Box-Guided VL，退化模式）：
+                            # 仅 allow_cloud_vision 且 page_img 非空时激活（等同 --enable-arb）。
+                            # 高优先级分歧经 VL 仲裁后更新状态；manual/both_wrong 已在上面入复核队列。
+                            va = _get_vision_adapter()
+                            if va is not None and page_input.img is not None:
+                                bucket = _get_vision_bucket()
+                                for d in high:
+                                    try:
+                                        arb = va.arbitrate_divergence(
+                                            d, page_input.img,
+                                            confusion_set=confusion_set, bucket=bucket,
+                                        )
+                                        db.update_cross_divergence_status(
+                                            page_num, d.div_type, d.a_seg, d.b_seg,
+                                            arb.decision,
+                                        )
+                                    except Exception as exc:  # 视觉仲裁属增强，绝不阻断主流程
+                                        _logger.warning(
+                                            "[orchestrator] cross_arbitrate failed page=%d: %s",
+                                            page_num, exc,
+                                        )
                 except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
                     _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
             vctx = DetectorContext(

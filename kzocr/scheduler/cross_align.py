@@ -94,6 +94,31 @@ class Divergence:
     engine_b: str = ""
 
 
+@dataclass
+class DivergenceArbitration:
+    """视觉仲裁（Box-Guided VL）对一个分歧点的裁决结果（视觉仲裁共享类型）。
+
+    decision 取值与含义：
+      - accepted_a : VL 确认图片真实字 = 引擎 A 侧字符（a_seg）
+      - accepted_b : VL 确认图片真实字 = 引擎 B 侧字符（b_seg）
+      - both_wrong : VL 给出第三字（两者皆错）→ 强制人工
+      - uncertain  : VL 无法判定 → 送 L3 本地 LLM 兜底
+      - manual     : is_match=False / conf<0.65 / JSON 解析失败 / 无图像 / box 非法 → 强制人工
+
+    mode：'box_guided'（精确裁框）| 'degraded'（无 char box，整页缩图 + 上下文提示）。
+    当前 KZOCR 归一化数据无逐字 bbox，`Divergence.boxes` 为空 → 走 degraded。
+    """
+
+    page_no: int = 0
+    div_index: int = 0
+    decision: str = "manual"
+    confidence: float = 0.0
+    real_char: str = ""
+    raw: str = ""
+    engine: str = ""
+    mode: str = "degraded"
+
+
 def _is_priority(a_seg: str, b_seg: str, confusion_set: Optional[dict]) -> bool:
     """数字/剂量分歧 或 形近字黑名单命中 → 高优先级。"""
     seg = a_seg + b_seg

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pytest
 
 from kzocr.engine.types import (
@@ -21,6 +22,7 @@ from kzocr.scheduler import orchestrator as _orc
 from kzocr.scheduler.orchestrator import orchestrate_book
 from kzocr.scheduler.registry import EngineRegistry
 from kzocr.scheduler.cross_align import Divergence
+from kzocr.engine.types import GlyphVerdict
 from kzocr.storage.db import BookDB
 
 
@@ -176,3 +178,41 @@ def test_cross_align_skipped_on_tier1_success(tmp_path):
     orchestrate_book("/fp", "bkc2", cfg, reg)
     rows = _read_db("bkc2", str(tmp_path))
     assert rows == []
+
+
+def test_cross_divergence_arbitrated_by_vision(tmp_path, monkeypatch):
+    """4.3 分歧级视觉仲裁：allow_cloud_vision=True 时，high 分歧经 VL 仲裁后状态被更新。
+
+    注入假 VL 响应（real_char 匹配 b_seg）→ accepted_b；recheck 同时 stub 避免真实网络。
+    """
+    monkeypatch.setenv("KZOCR_MODELSCOPE_API_KEY", "testkey")
+    monkeypatch.setattr(
+        _orc.VisionRecheckAdapter, "recheck",
+        lambda self, *a, **k: GlyphVerdict(status="PASS", confidence=0.7,
+                                           details="stub", detector_name="VisionRecheckAdapter"),
+    )
+    monkeypatch.setattr(
+        _orc.VisionRecheckAdapter, "_post_vl",
+        lambda self, prompt, b64: '{"is_match": true, "confidence": 0.9, "real_char": "二钱"}',
+    )
+
+    reg = _reg(
+        tier1_pages=_text_pages("附子20g"),   # ToxinDose FAIL(critical) → 进 Tier3 比对
+        tier3_texts=["附子二钱"],             # 剂量数字分歧 20g↔二钱 → high
+    )
+    # 渲染桩需带图像，否则仲裁因 img=None 被跳过
+    def _render_gen_img(n):
+        for i in range(n):
+            yield PageInput(page_num=i, img=np.zeros((100, 100, 3), dtype=np.uint8))
+
+    monkeypatch.setattr(_orc, "render_pages", lambda pdf, cfg, dpi=150: _render_gen_img(1))
+    cfg = StubConfig(allow_cloud_vision=True, db_dir=str(tmp_path))
+    orchestrate_book("/fp", "bkc4", cfg, reg)
+
+    rows = _read_db("bkc4", str(tmp_path))
+    assert len(rows) >= 1
+    # high 剂量分歧 20g↔二钱 经 VL 仲裁：mock 返回 real_char='二钱'==b_seg → accepted_b
+    high = [r for r in rows if r["priority"] == "high"]
+    assert high, "应有一条 high 分歧"
+    assert high[0]["status"] == "accepted_b"
+    assert high[0]["engine_b"] == "t3"
