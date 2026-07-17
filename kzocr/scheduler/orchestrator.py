@@ -403,6 +403,21 @@ def orchestrate_book(
                             page_no=page_num, divs=divs,
                             engine_a=t1_engine_name, engine_b=engine_name,
                         )
+                        # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
+                        high = [d for d in divs if d.priority == "high"]
+                        if high:
+                            db.record_anomaly(
+                                page_num,
+                                GlyphVerdict(
+                                    status="UNKNOWN",
+                                    confidence=0.4,
+                                    details=(
+                                        f"cross_divergence;high={len(high)};"
+                                        f"sample={high[0].a_seg}↔{high[0].b_seg}"
+                                    ),
+                                ),
+                                detector_chain=["CrossAlign"],
+                            )
                 except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
                     _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
             vctx = DetectorContext(

@@ -149,6 +149,26 @@ def test_cross_align_writes_on_tier1_fail_tier3_success(tmp_path):
     assert any(r["engine_a"] == "t1" and r["engine_b"] == "t3" for r in rows)
 
 
+def test_high_priority_divergence_routed_to_review_queue(tmp_path):
+    """M4 复核队列规则：high 优先级分歧（数字/剂量）100% 进人工复核（record_anomaly）。"""
+    reg = _reg(
+        tier1_pages=_text_pages("附子20g"),   # FAIL
+        tier3_texts=["附子二钱"],             # 数字分歧 → high
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    orchestrate_book("/fp", "bkc3", cfg, reg)
+
+    db = BookDB("bkc3", db_dir=str(tmp_path))
+    anomalies = db.get_anomalies()  # resolution='pending'
+    db.close()
+    assert len(anomalies) >= 1
+    # 复核队列项应来自 CrossAlign 且标记 cross_divergence
+    assert any(
+        "CrossAlign" in (a["detector_chain"] or "") and "cross_divergence" in (a["details"] or "")
+        for a in anomalies
+    )
+
+
 def test_cross_align_skipped_on_tier1_success(tmp_path):
     """Tier1 直接通过 → 不进入 Tier3，无分歧落库。"""
     reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"))
