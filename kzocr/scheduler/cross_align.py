@@ -28,6 +28,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
+# 形近字黑名单默认路径（与 kzocr/resources/confusion_set.json 一致）
+_DEFAULT_CONFUSION_PATH = Path(__file__).resolve().parent.parent / "resources" / "confusion_set.json"
+
 # 标点 + 空白：对齐前统一剥离，避免标点差异淹没真实字符分歧
 _PUNCT = set("，。、；：！？“”‘’（）《》—…·「」『』〈〉【】〔〕,.!?;:\"'`()[]{}<>~·—-…")
 _WS = set(" \t　\n\r")
@@ -39,6 +42,36 @@ _CN_NUM = set("〇零一二三四五六七八九十百千万两半")
 def strip_punct(s: str) -> str:
     """去掉标点与空白（用于对齐前的文本归一化）。"""
     return "".join(ch for ch in s if ch not in _PUNCT and ch not in _WS)
+
+
+def load_confusion_set(path: Optional[Path] = None) -> dict:
+    """加载形近字黑名单为 {wrong: correct}。
+
+    读取 confusion_set.json（list of {wrong, correct, category}），跳过
+    category=='正确' 或 wrong==correct 的条目（避免误判 UNKNOWN）。
+    文件缺失/解析失败返回空字典（不影响对齐主流程）。
+    """
+    p = Path(path) if path else _DEFAULT_CONFUSION_PATH
+    if not p.is_file():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    out: dict = {}
+    if isinstance(raw, list):
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            wrong = row.get("wrong")
+            correct = row.get("correct")
+            category = row.get("category", "")
+            if not wrong or not correct:
+                continue
+            if category == "正确" or wrong == correct:
+                continue
+            out[wrong] = correct
+    return out
 
 
 @dataclass

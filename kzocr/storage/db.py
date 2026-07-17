@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 import sqlite3
 from typing import Any, Optional
 
@@ -77,6 +78,22 @@ CREATE TABLE IF NOT EXISTS quality_result (
     confidence      REAL DEFAULT 1.0,
     issues_json     TEXT DEFAULT '[]',
     created_at      TEXT DEFAULT (datetime('now'))
+);
+
+-- 跨引擎分歧（借鉴 ocr_pipeline_v2：Tier1 文本 vs Tier3 文本 token 级模糊对齐）
+CREATE TABLE IF NOT EXISTS cross_divergence (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_no     INTEGER NOT NULL,
+    div_type    TEXT    NOT NULL,
+    a_seg       TEXT    NOT NULL DEFAULT '',
+    b_seg       TEXT    NOT NULL DEFAULT '',
+    a_context   TEXT    NOT NULL DEFAULT '',
+    boxes       TEXT    NOT NULL DEFAULT '[]',
+    priority    TEXT    NOT NULL DEFAULT 'normal',
+    status      TEXT    NOT NULL DEFAULT 'pending',
+    engine_a    TEXT    NOT NULL DEFAULT '',
+    engine_b    TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    DEFAULT (datetime('now'))
 );
 """
 
@@ -213,6 +230,53 @@ class BookDB:
             ),
         )
         self._conn.commit()
+
+    # ── cross_divergence（借鉴 ocr_pipeline_v2）──
+
+    def write_cross_divergences(
+        self,
+        page_no: int,
+        divs: list,
+        engine_a: str = "",
+        engine_b: str = "",
+    ) -> int:
+        """写入跨引擎分歧（kzocr.scheduler.cross_align.Divergence 列表）。返回写入行数。"""
+        rows = 0
+        for d in divs:
+            self._conn.execute(
+                """INSERT INTO cross_divergence
+                   (page_no, div_type, a_seg, b_seg, a_context, boxes,
+                    priority, status, engine_a, engine_b)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    d.page_no or page_no,
+                    d.div_type,
+                    d.a_seg,
+                    d.b_seg,
+                    d.a_context,
+                    json.dumps(d.boxes, ensure_ascii=False),
+                    d.priority,
+                    d.status,
+                    d.engine_a or engine_a,
+                    d.engine_b or engine_b,
+                ),
+            )
+            rows += 1
+        self._conn.commit()
+        return rows
+
+    def get_cross_divergences(self, page_no: int | None = None) -> list[dict[str, Any]]:
+        """读取跨引擎分歧（可选按页过滤），按 id 升序。"""
+        if page_no is None:
+            rows = self._conn.execute(
+                "SELECT * FROM cross_divergence ORDER BY id"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM cross_divergence WHERE page_no=? ORDER BY id",
+                (page_no,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def get_anomalies(
         self, *, status_filter: str = "pending"
