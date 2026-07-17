@@ -34,6 +34,8 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         # 未指定 --db 时落到本地隔离库，避免污染/误读真实 zai 控制台库
         cfg.zai_db = "kzocr.db"
     log.info("运行引擎：%s（v0.7 编排调度已启用）", args.pdf)
+    if args.cross_check:
+        os.environ["KZOCR_ENABLE_CROSS_CHECK"] = "1"
     book = engine_run.run_engine(args.pdf, book_code=args.book_code, config=cfg)
     result = push_book_to_zai(book, db_path=cfg.zai_db, skip_prisma_marker=True)
     log.info("书籍 %s 已写入 zai 库（%s 行/页/段落）", result["book_code"], result["counts"])
@@ -238,6 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("pdf")
     pp.add_argument("--book-code")
     pp.add_argument("--db", help="zai 的 SQLite 路径（覆盖配置）")
+    pp.add_argument("--cross-check", action="store_true", help="启用成功页跨引擎采样比对")
     pp.set_defaults(func=cmd_pipeline)
 
     pe = sub.add_parser("export", help="从 zai 库导出最终校正文档")

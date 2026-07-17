@@ -63,6 +63,9 @@ def _init_v07_registry(cfg) -> EngineRegistry:
             EC(),
             adapter=BookPipelineAdapter("kimi", temperature=0.0),
         )
+    # Tier 1: 本地 CPU OCR 引擎（无密钥、无 GPU 时可用）
+    _try_register_local_engine(reg, "paddleocr", "PaddleOCR PP-OCRv6", tier=1 if not cfg.kimi_engine_dir else 2)
+    _try_register_local_engine(reg, "rapidocr", "RapidOCR", tier=2)
     # Tier 2: 云端 VLM（SenseNova）
     if cfg.sensenova_api_key:
         from kzocr.adapters.engine_runners import VlmPageAdapter
@@ -75,11 +78,43 @@ def _init_v07_registry(cfg) -> EngineRegistry:
     return reg
 
 
+def _try_register_local_engine(
+    reg: EngineRegistry,
+    name: str,
+    label: str,
+    tier: int = 2,
+) -> None:
+    """尝试注册本地 CPU OCR 引擎适配器。Import/Build 失败时静默跳过。"""
+    if name == "paddleocr":
+        try:
+            from kzocr.engine.adapters import PaddleOCRAdapter
+            reg.register_adapter(
+                AdapterMeta(name=name, label=label, tier=tier, requires_network=False),
+                EC(),
+                adapter=PaddleOCRAdapter(),
+            )
+        except Exception:
+            pass  # paddleocr 未安装
+    elif name == "rapidocr":
+        try:
+            from kzocr.engine.adapters import RapidOCRAdapter
+            reg.register_adapter(
+                AdapterMeta(name=name, label=label, tier=tier, requires_network=False),
+                EC(),
+                adapter=RapidOCRAdapter(),
+            )
+        except Exception:
+            pass  # rapidocr 未安装
+
+
 def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> BookResult:
     cfg = config if config is not None else app_config.config
     logger.info("[engine] v0.7 编排调度系统")
     registry = _init_v07_registry(cfg)
-    overrides = EngineOverrides()
+    overrides = EngineOverrides(
+        enable_cross_check=os.environ.get("KZOCR_ENABLE_CROSS_CHECK", "0") in ("1", "true"),
+        consensus_sample_rate=float(os.environ.get("KZOCR_CONSENSUS_SAMPLE_RATE", "0")),
+    )
     book = orchestrate_book(
         pdf_path=pdf_path,
         book_code=book_code,
