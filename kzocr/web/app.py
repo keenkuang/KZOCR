@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from kzocr.scheduler.cross_align import add_learned_confusion
 from kzocr.storage.db import BookDB
 
 app = FastAPI(
@@ -591,6 +592,26 @@ async def book_recipes(request: Request, book_code: str):
     })
 
 
+@app.get("/book/{book_code}/divergences", response_class=HTMLResponse)
+async def book_divergences(
+    request: Request, book_code: str, priority: str = "", page: int = None
+):
+    """跨引擎分歧校对台（借鉴 ocr_pipeline_v2 交叉校验可视化）。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        items = db.get_cross_divergences(page_no=page, priority=priority or None)
+    except Exception:
+        items = []
+    finally:
+        db.close()
+    return templates.TemplateResponse(request, "divergences.html", {
+        "book_code": book_code,
+        "divergences": items,
+        "current_priority": priority,
+    })
+
+
 @app.get("/pipeline", response_class=HTMLResponse)
 async def pipeline_form(request: Request, book_code: str = ""):
     """OCR 处理表单。"""
@@ -856,6 +877,39 @@ async def api_recipes(book_code: str):
         ]
     finally:
         db.close()
+
+
+@api.get("/books/{book_code}/divergences")
+async def api_divergences(
+    book_code: str,
+    page: int = Query(None, description="按页号过滤"),
+    priority: str = Query(None, description="按优先级过滤（high/normal）"),
+):
+    """返回跨引擎分歧列表（JSON）。可选按页号/优先级过滤。"""
+    dbd = _db_dir()
+    db = BookDB(book_code, db_dir=dbd)
+    try:
+        return db.get_cross_divergences(page_no=page, priority=priority)
+    finally:
+        db.close()
+
+
+@api.post("/confusion")
+async def api_add_confusion(request: Request):
+    """新增/更新一条形近字混淆对（自学习：让静态黑名单持续进化）。
+
+    请求体 JSON：{"wrong": "...", "correct": "...", "source": "..."}。
+    返回 {"status": "ok"|"noop", ...}。参数非法或已存在返回 noop。
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {"status": "error", "message": "invalid json"}
+    wrong = (data.get("wrong") or "") if isinstance(data, dict) else ""
+    correct = (data.get("correct") or "") if isinstance(data, dict) else ""
+    source = (data.get("source") or "web") if isinstance(data, dict) else "web"
+    ok = add_learned_confusion(wrong, correct, source=source)
+    return {"status": "ok" if ok else "noop", "wrong": wrong, "correct": correct}
 
 
 # =============================================================================

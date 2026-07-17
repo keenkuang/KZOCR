@@ -134,3 +134,61 @@ def test_api_recipes():
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
+
+
+# =============================================================================
+# 跨引擎分歧页面 / REST + 形近字自学习
+# =============================================================================
+
+
+def test_book_divergences_page():
+    from kzocr.scheduler.cross_align import Divergence
+
+    db = BookDB("test-book-a", db_dir=os.environ["KZOCR_DB_DIR"])
+    db.write_cross_divergences(
+        0,
+        [Divergence(page_no=0, div_type="replace", a_seg="三", b_seg="二",
+                    a_context="黄【三】两", priority="high", engine_a="t1", engine_b="t3")],
+        engine_a="t1", engine_b="t3",
+    )
+    db.close()
+    resp = client.get("/book/test-book-a/divergences")
+    assert resp.status_code == 200
+    assert "三" in resp.text and "二" in resp.text
+
+
+def test_api_divergences():
+    from kzocr.scheduler.cross_align import Divergence
+
+    db = BookDB("test-book-a", db_dir=os.environ["KZOCR_DB_DIR"])
+    db.write_cross_divergences(
+        0,
+        [Divergence(page_no=0, div_type="replace", a_seg="三", b_seg="二", priority="high")],
+        engine_a="t1", engine_b="t3",
+    )
+    db.close()
+    resp = client.get("/api/books/test-book-a/divergences?priority=high")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list) and len(data) >= 1
+    assert data[0]["a_seg"] == "三"
+
+
+def test_api_add_confusion_self_learn():
+    """POST /api/confusion 应持久化新混淆对，并同步内存缓存（内容动态、调用静态）。"""
+    import kzocr.scheduler.cross_align as ca
+
+    resp = client.post("/api/confusion", json={"wrong": "芩", "correct": "苓", "source": "test"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    try:
+        # 磁盘（reload）与内存缓存均应包含新学到的混淆
+        assert ca.load_confusion_set(reload=True).get("芩") == "苓"
+        assert ca.load_confusion_set().get("芩") == "苓"
+    finally:
+        # 还原全局状态，避免污染其它测试
+        lp = ca._LEARNED_CONFUSION_PATH
+        if lp.is_file():
+            lp.unlink()
+        ca._CONFUSION_CACHE = None

@@ -25,11 +25,16 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
+from kzocr.engines.atomic import atomic_write
+
 # 形近字黑名单默认路径（与 kzocr/resources/confusion_set.json 一致）
 _DEFAULT_CONFUSION_PATH = Path(__file__).resolve().parent.parent / "resources" / "confusion_set.json"
+# 自学习混淆集：运行时由人工/仲裁确认的新混淆对追加于此，叠加在静态集之上（可进化）
+_LEARNED_CONFUSION_PATH = Path(__file__).resolve().parent.parent / "resources" / "learned_confusion.json"
 
 # 标点 + 空白：对齐前统一剥离，避免标点差异淹没真实字符分歧
 _PUNCT = set("，。、；：！？“”‘’（）《》—…·「」『』〈〉【】〔〕,.!?;:\"'`()[]{}<>~·—-…")
@@ -44,18 +49,15 @@ def strip_punct(s: str) -> str:
     return "".join(ch for ch in s if ch not in _PUNCT and ch not in _WS)
 
 
-def load_confusion_set(path: Optional[Path] = None) -> dict:
-    """加载形近字黑名单为 {wrong: correct}。
+def _load_confusion_file(path: Path) -> dict:
+    """从单个 JSON 文件加载形近字黑名单为 {wrong: correct}（跳过 category=='正确'/wrong==correct）。
 
-    读取 confusion_set.json（list of {wrong, correct, category}），跳过
-    category=='正确' 或 wrong==correct 的条目（避免误判 UNKNOWN）。
     文件缺失/解析失败返回空字典（不影响对齐主流程）。
     """
-    p = Path(path) if path else _DEFAULT_CONFUSION_PATH
-    if not p.is_file():
+    if not path.is_file():
         return {}
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
     out: dict = {}
@@ -72,6 +74,78 @@ def load_confusion_set(path: Optional[Path] = None) -> dict:
                 continue
             out[wrong] = correct
     return out
+
+
+# 内存常驻缓存：黑名单"静态呆在内存里"供快速调用，内容则经 add_learned_confusion 动态优化
+_CONFUSION_CACHE: Optional[dict] = None
+
+
+def load_confusion_set(path: Optional[Path] = None, *, reload: bool = False) -> dict:
+    """加载形近字黑名单为 {wrong: correct}，并叠加自学习集（learned 覆盖静态）。
+
+    读取 confusion_set.json（list of {wrong, correct, category}），跳过
+    category=='正确' 或 wrong==correct 的条目（避免误判 UNKNOWN）。
+    自学习集 `learned_confusion.json` 若存在则合并其上（让新发现的混淆立即生效，
+    实现"可进化"）。
+
+    为兼顾"常驻内存、快速调用"，首次构建后缓存在模块级 `_CONFUSION_CACHE`，
+    后续调用直接返回缓存（reload=True 强制重读，或新增学习项时自动更新缓存）。
+    任一文件缺失/解析失败不影响主流程。
+    """
+    global _CONFUSION_CACHE
+    if not reload and _CONFUSION_CACHE is not None:
+        return _CONFUSION_CACHE
+    out = _load_confusion_file(Path(path) if path else _DEFAULT_CONFUSION_PATH)
+    out.update(_load_confusion_file(_LEARNED_CONFUSION_PATH))  # 学习集覆盖静态集
+    _CONFUSION_CACHE = out
+    return out
+
+
+def reload_confusion_set() -> dict:
+    """强制从磁盘重读并刷新内存缓存（例如在外部修改静态集后）。"""
+    return load_confusion_set(reload=True)
+
+
+def add_learned_confusion(wrong: str, correct: str, source: str = "") -> bool:
+    """把新发现的形近混淆对追加到 `learned_confusion.json`（原子写入，去重）。
+
+    用于"黑名单自学习/进化"：人工在 Web 校对台确认某对形近字、或仲裁发现新混淆时，
+    调用本函数持久化，并**同步更新内存缓存**，下次比对立即生效（内容动态、调用静态）。
+    返回 True=新增，False=参数非法或已存在（noop）。
+
+    安全：经由 atomic_write 的 allowed_base 约束写入路径（防路径穿越，同 C2 修复）。
+    """
+    global _CONFUSION_CACHE
+    wrong, correct = (wrong or "").strip(), (correct or "").strip()
+    if not wrong or not correct or wrong == correct:
+        return False
+    data: list = []
+    if _LEARNED_CONFUSION_PATH.is_file():
+        try:
+            data = json.loads(_LEARNED_CONFUSION_PATH.read_text(encoding="utf-8")) or []
+        except (json.JSONDecodeError, OSError):
+            data = []
+    if not isinstance(data, list):
+        data = []
+    for row in data:
+        if isinstance(row, dict) and row.get("wrong") == wrong and row.get("correct") == correct:
+            return False  # 已存在
+    data.append({
+        "wrong": wrong,
+        "correct": correct,
+        "category": "learned",
+        "source": source,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    atomic_write(
+        _LEARNED_CONFUSION_PATH,
+        json.dumps(data, ensure_ascii=False, indent=2),
+        allowed_base=_LEARNED_CONFUSION_PATH.parent,
+    )
+    # 同步更新内存缓存（内容动态优化，常驻内存供快速调用）
+    if _CONFUSION_CACHE is not None:
+        _CONFUSION_CACHE[wrong] = correct
+    return True
 
 
 @dataclass

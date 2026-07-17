@@ -265,17 +265,23 @@ class BookDB:
         self._conn.commit()
         return rows
 
-    def get_cross_divergences(self, page_no: int | None = None) -> list[dict[str, Any]]:
-        """读取跨引擎分歧（可选按页过滤），按 id 升序。"""
-        if page_no is None:
-            rows = self._conn.execute(
-                "SELECT * FROM cross_divergence ORDER BY id"
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM cross_divergence WHERE page_no=? ORDER BY id",
-                (page_no,),
-            ).fetchall()
+    def get_cross_divergences(
+        self, page_no: int | None = None, priority: str | None = None
+    ) -> list[dict[str, Any]]:
+        """读取跨引擎分歧（可选按页号/优先级过滤），按 id 升序。"""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if page_no is not None:
+            clauses.append("page_no=?")
+            params.append(page_no)
+        if priority is not None:
+            clauses.append("priority=?")
+            params.append(priority)
+        sql = "SELECT * FROM cross_divergence"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id"
+        rows = self._conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def update_cross_divergence_status(
