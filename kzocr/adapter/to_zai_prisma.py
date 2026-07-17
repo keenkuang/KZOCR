@@ -144,7 +144,8 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                      skip_prisma_marker: bool = False,
                      *, pdf_path: Optional[Path] = None,
                      persist_bookdb: Optional[bool] = None,
-                     register_postgres: bool = True) -> dict:
+                     register_postgres: bool = True,
+                     overwrite: bool = False) -> dict:
     """把归一化 BookResult 打包导出为可移植校对包（custom.db），并回写 BookDB/Postgres。
 
     定位（见 docs/plans/db-layering.md §5）：
@@ -175,12 +176,20 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
     # (1) 落 BookDB（系统 of record）—— best-effort，失败仅告警
     do_persist = persist_bookdb if persist_bookdb is not None \
         else os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True")
+    bookdb_persisted = False
     if do_persist:
         try:
             from kzocr.storage.db import BookDB
             BookDB.persist_book_result(book, db_dir=os.environ.get("KZOCR_DB_DIR", ""))
+            bookdb_persisted = True
         except Exception:
-            logger.warning("[adapter] BookDB 落库失败，跳过", exc_info=True)
+            # 显眼告警：of record 落库失败仍继续写 custom.db，意味着导出包无权威库支撑，
+            # 后续 import 写回的人工校对可能静默丢失（W2）。生产环境应关注此错误。
+            logger.error(
+                "[adapter][DATA INTEGRITY] BookDB 系统 of record 落库失败，"
+                "仍继续写 custom.db（导出包无权威库支撑，人工校对可能丢失）",
+                exc_info=True,
+            )
 
     # (2) 注册 Postgres 元数据 —— best-effort，无 PG 时静默跳过
     pg_meta = {"registered": False}
@@ -189,11 +198,17 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
 
     # (3) 写 zai 校对工作台包（可移植）
     db = _resolve_db(db_path, zai_path).resolve()
-    # 冻结保护（W4）：若目标已被 freeze_custom_db 冻结（只读 + .frozen 标记），说明是旧包；
-    # 重新 push 是用户显式覆盖动作，这里 best-effort 解除只读以允许重写，并告警避免误覆盖。
+    # 冻结保护（W4）：若目标已被 freeze_custom_db 冻结（只读 + .frozen 标记），说明是历史旧包。
+    # 默认不允许静默覆盖（避免误删人工编辑）；需显式 overwrite=True 才解除只读重写，
+    # 否则抛清晰错误，引导用户导出到新路径（见 db-layering.md 闭环用法）。
     frozen_marker = Path(str(db) + ".frozen")
     if frozen_marker.exists():
-        logger.warning("[adapter] 目标校对包已冻结（%s），将解除只读以重写", frozen_marker)
+        if not overwrite:
+            raise RuntimeError(
+                f"[adapter] 目标校对包已冻结（{frozen_marker}），不可静默覆盖。"
+                f"请导出到新路径，或显式传 overwrite=True 以解除冻结并重写。"
+            )
+        logger.warning("[adapter] 目标校对包已冻结，overwrite=True 解除只读并重写：%s", frozen_marker)
         try:
             os.chmod(str(db), 0o600)
             frozen_marker.unlink()
@@ -373,6 +388,7 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
             "book_code": book.book_code,
             "db": str(db),
             "bookdb_path": str(bookdb_path),
+            "bookdb_persisted": bookdb_persisted,
             "counts": counts,
             "postgres": pg_meta,
         }
@@ -394,6 +410,10 @@ def import_proofread_package(db_path: Optional[Path] = None,
     book_code 缺省时从 custom.db 的 Line.bookCode 推断（单行 SELECT 已含 bookCode 列）。
 
     Args:
+        db_path: 校对包（custom.db）显式路径，覆盖 config.zai_db。
+        zai_path: 同 db_path（别名），二者皆空时用 config.zai_db。
+        book_code: 显式书籍编码；缺省时从包内 Line.bookCode 推断。
+        db_dir: BookDB 目录（默认 KZOCR_DB_DIR 或 cwd/db），回写目标。
         register_postgres: best-effort 把导入的 Proofread 归档进 Postgres
             LineCorrectionArchive（无 PG / 归档失败则静默跳过，不阻断导入）。
 
@@ -485,6 +505,7 @@ def _import_proofreads_to_postgres(book_code: str, proof_rows: list,
         for r in proof_rows:
             # original_line_id 为 int 列；把层级键 (pageNum, paraSeq, seqInPara) 编码进单个 int，
             # 保留页/段/行上下文（I3），而非仅传 seqInPara 丢失上下文。
+            # 编码上限：假设 pageNum<1000、paraSeq<100、seqInPara<1000（超界会碰撞，古籍页面罕见）。
             original_line_id = r["pageNum"] * 100000 + r["paraSeq"] * 1000 + r["seqInPara"]
             db_pg.archive_line_correction(
                 book_id,

@@ -40,7 +40,7 @@ def test_hierarchical_line_unique_key():
             "SELECT page_num, para_seq, line_seq FROM line ORDER BY para_seq, line_seq"
         ).fetchall()
         assert len(rows) == 2
-        # 段序号用 sequence_in_page（1-based），行序 1-based
+        # 段序号按位置派生（1-based，save_book_result 用 enumerate），行序同理
         assert rows[0]["para_seq"] == 1 and rows[0]["line_seq"] == 1
         assert rows[1]["para_seq"] == 1 and rows[1]["line_seq"] == 2
     finally:

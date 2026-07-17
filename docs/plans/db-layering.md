@@ -22,7 +22,7 @@
    ┌──────────────────────────────────────────┐
    │  BookDB  (SQLite, 每书一个文件)              │  ← 书籍全量数据（系统 of record）
    │  db/{book_code}.db                          │     - 元数据（已有 set_book_meta）
-   │  - 内容表：Book/Page/Paragraph/Line(+char_boxes)│
+   │  - 内容表：Book/Page/Line(+char_boxes)/proofread（段层次仅在导出包 custom.db 内，BookDB 不单建 Paragraph 表）│
    │  - QA 表：page_progress / cross_divergence   │
    │            / hierarchy_anomaly / quality_result│
    │            / benchmark_results（已有）         │

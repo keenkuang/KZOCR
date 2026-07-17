@@ -11,6 +11,9 @@ import tempfile
 from pathlib import Path
 
 from kzocr.engine.mock import mock_book_result
+from kzocr.engine.types import (
+    BookResult, PageResult, ParagraphResult, LineResult,
+)
 from kzocr.adapter.to_zai_prisma import (
     push_book_to_zai, import_proofread_package, freeze_custom_db,
 )
@@ -170,6 +173,125 @@ def test_import_infers_book_code_from_package():
         for f in Path(tmp_bookdb).glob("TCM-IMP-003.db*"):
             f.unlink()
         Path(pkg).unlink(missing_ok=True)
+
+
+def test_export_import_multi_paragraph():
+    """多段落页（code-reviewer W2）：导出/导入闭环 para_seq 按位置正确映射，不串段。"""
+    pages = [PageResult(
+        page_num=1,
+        paragraphs=[
+            ParagraphResult(sequence_in_page=1, lines=[
+                LineResult(sequence_in_paragraph=1, final="甲", consensus="甲"),
+                LineResult(sequence_in_paragraph=2, final="乙", consensus="乙"),
+            ]),
+            ParagraphResult(sequence_in_page=2, lines=[
+                LineResult(sequence_in_paragraph=1, final="丙", consensus="丙"),
+            ]),
+        ],
+    )]
+    book = BookResult(book_code="TCM-MP-001", title="多段测试", pages=pages)
+    book.is_mock = False
+
+    tmp_bookdb = tempfile.mkdtemp()
+    old_db_dir = os.environ.get("KZOCR_DB_DIR")
+    old_persist = os.environ.get("KZOCR_PERSIST_DB")
+    os.environ["KZOCR_DB_DIR"] = tmp_bookdb
+    os.environ["KZOCR_PERSIST_DB"] = "1"
+    pkg = tempfile.mktemp(suffix=".db")
+    try:
+        push_book_to_zai(book, db_path=pkg, skip_prisma_marker=True)
+        # 校验导出包层级键按位置派生：段1两行(1,1)(1,2)，段2一行(2,1)
+        con = sqlite3.connect(pkg)
+        keys = [tuple(r) for r in con.execute(
+            "SELECT paraSeq,seqInPara FROM Line WHERE pageNum=1 ORDER BY paraSeq,seqInPara"
+        ).fetchall()]
+        con.close()
+        assert keys == [(1, 1), (1, 2), (2, 1)]
+
+        # 人工终校第 2 段第 1 行（para_seq=2, seqInPara=1）
+        con = sqlite3.connect(pkg)
+        con.execute(
+            "UPDATE Line SET humanFinal=? WHERE pageNum=1 AND paraSeq=2 AND seqInPara=1",
+            ("丙（终校）",),
+        )
+        con.commit()
+        con.close()
+
+        imp = import_proofread_package(db_path=pkg, book_code="TCM-MP-001")
+        assert imp["imported_lines"] == 1
+        db = BookDB("TCM-MP-001", db_dir=tmp_bookdb)
+        try:
+            # 第 2 段第 1 行收到终校
+            assert db.get_line_human_final(1, 2, 1) == "丙（终校）"
+            # 第 1 段第 1 行未被误写
+            assert db.get_line_human_final(1, 1, 1) == ""
+        finally:
+            db.close()
+    finally:
+        if old_db_dir is None:
+            os.environ.pop("KZOCR_DB_DIR", None)
+        else:
+            os.environ["KZOCR_DB_DIR"] = old_db_dir
+        if old_persist is None:
+            os.environ.pop("KZOCR_PERSIST_DB", None)
+        else:
+            os.environ["KZOCR_PERSIST_DB"] = old_persist
+        for f in Path(tmp_bookdb).glob("TCM-MP-001.db*"):
+            f.unlink()
+        Path(pkg).unlink(missing_ok=True)
+
+
+def test_reexport_preserves_human_final():
+    """重导出闭环（W1）：import 写回 BookDB 的 human_final 应在再次导出时合并进新包。"""
+    book = mock_book_result("TCM-RX-001")
+    book.is_mock = False
+
+    tmp_bookdb = tempfile.mkdtemp()
+    old_db_dir = os.environ.get("KZOCR_DB_DIR")
+    old_persist = os.environ.get("KZOCR_PERSIST_DB")
+    os.environ["KZOCR_DB_DIR"] = tmp_bookdb
+    os.environ["KZOCR_PERSIST_DB"] = "1"
+    pkg1 = tempfile.mktemp(suffix=".db")
+    pkg2 = tempfile.mktemp(suffix=".db")
+    try:
+        # 第一版导出
+        push_book_to_zai(book, db_path=pkg1, skip_prisma_marker=True)
+        # 人工终校 page1 段1 行1
+        con = sqlite3.connect(pkg1)
+        con.execute(
+            "UPDATE Line SET humanFinal=? WHERE pageNum=1 AND paraSeq=1 AND seqInPara=1",
+            ("方用白术三钱，茯苓二钱。（终校）",),
+        )
+        con.commit()
+        con.close()
+        # 导入写回 BookDB（系统 of record）
+        imp = import_proofread_package(db_path=pkg1, book_code="TCM-RX-001")
+        assert imp["imported_lines"] == 1
+
+        # 重新导出到新路径
+        res2 = push_book_to_zai(book, db_path=pkg2, skip_prisma_marker=True, persist_bookdb=True)
+        assert res2["bookdb_persisted"] is True
+
+        # 新包应包含已导入的人工终校（闭环无损）
+        con = sqlite3.connect(pkg2)
+        hf = con.execute(
+            "SELECT humanFinal FROM Line WHERE pageNum=1 AND paraSeq=1 AND seqInPara=1"
+        ).fetchone()[0]
+        con.close()
+        assert hf == "方用白术三钱，茯苓二钱。（终校）"
+    finally:
+        if old_db_dir is None:
+            os.environ.pop("KZOCR_DB_DIR", None)
+        else:
+            os.environ["KZOCR_DB_DIR"] = old_db_dir
+        if old_persist is None:
+            os.environ.pop("KZOCR_PERSIST_DB", None)
+        else:
+            os.environ["KZOCR_PERSIST_DB"] = old_persist
+        for f in Path(tmp_bookdb).glob("TCM-RX-001.db*"):
+            f.unlink()
+        Path(pkg1).unlink(missing_ok=True)
+        Path(pkg2).unlink(missing_ok=True)
 
 
 def test_freeze_custom_db():
