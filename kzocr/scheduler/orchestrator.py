@@ -329,8 +329,14 @@ def orchestrate_book(
         _vision_adapter_attempted = True
         if getattr(config, "allow_cloud_vision", False):
             # 视觉回看 MUST use a DIFFERENT model/provider from the OCR engine
-            # to ensure independent verification. OCR uses SenseNova, so recheck
-            # prefers ModelScope Qwen first (different provider/model family).
+            # to ensure independent verification.
+            # Try GLM first (free tier), then ModelScope, then SenseNova.
+            try:
+                vision_adapter = VisionRecheckAdapter.glm_default()
+                if vision_adapter.api_key:
+                    return vision_adapter
+            except Exception:
+                pass
             try:
                 vision_adapter = VisionRecheckAdapter.modelscope_default()
                 if vision_adapter.api_key:

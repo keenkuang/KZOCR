@@ -743,12 +743,16 @@ class VisionRecheckAdapter:
         model: str = "",
         max_image_pixels: int = 2048,
         timeout: int = 30,
+        support_reasoning_effort: bool = True,
+        max_tokens_cap: int = 4096,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
         self.max_image_pixels = max_image_pixels
         self.timeout = timeout
+        self.support_reasoning_effort = support_reasoning_effort
+        self.max_tokens_cap = max_tokens_cap
 
     @classmethod
     def sensenova_default(cls) -> "VisionRecheckAdapter":
@@ -767,6 +771,32 @@ class VisionRecheckAdapter:
             base_url="https://api-inference.modelscope.cn/v1",
             model="Qwen/Qwen3-VL-8B-Instruct",
         )
+
+    @classmethod
+    def glm_default(cls) -> "VisionRecheckAdapter":
+        """使用 GLM-4V-Flash 视觉模型（智谱 BigModel，兼容 OpenAI 协议）。"""
+        return cls(
+            api_key=os.environ.get("KZOCR_GLM_API_KEY", "") or os.environ.get("KZOCR_LLM_API_KEY", ""),
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            model="glm-4v-flash",
+            support_reasoning_effort=False,
+            max_tokens_cap=1024,
+        )
+
+    def _build_payload(self, img_b64: str, text: str, max_tokens: int = 2048) -> dict:
+        """构造 VL API 请求 payload，兼容 SenseNova/GLM 等不同模型参数。"""
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": img_b64}},
+                {"type": "text", "text": text},
+            ]}],
+            "max_tokens": min(max_tokens, self.max_tokens_cap),
+            "temperature": 0.0,
+        }
+        if self.support_reasoning_effort:
+            payload["reasoning_effort"] = "none"
+        return payload
 
     def _resize_image(self, img: np.ndarray) -> np.ndarray:
         """缩放图像至 VL 模型可接受的尺寸（max 2048 长边）。"""
@@ -845,16 +875,7 @@ class VisionRecheckAdapter:
         import urllib.request
 
         url = self.base_url.rstrip("/") + "/chat/completions"
-        payload = json.dumps({
-            "model": self.model,
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": img_b64}},
-                {"type": "text", "text": verify_prompt},
-            ]}],
-            "max_tokens": 2048,
-            "temperature": 0.0,
-            "reasoning_effort": "none",
-        }).encode()
+        payload = json.dumps(self._build_payload(img_b64, verify_prompt, max_tokens=2048)).encode()
 
         t0 = _time.time()
         try:
@@ -898,16 +919,7 @@ class VisionRecheckAdapter:
         import urllib.request as _req
 
         url = self.base_url.rstrip("/") + "/chat/completions"
-        payload = json.dumps({
-            "model": self.model,
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": img_b64}},
-                {"type": "text", "text": text_prompt},
-            ]}],
-            "max_tokens": 512,
-            "temperature": 0.0,
-            "reasoning_effort": "none",
-        }).encode()
+        payload = json.dumps(self._build_payload(img_b64, text_prompt, max_tokens=512)).encode()
         req = _req.Request(url, data=payload, method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Bearer {self.api_key}")

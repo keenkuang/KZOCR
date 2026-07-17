@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import tempfile
+from dataclasses import dataclass
 
 from kzocr.engine.adapters import PaddleOCRAdapter, RapidOCRAdapter
 from kzocr.engine.types import AdapterMeta, EngineConfig
@@ -106,5 +106,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    from dataclasses import dataclass
     raise SystemExit(main())

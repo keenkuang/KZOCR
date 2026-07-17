@@ -16,11 +16,13 @@
 """
 from __future__ import annotations
 
-from kzocr.engine.types import AdapterPageResult, PageInput
+import numpy as np
+
+from kzocr.engine.types import AdapterPageResult, BookResult, PageInput, PageResult
 
 
 class PaddleOCRAdapter:
-    """包装 PaddleOCR PP-OCRv6 为 EngineRunner（页级）。
+    """包装 PaddleOCR PP-OCRv6 为 EngineRunner（页级 + 书级）。
 
     引擎输出归一化：
     - text：拼接所有识别行的文本
@@ -36,7 +38,7 @@ class PaddleOCRAdapter:
             return
         from paddleocr import PaddleOCR
 
-        self._engine = PaddleOCR(show_log=False)
+        self._engine = PaddleOCR()
 
     def run_page(self, page: PageInput) -> AdapterPageResult:
         self._lazy_init()
@@ -45,8 +47,23 @@ class PaddleOCRAdapter:
         res = self._engine.ocr(img)
         return _parse_ppocr_result(res)
 
-    def run_book(self, pdf_path: str) -> AdapterPageResult:
-        raise NotImplementedError("PaddleOCRAdapter 仅支持页级（run_page），不支持书级")
+    def run_book(self, pdf_path: str) -> BookResult:
+        """书级执行：逐页渲染 → run_page → BookResult。"""
+        import fitz
+        doc = fitz.open(pdf_path)
+        try:
+            pages = []
+            for i in range(doc.page_count):
+                pix = doc[i].get_pixmap(dpi=150)
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                    pix.height, pix.width, pix.n
+                )
+                pi = PageInput(page_num=i, img=img)
+                result = self.run_page(pi)
+                pages.append(PageResult(page_num=i, text=result.text, confidence=result.confidence))
+            return BookResult(book_code="", title="", pages=pages)
+        finally:
+            doc.close()
 
 
 def _quad_to_rect(quad) -> list[int]:
@@ -126,8 +143,23 @@ class RapidOCRAdapter:
         out, _ = self._engine(img)
         return _parse_rapidocr_result(out)
 
-    def run_book(self, pdf_path: str) -> AdapterPageResult:
-        raise NotImplementedError("RapidOCRAdapter 仅支持页级（run_page），不支持书级")
+    def run_book(self, pdf_path: str) -> BookResult:
+        """书级执行：逐页渲染 → run_page → BookResult。"""
+        import fitz
+        doc = fitz.open(pdf_path)
+        try:
+            pages = []
+            for i in range(doc.page_count):
+                pix = doc[i].get_pixmap(dpi=150)
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                    pix.height, pix.width, pix.n
+                )
+                pi = PageInput(page_num=i, img=img)
+                result = self.run_page(pi)
+                pages.append(PageResult(page_num=i, text=result.text, confidence=result.confidence))
+            return BookResult(book_code="", title="", pages=pages)
+        finally:
+            doc.close()
 
 
 def _parse_rapidocr_result(out) -> AdapterPageResult:
