@@ -146,3 +146,108 @@ def test_quality_result_upsert(tmp_db):
     results = tmp_db.get_quality_results()
     assert len(results) == 1
     assert results[0]["confidence"] == 0.5
+
+
+# ── cross_divergence ──
+
+def test_write_cross_divergences_roundtrip(tmp_db):
+    """写入分歧后读取返回同一记录。"""
+    from kzocr.scheduler.cross_align import Divergence
+    divs = [
+        Divergence(page_no=0, div_type="replace", a_seg="三", b_seg="二",
+                   a_context="【三】", priority="high", engine_a="t1", engine_b="t3"),
+        Divergence(page_no=0, div_type="delete", a_seg="", b_seg="", priority="normal"),
+    ]
+    n = tmp_db.write_cross_divergences(0, divs, engine_a="t1", engine_b="t3")
+    assert n == 2
+
+    rows = tmp_db.get_cross_divergences()
+    assert len(rows) == 2
+    assert rows[0]["priority"] == "high"
+    assert rows[0]["a_seg"] == "三"
+    assert rows[0]["engine_a"] == "t1"
+    assert rows[0]["engine_b"] == "t3"
+
+
+def test_get_cross_divergences_filter(tmp_db):
+    """按 page_no / priority 过滤。"""
+    from kzocr.scheduler.cross_align import Divergence
+    d1 = Divergence(page_no=0, div_type="replace", a_seg="三", b_seg="二", priority="high")
+    d2 = Divergence(page_no=1, div_type="replace", a_seg="日", b_seg="曰", priority="normal")
+    tmp_db.write_cross_divergences(0, [d1])
+    tmp_db.write_cross_divergences(1, [d2])
+
+    paged = tmp_db.get_cross_divergences(page_no=0)
+    assert len(paged) == 1
+    assert paged[0]["a_seg"] == "三"
+
+    high = tmp_db.get_cross_divergences(priority="high")
+    assert len(high) == 1
+
+    none = tmp_db.get_cross_divergences(page_no=9)
+    assert none == []
+
+
+def test_update_cross_divergence_status(tmp_db):
+    """update_cross_divergence_status 定位更新。"""
+    from kzocr.scheduler.cross_align import Divergence
+    d = Divergence(page_no=0, div_type="replace", a_seg="三", b_seg="二", priority="high")
+    tmp_db.write_cross_divergences(0, [d])
+
+    affected = tmp_db.update_cross_divergence_status(0, "replace", "三", "二", "accepted_a")
+    assert affected == 1  # 匹配同一行
+
+    rows = tmp_db.get_cross_divergences()
+    assert rows[0]["status"] == "accepted_a"
+
+
+# ── hierarchy_anomaly 补充 ──
+
+def test_resolve_anomaly(tmp_db):
+    """resolve_anomaly 更新决议状态。"""
+    tmp_db.init_page(1)
+    v = GlyphVerdict(status="UNKNOWN", confidence=0.6, details="test")
+    tmp_db.record_anomaly(1, verdict=v)
+    anoms = tmp_db.get_anomalies()
+    assert len(anoms) == 1
+    aid = anoms[0]["id"]
+
+    tmp_db.resolve_anomaly(aid, "fixed", "人工复核确认")
+    anoms_after = tmp_db.get_anomalies()
+    assert len(anoms_after) == 0  # resolution=fixed 默认不返回
+
+    fixed = tmp_db.get_anomalies(status_filter="fixed")
+    assert len(fixed) == 1
+    assert fixed[0]["note"] == "人工复核确认"
+
+
+def test_get_unresolved_anomalies_joins_page_progress(tmp_db):
+    """get_unresolved_anomalies 联表 page_progress 获取 char_count。"""
+    tmp_db.init_page(1, char_count=300)
+    v = GlyphVerdict(status="FAIL", confidence=1.0, details="test")
+    tmp_db.record_anomaly(1, verdict=v)
+
+    unresolved = tmp_db.get_unresolved_anomalies()
+    assert len(unresolved) == 1
+    assert unresolved[0]["page_num"] == 1
+    assert unresolved[0]["char_count"] == 300  # 联表数据
+
+
+# ── benchmark ──
+
+def test_write_benchmark(tmp_db):
+    """write_benchmark 写入后可查询。"""
+    tmp_db.init_page(0, char_count=100, engine_label="t1")
+    tmp_db.update_ocr(0, status="success", char_count=100, latency_ms=500)
+    tmp_db.write_benchmark(
+        book_code="test_book", engine="t1",
+        total_pages=1, success_pages=1, fail_pages=0,
+        total_latency_ms=500, total_elapsed_s=10.0,
+    )
+    rows = tmp_db._conn.execute(
+        "SELECT * FROM benchmark_results"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["engine"] == "t1"
+    assert rows[0]["total_pages"] == 1
+    assert rows[0]["success_pages"] == 1
