@@ -237,6 +237,7 @@ class AdapterPageResult:
     text: str
     confidence: float = 0.9
     char_confidences: Optional[list[float]] = None   # 字级置信度，与 text 等长（None=不支持）
+    boxes: Optional[list[list[int]]] = None           # 行级边界框列表，每项 [x1,y1,x2,y2]（None=不支持）
     crop_img_path: Optional[str] = None              # B7：裁剪图路径引用，不存像素
     meta: Optional[AdapterMeta] = None
 
