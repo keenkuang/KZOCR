@@ -20,3 +20,6 @@ trace/
 
 # 形近字自学习集（运行时生成，可进化；非静态资源）
 kzocr/resources/learned_confusion.json
+
+# 真实书端到端验证产物（scripts/e2e_cross_engine_realbook.py 生成）
+e2e_db/
