@@ -34,8 +34,10 @@ from kzocr.engine.types import (
 from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
 from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionRecheckAdapter
+from kzocr.scheduler.cross_align import run_cross_align, load_confusion_set
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
+from kzocr.engines.ratelimit import MultiTokenRateLimiter
 import numpy as np
 
 _logger = logging.getLogger(__name__)
@@ -192,6 +194,8 @@ def orchestrate_book(
         allow_cloud_vision=bool(getattr(config, "allow_cloud_vision", False)),
     )
     verifier = GlyphVerifier()
+    # 形近字黑名单（供跨引擎分歧对齐标记 high 优先级，失败路径比对时复用）
+    confusion_set = load_confusion_set()
     # 视觉回看适配器（惰性初始化，仅在需要时创建）
     vision_adapter: Optional[VisionRecheckAdapter] = None
     _vision_adapter_attempted = False
@@ -218,6 +222,18 @@ def orchestrate_book(
             except Exception:
                 pass
         return None
+
+    # 视觉仲裁共享进程级限流（复用 MultiTokenRateLimiter；默认关，仅 allow_cloud_vision 时用到）
+    vision_bucket: Optional[MultiTokenRateLimiter] = None
+
+    def _get_vision_bucket() -> Optional[MultiTokenRateLimiter]:
+        nonlocal vision_bucket
+        if vision_bucket is None:
+            vision_bucket = MultiTokenRateLimiter(
+                tokens=30, window_seconds=60, key="vision_recheck"
+            )
+        return vision_bucket
+
     scheduler = EngineScheduler()
     trace: list[EngineCallRecord] = []
     start_time = time.monotonic()
@@ -383,31 +399,84 @@ def orchestrate_book(
                 tier3, page_input, timeout_s=timeout_t3,
                 max_workers=concurrency_ctrl.workers,
             )
-            if result is not None and engine_name is not None:
-                t_elapsed = 500  # placeholder
-                vctx = DetectorContext(
+        if result is not None and engine_name is not None:
+            t_elapsed = 500  # placeholder
+            # ── 跨引擎分歧对齐（借鉴 ocr_pipeline_v2）：Tier1 文本 vs Tier3 文本 ──
+            # 失败路径上两引擎文本共存，比对提取分歧（数字/剂量+形近黑名单 high 优先），
+            # 供 HumanGate / 视觉仲裁。纯函数无网络，失败页量小，直接落库。
+            if cur_text and result.text:
+                try:
+                    divs = run_cross_align(
+                        page_num, cur_text, result.text,
+                        confusion_set=confusion_set,
+                        engine_a=t1_engine_name, engine_b=engine_name,
+                    )
+                    if divs:
+                        db.write_cross_divergences(
+                            page_no=page_num, divs=divs,
+                            engine_a=t1_engine_name, engine_b=engine_name,
+                        )
+                        # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
+                        high = [d for d in divs if d.priority == "high"]
+                        if high:
+                            db.record_anomaly(
+                                page_num,
+                                GlyphVerdict(
+                                    status="UNKNOWN",
+                                    confidence=0.4,
+                                    details=(
+                                        f"cross_divergence;high={len(high)};"
+                                        f"sample={high[0].a_seg}↔{high[0].b_seg}"
+                                    ),
+                                ),
+                                detector_chain=["CrossAlign"],
+                            )
+                            # 4.3 分歧级视觉仲裁（Box-Guided VL，退化模式）：
+                            # 仅 allow_cloud_vision 且 page_img 非空时激活（等同 --enable-arb）。
+                            # 高优先级分歧经 VL 仲裁后更新状态；manual/both_wrong 已在上面入复核队列。
+                            va = _get_vision_adapter()
+                            if va is not None and page_input.img is not None:
+                                bucket = _get_vision_bucket()
+                                for d in high:
+                                    try:
+                                        arb = va.arbitrate_divergence(
+                                            d, page_input.img,
+                                            confusion_set=confusion_set, bucket=bucket,
+                                        )
+                                        db.update_cross_divergence_status(
+                                            page_num, d.div_type, d.a_seg, d.b_seg,
+                                            arb.decision,
+                                        )
+                                    except Exception as exc:  # 视觉仲裁属增强，绝不阻断主流程
+                                        _logger.warning(
+                                            "[orchestrator] cross_arbitrate failed page=%d: %s",
+                                            page_num, exc,
+                                        )
+                except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
+                    _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
+            vctx = DetectorContext(
                     page_num=page_num, engine_label=engine_name,
                     book_type=book_type, pub_era=pub_era,
                     resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
                 )
-                verdict = verifier.verify_with_vision(
-                    result.text, vctx,
-                    page_img=page_input.img if page_input.img is not None else None,
-                    vision_adapter=_get_vision_adapter(),
-                )
-                _eng = next((e for e in tier3 if e.meta.name == engine_name), None)
-                if _eng:
-                    page_trace.append(
-                        EngineCallRecord(
-                            page=page_num, tier=3, engine=engine_name,
-                            latency_ms=t_elapsed, glyph_status=verdict.status,
-                            detector_chain=list(verifier.last_detector_chain),
-                        )
+            verdict = verifier.verify_with_vision(
+                result.text, vctx,
+                page_img=page_input.img if page_input.img is not None else None,
+                vision_adapter=_get_vision_adapter(),
+            )
+            _eng = next((e for e in tier3 if e.meta.name == engine_name), None)
+            if _eng:
+                page_trace.append(
+                    EngineCallRecord(
+                        page=page_num, tier=3, engine=engine_name,
+                        latency_ms=t_elapsed, glyph_status=verdict.status,
+                        detector_chain=list(verifier.last_detector_chain),
                     )
-                    _record_engine_usage(registry, _eng, verdict, t_elapsed, engine_usage_counter)
-                if verdict.status in ("PASS", "RARE"):
-                    final_text = result.text
-                    pages_text.append(final_text)
+                )
+                _record_engine_usage(registry, _eng, verdict, t_elapsed, engine_usage_counter)
+            if verdict.status in ("PASS", "RARE"):
+                final_text = result.text
+                pages_text.append(final_text)
 
         # ── HumanGate ──
         if verdict.status in ("FAIL", "UNKNOWN"):

@@ -25,6 +25,7 @@ import numpy as np
 
 from kzocr.engine.types import GlyphVerdict
 from kzocr.engines import leakage as _leakage
+from kzocr.scheduler.cross_align import Divergence, DivergenceArbitration
 
 _logger = logging.getLogger(__name__)
 
@@ -491,6 +492,95 @@ class GlyphVerifier:
 # VisionRecheckAdapter — 视觉回看（§4.2.7）
 # ═══════════════════════════════════════════════════════════════
 
+# 分歧级视觉仲裁（Box-Guided VL，借鉴 ocr_pipeline_v2 cross_arbitrate + 豆包帖）
+_ARB_CONF_GATE = 0.65   # conf<0.65 → 强制人工
+_ARB_BOX_PAD = 8        # 裁框外扩 8px（防墨迹晕染）
+_ARB_MIN_BOX = 12       # 框边长下限（px），过小跳过 VL 强制人工
+
+
+def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
+    """构造分歧级仲裁 prompt：只让 VL 核对候选字字形，强制 JSON 输出。
+
+    mode='box_guided'：图片已是裁剪好的候选字小框，无需定位；
+    mode='degraded'：无 char box，给出 a_context 让 VL 在整页中定位候选字。
+    """
+    a, b = divergence.a_seg, divergence.b_seg
+    confusion_hints = []
+    if confusion_set:
+        for wrong, correct in confusion_set.items():
+            if wrong in (a, b) or correct in (a, b):
+                confusion_hints.append(f"{wrong}≠{correct}")
+    confusion_line = "；".join(confusion_hints[:12]) if confusion_hints else "（无）"
+
+    if mode == "box_guided":
+        head = (
+            "图片中已裁剪出待核对的候选字符（按原图像素坐标裁框）。\n"
+            f"候选字（引擎 A 识别）：{a}\n"
+            f"另一引擎识别为：{b}\n"
+        )
+    else:
+        head = (
+            "请核对整页中下列文本片段里用【】标出的候选字符。\n"
+            f"上下文：{divergence.a_context}\n"
+            f"候选字（引擎 A 识别）：{a}\n"
+            f"另一引擎识别为：{b}\n"
+        )
+    return (
+        head
+        + "可能形近混淆清单：" + confusion_line + "\n\n"
+        "仅做字形认知核对，不要猜测语义。请严格只输出如下 JSON（不要任何解释文字）：\n"
+        '{"candidate_char": "<候选字>", "is_match": true或false, '
+        '"confidence": 0.0到1.0之间的数字, "real_char": "<你认为图片中真实字>"}'
+    )
+
+
+def _parse_arbitration_response(text: str):
+    """从 VL 原始输出中稳健提取仲裁 JSON；失败返回 None。
+
+    容错：去 ```json 代码围栏、截取首尾大括号、非法 JSON 返回 None。
+    """
+    if not text:
+        return None
+    s = text.strip()
+    if "```" in s:  # 去 markdown 代码围栏
+        parts = s.split("```")
+        if len(parts) >= 2:
+            s = parts[1]
+            if s.startswith("json"):
+                s = s[4:]
+    lo, hi = s.find("{"), s.rfind("}")
+    if lo == -1 or hi == -1 or hi <= lo:
+        return None
+    frag = s[lo:hi + 1]
+    try:
+        obj = json.loads(frag)
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _gate_arbitration(parsed: dict, a_seg: str, b_seg: str):
+    """按 VL 返回的 is_match/confidence/real_char 映射裁决。
+
+    返回 (decision, real_char)。is_match=False 或 conf<0.65 → manual；
+    real_char 匹配 A/B 侧 → accepted_a/b；给出第三字 → both_wrong；否则 uncertain。
+    """
+    is_match = str(parsed.get("is_match", "")).strip().lower() in ("true", "1", "yes", "y")
+    try:
+        conf = float(parsed.get("confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    real = (parsed.get("real_char") or "").strip()
+    if not is_match or conf < _ARB_CONF_GATE:
+        return "manual", real
+    if real == a_seg:
+        return "accepted_a", real
+    if real == b_seg:
+        return "accepted_b", real
+    if real:
+        return "both_wrong", real
+    return "uncertain", real
+
 
 class VisionRecheckAdapter:
     """视觉回看适配器：用 VL 模型验证 OCR 文本与图像的匹配度。
@@ -655,4 +745,119 @@ class VisionRecheckAdapter:
             confidence=0.5,
             details=f"vision_recheck_failed;response={answer[:100]};latency_ms={ms}",
             detector_name="VisionRecheckAdapter",
+        )
+
+    def _post_vl(self, text_prompt: str, img_b64: str) -> str:
+        """发「图 + 文」到 VL 模型，返回模型原始文本（网络异常向上抛）。
+
+        与 `recheck` 共用同一套 chat/completions 协议；抽出来便于仲裁复用与单测 mock。
+        """
+        import urllib.request as _req
+
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        payload = json.dumps({
+            "model": self.model,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": img_b64}},
+                {"type": "text", "text": text_prompt},
+            ]}],
+            "max_tokens": 512,
+            "temperature": 0.0,
+            "reasoning_effort": "none",
+        }).encode()
+        req = _req.Request(url, data=payload, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {self.api_key}")
+        resp = _req.urlopen(req, timeout=self.timeout)
+        body = json.loads(resp.read().decode())
+        return (body.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+
+    def arbitrate_divergence(
+        self,
+        divergence: "Divergence",
+        page_img,
+        confusion_set: Optional[dict] = None,
+        bucket=None,
+    ) -> "DivergenceArbitration":
+        """分歧级视觉仲裁（Box-Guided VL）。
+
+        借鉴 ocr_pipeline_v2 `cross_arbitrate` + 豆包帖《形近字共识错误难破的原因与应对》：
+        不给 VL 整页问 PASS/FAIL，而是拿候选字 + 它的 quad 框，**只让 VL 重审那小框字形**
+        （认知对比），Prompt 强制 JSON 输出，再按置信度门控映射裁决。
+
+        Args:
+            divergence: cross_align.Divergence 分歧点（.a_seg/.b_seg/.a_context/.boxes）
+            page_img: 页面图像 (H,W,3) 或 None
+            confusion_set: 形近字黑名单 wrong->correct（可选，用于 Prompt 提示）
+            bucket: 可选 MultiTokenRateLimiter 共享进程级限流
+
+        Returns:
+            DivergenceArbitration：decision / confidence / real_char / mode / raw
+
+        行为：
+        - 未配置（无 key/base/model）或无图像 → 直接 manual，不调网络。
+        - `divergence.boxes` 非空 → 精确裁框（Box-Guided）；多字框/过小框 → manual 跳过。
+        - `boxes` 为空（当前 KZOCR 归一化数据无逐字 bbox）→ 退化整页缩图 + 上下文提示。
+        - JSON 解析失败 / is_match=False / conf<0.65 → manual。
+        """
+        if not self.api_key or not self.base_url or not self.model:
+            return DivergenceArbitration(
+                page_no=divergence.page_no, decision="manual",
+                raw="vision_recheck_not_configured", engine="",
+            )
+        if page_img is None:
+            return DivergenceArbitration(
+                page_no=divergence.page_no, decision="manual",
+                raw="vision_recheck_no_image", engine=self.model,
+            )
+
+        # ── 裁框：boxes 存在则精确 Box-Guided，否则退化整页 + 上下文提示 ──
+        boxes = list(divergence.boxes or [])
+        mode = "degraded"
+        crop = None
+        if boxes:
+            if len(boxes) > 1:
+                return DivergenceArbitration(
+                    page_no=divergence.page_no, decision="manual",
+                    raw="box_multi_char_skip", mode="box_guided", engine=self.model,
+                )
+            x1, y1, x2, y2 = (int(v) for v in boxes[0])
+            # 原始框尺寸过小（含墨迹也难辨）→ 跳过 VL 强制人工（padding 前判断）
+            if (x2 - x1) < _ARB_MIN_BOX or (y2 - y1) < _ARB_MIN_BOX:
+                return DivergenceArbitration(
+                    page_no=divergence.page_no, decision="manual",
+                    raw="box_too_small_skip", mode="box_guided", engine=self.model,
+                )
+            h, w = page_img.shape[:2]
+            x1, x2 = max(0, x1 - _ARB_BOX_PAD), min(w, x2 + _ARB_BOX_PAD)
+            y1, y2 = max(0, y1 - _ARB_BOX_PAD), min(h, y2 + _ARB_BOX_PAD)
+            crop = page_img[y1:y2, x1:x2]
+            mode = "box_guided"
+
+        if crop is None:
+            crop = self._resize_image(page_img)
+        img_b64 = self._img_to_b64(crop)
+
+        prompt = _build_arbitration_prompt(divergence, confusion_set, mode)
+        try:
+            if bucket is not None:
+                bucket.acquire()
+            raw = self._post_vl(prompt, img_b64)
+        except Exception as exc:
+            return DivergenceArbitration(
+                page_no=divergence.page_no, decision="manual",
+                raw=f"vision_recheck_api_error;{str(exc)[:80]}", mode=mode, engine=self.model,
+            )
+
+        parsed = _parse_arbitration_response(raw)
+        if parsed is None:
+            return DivergenceArbitration(
+                page_no=divergence.page_no, decision="manual",
+                confidence=0.0, raw=raw[:200], mode=mode, engine=self.model, real_char="",
+            )
+        decision, real_char = _gate_arbitration(parsed, divergence.a_seg, divergence.b_seg)
+        return DivergenceArbitration(
+            page_no=divergence.page_no, decision=decision,
+            confidence=float(parsed.get("confidence", 0.0) or 0.0),
+            real_char=real_char, raw=raw[:200], mode=mode, engine=self.model,
         )

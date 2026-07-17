@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block breadcrumb %}核心业务 / {{ book_code }} / 跨引擎分歧{% endblock %}
+{% block title %}跨引擎分歧 · {{ book_code }}{% endblock %}
+{% block content %}
+
+<div class="flex gap-2 mb-4">
+    <a href="/book/{{ book_code }}" class="text-sm text-blue-600 hover:underline">← 返回书籍</a>
+    <div class="flex gap-1 ml-4">
+        <a href="?priority=" class="text-xs px-3 py-1 rounded-full {% if current_priority == '' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">全部</a>
+        <a href="?priority=high" class="text-xs px-3 py-1 rounded-full {% if current_priority == 'high' %}bg-red-100 text-red-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">高优先级</a>
+        <a href="?priority=normal" class="text-xs px-3 py-1 rounded-full {% if current_priority == 'normal' %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">普通</a>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg border">
+    <div class="px-4 py-3 border-b border-gray-100">
+        <h3 class="text-sm font-medium">跨引擎分歧（{{ divergences|length }} 条）</h3>
+        <p class="text-xs text-gray-400 mt-1">两引擎文本 token 级分歧比对；数字/剂量与形近字命中为高优先级。可点「学为形近字」把新发现的混淆对写入自学习黑名单。</p>
+    </div>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                    <th class="px-4 py-3">ID</th>
+                    <th class="px-4 py-3">页号</th>
+                    <th class="px-4 py-3">类型</th>
+                    <th class="px-4 py-3">候选 A → B</th>
+                    <th class="px-4 py-3">上下文</th>
+                    <th class="px-4 py-3">优先级</th>
+                    <th class="px-4 py-3">状态</th>
+                    <th class="px-4 py-3">引擎</th>
+                    <th class="px-4 py-3">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in divergences %}
+                <tr class="border-t border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3">{{ d.id }}</td>
+                    <td class="px-4 py-3">{{ d.page_no }}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500">{{ d.div_type }}</td>
+                    <td class="px-4 py-3 font-mono">
+                        <span class="text-red-600">{{ d.a_seg or '∅' }}</span>
+                        <span class="text-gray-400"> → </span>
+                        <span class="text-green-600">{{ d.b_seg or '∅' }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate" title="{{ d.a_context }}">{{ d.a_context }}</td>
+                    <td class="px-4 py-3">
+                        {% if d.priority == 'high' %}<span class="badge-red">高</span>
+                        {% else %}<span class="badge-gray">普通</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if d.status == 'pending' %}<span class="badge-yellow">待处理</span>
+                        {% elif d.status in ('accepted_a','accepted_b') %}<span class="badge-green">已采纳</span>
+                        {% elif d.status in ('both_wrong','manual') %}<span class="badge-red">需人工</span>
+                        {% elif d.status == 'uncertain' %}<span class="badge-yellow">存疑</span>
+                        {% else %}<span class="badge-gray">{{ d.status }}</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-500">{{ d.engine_a }}/{{ d.engine_b }}</td>
+                    <td class="px-4 py-3">
+                        {% if d.a_seg and d.b_seg and d.a_seg != d.b_seg %}
+                        <button class="text-xs text-indigo-600 hover:underline bg-transparent border-none cursor-pointer"
+                                onclick="learnConfusion('{{ d.a_seg }}', '{{ d.b_seg }}', this)">学为形近字</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="9" class="px-4 py-8 text-center text-gray-400">暂无跨引擎分歧</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+async function learnConfusion(wrong, correct, btn) {
+    btn.disabled = true;
+    btn.textContent = '学习中…';
+    try {
+        const resp = await fetch('/api/confusion', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({wrong: wrong, correct: correct, source: 'web-divergence'})
+        });
+        const data = await resp.json();
+        btn.textContent = data.status === 'ok' ? '已学习 ✓' : '已存在';
+    } catch (e) {
+        btn.textContent = '失败';
+        btn.disabled = false;
+    }
+}
+</script>
+
+{% endblock %}
