@@ -8,13 +8,21 @@ Web/REST 暴露与形近字黑名单自学习。
   - 引擎A：PaddleOCR（PP-OCRv6，CPU，无需密钥）
   - 引擎B：RapidOCR（onnxruntime，CPU，无需密钥）
 
+**全流程含版心裁切**：每页先经生产级 `_crop_to_body`（与 orchestrator.py:62 一致：
+PP-DocLayoutV3 优先 + cv2 三级降级）裁掉页眉/页脚/侧眉/页码等版心外噪声，再交给
+OCR 引擎识别——与生产流水线前端对齐，而非整页识别（整页会引入大量版心外噪声）。
+
 说明：完整 `orchestrate_book` 的跨引擎比对挂在 Tier1(PaddleOCR) vs Tier3(本地 LLM)
 失败路径上，而本机无 GPU / 无云端密钥，故这里直接驱动跨引擎校验栈的核心
 （真实引擎 + run_cross_align + BookDB + Web/REST + 自学习），等价验证端到端能力。
 
-依赖（本机已装）：paddleocr、rapidocr_onnxruntime。
+依赖（本机已装）：paddleocr、rapidocr_onnxruntime；可选 paddlex（PP-DocLayoutV3，
+未装则自动降级 cv2）。
 用法：
-  python scripts/e2e_cross_engine_realbook.py <pdf> [--book-code X] [--db-dir D] [--dpi 150]
+  python scripts/e2e_cross_engine_realbook.py <pdf> \
+      [--book-code X] [--db-dir D] [--dpi 150] \
+      [--start-page 1] [--end-page N] [--no-crop]
+  # 页码为 1-indexed（书页号），含端点；默认全本。--no-crop 走整页对照。
 """
 from __future__ import annotations
 
@@ -34,6 +42,9 @@ from kzocr.scheduler.cross_align import (
 )
 from kzocr.storage.db import BookDB
 from kzocr.engine.types import GlyphVerdict
+# 生产级版心裁切（与 orchestrator.py:62 一致）
+from kzocr.engine.run import _crop_to_body
+from kzocr.engine.layout_crop import reset_cv2_calib
 
 
 def render_page(pdf_path: str, i: int, dpi: int = 150) -> np.ndarray:
@@ -71,11 +82,17 @@ def ro_text(ro, img: np.ndarray) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="真实书跨引擎校验端到端验证")
+    ap = argparse.ArgumentParser(description="真实书跨引擎校验端到端验证（含版心裁切全流程）")
     ap.add_argument("pdf", help="真实扫描古籍 PDF 路径")
     ap.add_argument("--book-code", default="REALBOOK-秘方求真-570")
     ap.add_argument("--db-dir", default="e2e_db")
     ap.add_argument("--dpi", type=int, default=150)
+    ap.add_argument("--start-page", type=int, default=1,
+                    help="起始书页号（1-indexed，含端点）；默认 1")
+    ap.add_argument("--end-page", type=int, default=None,
+                    help="结束书页号（1-indexed，含端点）；默认全本末页")
+    ap.add_argument("--no-crop", action="store_true",
+                    help="关闭版心裁切，走整页对照（验证裁切必要性时对比用）")
     args = ap.parse_args()
 
     if not os.path.isfile(args.pdf):
@@ -104,16 +121,34 @@ def main() -> int:
     doc = fitz.open(args.pdf)
     n_pages = doc.page_count
     doc.close()
-    print(f"[info] 书籍 {args.book_code}：{n_pages} 页")
+
+    # 页码范围（1-indexed 书页号 → 0-indexed PDF 索引）
+    start_idx = max(0, args.start_page - 1)
+    end_idx = (args.end_page - 1) if args.end_page is not None else (n_pages - 1)
+    end_idx = min(end_idx, n_pages - 1)
+    if start_idx > end_idx:
+        print(f"[ERR] 页码范围无效：start={args.start_page} end={args.end_page}（全书 {n_pages} 页）",
+              file=sys.stderr)
+        return 2
+    sel_pages = end_idx - start_idx + 1
+    print(f"[info] 书籍 {args.book_code}：全书 {n_pages} 页，本次处理书页 {args.start_page}~{end_idx + 1}（{sel_pages} 页）")
+    print(f"[info] 版心裁切：{'开启（生产级 _crop_to_body）' if not args.no_crop else '关闭（整页对照）'}")
+
+    # 换书零人工：每次运行前重置 cv2 左界标定缓存，前几页用 PP-DocLayoutV3 真值重标定
+    reset_cv2_calib()
 
     db = BookDB(args.book_code, db_dir=args.db_dir)
     total_div = 0
     total_high = 0
     per_page: list[dict] = []
 
-    for i in range(n_pages):
+    for i in range(start_idx, end_idx + 1):
         t0 = time.time()
         img = render_page(args.pdf, i, dpi=args.dpi)
+        h0, w0 = img.shape[:2]
+        if not args.no_crop:
+            img = _crop_to_body(img, page_num=i)  # 生产级版心裁切
+        h1, w1 = img.shape[:2]
         txt_a = po_text(oc, img)
         txt_b = ro_text(ro, img)
         dt = time.time() - t0
@@ -142,7 +177,9 @@ def main() -> int:
             "divs": len(divs), "high": len(high), "sec": round(dt, 1),
             "sample_high": f"{high[0].a_seg}↔{high[0].b_seg}" if high else "",
         })
-        print(f"  page {i}: A={len(txt_a)}字 B={len(txt_b)}字 | 分歧 {len(divs)} (high {len(high)}) {dt:.1f}s"
+        crop_pct = int((w0 * h0 - w1 * h1) * 100 / (w0 * h0)) if (w0 * h0) else 0
+        crop_tag = f"裁{crop_pct}%" if not args.no_crop else "整页"
+        print(f"  page {i}: [{crop_tag}] A={len(txt_a)}字 B={len(txt_b)}字 | 分歧 {len(divs)} (high {len(high)}) {dt:.1f}s"
               + (f"  例:{per_page[-1]['sample_high']}" if high else ""))
 
     print(f"[ok] 落库完成：总分歧 {total_div}，high 优先级 {total_high}")
@@ -190,8 +227,9 @@ def main() -> int:
         print("[skip] 未找到单字形近对，跳过自学习写入")
 
     print("\n=== 端到端验证汇总 ===")
-    print(f"  书籍: {args.book_code}（{n_pages} 页真实扫描）")
+    print(f"  书籍: {args.book_code}（全书 {n_pages} 页；本次 {sel_pages} 页 书页{args.start_page}~{end_idx + 1}）")
     print("  引擎: PaddleOCR(PP-OCRv6) vs RapidOCR — 均为真实本地 CPU 引擎")
+    print(f"  版心裁切: {'开启（生产级 _crop_to_body）' if not args.no_crop else '关闭（整页对照）'}")
     print(f"  分歧总数: {total_div}  | high 优先级: {total_high}")
     print(f"  Web/REST 暴露: {'通过' if r.status_code == 200 and r2.status_code == 200 else '失败'}")
     print(f"  形近字自学习: {'通过' if learn_ok else '跳过/未触发'}")

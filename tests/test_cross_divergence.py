@@ -21,6 +21,7 @@ from kzocr.engine.types import (
 from kzocr.scheduler import orchestrator as _orc
 from kzocr.scheduler.orchestrator import orchestrate_book
 from kzocr.scheduler.registry import EngineRegistry
+from kzocr.scheduler.scheduler import EngineOverrides
 from kzocr.scheduler.cross_align import Divergence
 from kzocr.engine.types import GlyphVerdict
 from kzocr.storage.db import BookDB
@@ -227,3 +228,54 @@ def test_cross_divergence_arbitrated_by_vision(tmp_path, monkeypatch):
     assert high, "应有一条 high 分歧"
     assert high[0]["status"] == "accepted_b"
     assert high[0]["engine_b"] == "t3"
+
+
+# ── C：成功页 cross-check ──
+def test_cross_check_on_success_page(tmp_path):
+    """enable_cross_check=True + Tier2 可用 → 成功页触发 cross-check，分歧落库。"""
+    reg = _reg(
+        tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"),  # PASS
+        # Tier2 不设 requires_network（cross-check 引擎可以是本地 CPU 引擎，不需要 allow_cloud_vision）
+    )
+    reg.register_adapter(
+        AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
+        EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补气，方用萆薮分清饮")]),
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    overrides = EngineOverrides(enable_cross_check=True)
+    result = orchestrate_book("/fp", "bkc5", cfg, reg, overrides=overrides)
+    assert len(result.pages) == 1
+
+    rows = _read_db("bkc5", str(tmp_path))
+    assert len(rows) >= 1, "应有分歧落库"
+    assert any(r["engine_a"] == "t1" and r["engine_b"] == "t2" for r in rows)
+
+
+def test_cross_check_no_tier2(tmp_path):
+    """enable_cross_check=True 但无 Tier2 → 静默跳过，无分歧落库。"""
+    reg = _reg(
+        tier1_pages=_text_pages("黄芪补气"),  # PASS
+        # 未注册 Tier2
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    overrides = EngineOverrides(enable_cross_check=True)
+    orchestrate_book("/fp", "bkc6", cfg, reg, overrides=overrides)
+
+    rows = _read_db("bkc6", str(tmp_path))
+    assert rows == [], "无 Tier2 时应无分歧"
+
+
+def test_cross_check_disabled_by_default(tmp_path):
+    """enable_cross_check=False（默认）→ 即使有 Tier2 可见也不触发 cross-check。"""
+    reg = _reg(
+        tier1_pages=_text_pages("黄芪补气"),  # PASS
+    )
+    # 显式注册 requires_network=False 的 Tier2（即使 allow_cloud_vision=False 也可选）
+    reg.register_adapter(
+        AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
+        EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补")]),
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    orchestrate_book("/fp", "bkc7", cfg, reg)  # 默认 overrides=None，enable_cross_check 为 False
+    rows = _read_db("bkc7", str(tmp_path))
+    assert rows == [], "默认不启用 cross-check，即使 Tier2 可见也应无分歧"

@@ -139,6 +139,7 @@ _LEVEL_RANK = {"一级高危": 1, "二级中频": 2, "三级通用": 3}
 _LEVEL_PATH = {1: "一级高危", 2: "二级中频", 3: "三级通用"}
 
 _KEYS_CACHE: Optional[dict] = None
+_KEYS_SPLIT_CACHE: Optional[dict] = None  # load_confusion_keys_split 专用缓存
 _PHRASE_CACHE: Optional[list] = None
 
 
@@ -168,6 +169,46 @@ def load_confusion_keys(path: Optional[Path] = None, *, reload: bool = False) ->
                 out[ch] = rank
     _KEYS_CACHE = {ch: _LEVEL_PATH[r] for ch, r in out.items()}
     return _KEYS_CACHE
+
+
+def load_confusion_keys_split(path: Optional[Path] = None, *, reload: bool = False) -> dict:
+    """Layer1 分侧：区分误认侧(wrong) / 基准侧(correct)。返回 {"wrong": ..., "correct": ...}。
+
+    wrong 侧：OCR 可能误输出的字符（如把"朴"误认成"补"，则"补"在 wrong 侧）。
+    correct 侧：正确/基准字符（如"朴"）。
+    双向字符（同时出现在 wrong 和 correct 侧，如 补↔朴）→ 两侧都记。
+
+    供 ConfusionKeyPresenceDetector 做"分侧强弱标定"——含误认字强标（confidence=0.55），
+    含正确基准字弱标（confidence=0.35）。
+    独立缓存 _KEYS_SPLIT_CACHE（不破坏已有 _KEYS_CACHE）。
+    """
+    global _KEYS_SPLIT_CACHE
+    # 只有使用默认路径时才写入全局缓存（自定义路径不覆盖全局缓存，避免测试间污染）
+    use_cache = path is None
+    if use_cache and not reload and _KEYS_SPLIT_CACHE is not None:
+        return _KEYS_SPLIT_CACHE
+    rows = _load_confusion_file(Path(path) if path else _DEFAULT_CONFUSION_PATH, raw=True)
+    wrong: dict[str, int] = {}
+    correct: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        w, c = row.get("wrong"), row.get("correct")
+        level = row.get("level", "三级通用")
+        rank = _LEVEL_RANK.get(level, 3)
+        if not w or not c or w == c:
+            continue
+        for ch, side in ((w, wrong), (c, correct)):
+            prev = side.get(ch)
+            if prev is None or rank < prev:
+                side[ch] = rank
+    result = {
+        "wrong": {ch: _LEVEL_PATH[r] for ch, r in wrong.items()},
+        "correct": {ch: _LEVEL_PATH[r] for ch, r in correct.items()},
+    }
+    if use_cache:
+        _KEYS_SPLIT_CACHE = result
+    return result
 
 
 def load_confusion_phrases(path: Optional[Path] = None, *, reload: bool = False) -> list:
