@@ -251,3 +251,25 @@ def test_write_benchmark(tmp_db):
     assert rows[0]["engine"] == "t1"
     assert rows[0]["total_pages"] == 1
     assert rows[0]["success_pages"] == 1
+
+
+# ── close / vacuum ──
+
+def test_close_prevents_further_ops(tmp_db):
+    """close 后任何操作抛出 sqlite3.ProgrammingError。"""
+    tmp_db.close()
+    import sqlite3
+    with pytest.raises(sqlite3.ProgrammingError):
+        tmp_db.init_page(0)
+
+
+def test_vacuum_completes_and_db_valid(tmp_db):
+    """vacuum 成功执行且数据库仍可正常读写。"""
+    tmp_db.init_page(0, char_count=100)
+    tmp_db.update_ocr(0, status="success", char_count=100, latency_ms=500)
+    tmp_db.vacuum()
+    # vacuum 后数据库仍正常工作
+    row = tmp_db.get_page_progress(0)
+    assert row is not None
+    assert row["char_count"] == 100
+    assert row["ocr_status"] == "success"
