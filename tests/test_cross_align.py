@@ -6,6 +6,7 @@ from pathlib import Path
 
 from kzocr.scheduler.cross_align import (
     align_engines,
+    load_confusion_keys_split,
     run_cross_align,
     strip_punct,
     write_divergences,
@@ -119,3 +120,62 @@ def test_real_tcm_snippet_divergence():
     assert divs
     # 数字 2 仍在，含数字的分歧应 high
     assert any(d.priority == "high" for d in divs)
+
+
+def test_load_confusion_keys_split(tmp_path: Path):
+    """验证 load_confusion_keys_split 正确分离 wrong/correct 侧。"""
+    rows = [
+        {"wrong": "补", "correct": "朴", "level": "一级高危", "category": "通用形近"},
+        {"wrong": "炙", "correct": "灸", "level": "一级高危", "category": "通用形近"},
+        {"wrong": "日", "correct": "曰", "level": "三级通用", "category": "通用形近"},
+    ]
+    path = tmp_path / "confusion_set.json"
+    import json
+    path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+
+    result = load_confusion_keys_split(path=path, reload=True)
+    assert "wrong" in result, f"缺少 wrong 侧: {result}"
+    assert "correct" in result, f"缺少 correct 侧: {result}"
+
+    wrong = result["wrong"]
+    correct = result["correct"]
+
+    # wrong 侧：取每条混淆对的 wrong 字符
+    assert wrong.get("补") == "一级高危"
+    assert wrong.get("炙") == "一级高危"
+    assert wrong.get("日") == "三级通用"
+
+    # correct 侧：取每条混淆对的 correct 字符
+    assert correct.get("朴") == "一级高危"
+    assert correct.get("灸") == "一级高危"
+    assert correct.get("曰") == "三级通用"
+
+    # 双向字符出现在两侧（补 在 wrong 侧，也在 correct 侧作为其他条目的... 不在此例）
+    # 本例无双向，验一下不存在的字符
+    assert "不存在的" not in wrong
+
+
+def test_load_confusion_keys_split_bidirectional(tmp_path: Path):
+    """双向混淆对（补↔朴）的字符应出现在两侧。"""
+    rows = [
+        {"wrong": "补", "correct": "朴", "level": "一级高危", "category": "通用形近"},
+        {"wrong": "朴", "correct": "补", "level": "一级高危", "category": "通用形近"},
+    ]
+    path = tmp_path / "bidirectional.json"
+    import json
+    path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+
+    result = load_confusion_keys_split(path=path, reload=True)
+    # "补" 同时出现在 wrong（第一条）和 correct（第二条）
+    assert result["wrong"].get("补") == "一级高危"
+    assert result["correct"].get("补") == "一级高危"
+    # "朴" 同时出现在 wrong（第二条）和 correct（第一条）
+    assert result["wrong"].get("朴") == "一级高危"
+    assert result["correct"].get("朴") == "一级高危"
+
+
+def test_load_confusion_keys_split_empty_no_file(tmp_path: Path):
+    """缺失/空文件应返回空 wrong/correct。"""
+    missing = tmp_path / "nonexistent.json"
+    result = load_confusion_keys_split(path=missing, reload=True)
+    assert result == {"wrong": {}, "correct": {}}

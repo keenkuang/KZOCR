@@ -119,6 +119,70 @@ def _run_single_engine_with_timeout(
     return result["v"]
 
 
+def _run_success_cross_check(
+    page_num: int,
+    cur_text: str,
+    page_input: PageInput,
+    scheduler: EngineScheduler,
+    registry: EngineRegistry,
+    db: BookDB,
+    confusion_set: dict,
+    budget: Budget,
+    overrides,
+    page_layout: Optional[PageLayout],
+    max_time_per_page_ms: int,
+    engine_a: str = "tier1",
+) -> None:
+    """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
+
+    纯增强（try/except 不阻断主流程）；无 Tier2 候选时静默跳过（本机无 GPU/密钥时正常行为）。
+    High 优先分歧经 record_anomaly 入 M4 队列；allow_cloud_vision 时可选调视觉仲裁。
+    """
+    try:
+        tier2 = _safe_select_candidates(
+            scheduler, registry, 2, page_input, budget, page_layout, overrides,
+        )
+        if not tier2:
+            return  # 无 Tier2 候选（本机无 GPU/密钥），静默跳过
+        timeout_cross = min(60000, max_time_per_page_ms) / 1000
+        cross_result = _run_single_engine_with_timeout(
+            tier2[0], page_input, timeout_cross,
+        )
+        cross_text = getattr(cross_result, "text", "") or ""
+        if not cur_text or not cross_text:
+            return
+
+        divs = run_cross_align(
+            page_num, cur_text, cross_text,
+            confusion_set=confusion_set,
+            engine_a=engine_a, engine_b=tier2[0].meta.name,
+        )
+        if not divs:
+            return
+
+        db.write_cross_divergences(
+            page_no=page_num, divs=divs,
+            engine_a=engine_a, engine_b=tier2[0].meta.name,
+        )
+        high = [d for d in divs if d.priority == "high"]
+        if high:
+            db.record_anomaly(
+                page_num,
+                GlyphVerdict(
+                    status="UNKNOWN", confidence=0.4,
+                    details=(
+                        f"cross_divergence;high={len(high)};"
+                        f"sample={high[0].a_seg}↔{high[0].b_seg}"
+                    ),
+                ),
+                detector_chain=["CrossAlign"],
+            )
+            # TODO: allow_cloud_vision 时可调 arbitrate_divergence 对 high 分歧执行 VL 仲裁
+            # 复用现有逻辑（orchestrator.py:437-454），record_anomaly 后调用仲裁更新分歧状态
+    except Exception as exc:
+        _logger.warning("[orchestrator] success cross-check failed page=%d: %s", page_num, exc)
+
+
 def _record_engine_usage(
     registry: EngineRegistry,
     engine: EngineRegistration,
@@ -386,6 +450,19 @@ def orchestrate_book(
                 db.update_ocr(page_num, status="success", char_count=len(cur_text), latency_ms=t1_elapsed_per_page)
                 db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
                 db.update_import(page_num, status="imported", count=1)
+
+                # ── 增强路径：成功页跨引擎采样比对（enable_cross_check 时激活）──
+                # 对成功页追加 Tier2 引擎做交叉验证，捕获 GlyphVerifier 抓不到的字符级错误
+                # （因中文形近字 GlyphVerifier 无法判对错，需要双引擎比对）。
+                if getattr(overrides, "enable_cross_check", False) and not budget.exhausted:
+                    _run_success_cross_check(
+                        page_num, cur_text, page_input,
+                        scheduler, registry, db,
+                        confusion_set, budget, overrides, page_layout,
+                        budget.max_time_per_page_ms,
+                        engine_a=t1_engine_name,
+                    )
+
                 trace.extend(page_trace)
                 continue
 

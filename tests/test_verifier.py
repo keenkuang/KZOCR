@@ -10,6 +10,7 @@ from __future__ import annotations
 from kzocr.engine.types import GlyphVerdict
 from kzocr.scheduler.verifier import (
     CharCountSpikeDetector,
+    ConfusionKeyPresenceDetector,
     ConfusionSetDetector,
     DetectorContext,
     GlyphVerifier,
@@ -110,6 +111,59 @@ def test_confusion_resource_filters_correct_entries():
     ctx = _ctx()
     v = det.check("黄芪常用于补益剂", ctx)
     assert v is None or v.status != "UNKNOWN"
+
+
+# ── ConfusionKeyPresenceDetector 分侧强弱标 ──
+def test_confusion_key_presence_wrong_side_strong():
+    """wrong 侧一级高危字命中 → 强标 (confidence=0.55)。"""
+    det = ConfusionKeyPresenceDetector(
+        {"补": "一级高危", "炙": "一级高危"},
+        correct_keys={},
+    )
+    v = det.check("补气", _ctx())
+    assert v is not None and v.status == "RARE"
+    assert v.force_review is True
+    assert v.confidence == 0.55
+    assert "confusion_key_wrong" in v.details
+
+
+def test_confusion_key_presence_correct_only_side_weak():
+    """correct-only 一级高危字（不在 wrong 侧）命中 → 弱标 (confidence=0.35)。"""
+    det = ConfusionKeyPresenceDetector(
+        {"补": "一级高危"},  # wrong 侧
+        correct_keys={"朴": "一级高危"},  # correct-only：朴不在 wrong 侧
+    )
+    v = det.check("朴硝", _ctx())
+    assert v is not None and v.status == "RARE"
+    assert v.force_review is True
+    assert v.confidence == 0.35
+    assert "confusion_key_correct" in v.details
+
+
+def test_confusion_key_presence_bidirectional_gets_strong():
+    """双向字符（同时在 wrong 和 correct 侧）→ wrong 侧优先，强标。"""
+    det = ConfusionKeyPresenceDetector(
+        {"补": "一级高危"},  # wrong 侧
+        correct_keys={"补": "一级高危"},  # correct 侧也有"补"
+    )
+    v = det.check("补气", _ctx())
+    assert v is not None and v.confidence == 0.55
+    assert "confusion_key_wrong" in v.details
+
+
+def test_confusion_key_presence_no_hit():
+    """无命中 → None。"""
+    det = ConfusionKeyPresenceDetector(
+        {"日": "三级通用"},
+        correct_keys={},
+    )
+    assert det.check("补气", _ctx()) is None
+
+
+def test_confusion_key_presence_empty_text():
+    """空文本 → None。"""
+    det = ConfusionKeyPresenceDetector({"补": "一级高危"})
+    assert det.check("", _ctx()) is None
 
 
 # ── TermKBMatcher ──

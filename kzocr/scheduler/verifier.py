@@ -28,7 +28,7 @@ from kzocr.engines import leakage as _leakage
 from kzocr.scheduler.cross_align import (
     Divergence,
     DivergenceArbitration,
-    load_confusion_keys,
+    load_confusion_keys_split,
     load_confusion_phrases,
 )
 
@@ -231,7 +231,10 @@ class ConfusionSetDetector:
 
 
 class ConfusionKeyPresenceDetector:
-    """Layer1 前置静态筛查（零算力，最先执行）：OCR 输出含一级高危基准字 → 强制 M4 复核。
+    """Layer1 前置静态筛查（零算力，最先执行）：分侧强弱标定。
+
+    - wrong 侧（误认侧）命中一级高危字 → force_review=True, confidence=0.55（强标）
+    - correct 侧（基准侧）命中一级高危字 → force_review=True, confidence=0.35（弱标）
 
     Option B（采纳 + 仅送复核，不阻断主流程）：返回 `status="RARE"`（文本照常采纳）
     且 `force_review=True`（打标送人工复核队列）。与 orchestrator「视觉仲裁属增强，
@@ -239,35 +242,53 @@ class ConfusionKeyPresenceDetector:
 
     仅对"一级高危"字符无条件强制（SPEC#1 的"强制复核"语义）。二/三级字符不 blanket 强制，
     交由跨引擎分歧 + Box-Guided VL 拦截——否则日/目、人/入、土/士等高频通用字会淹没 M4 队列。
-    基准字（correct）与误认字（wrong）都纳入 key 集：两者皆为高风险字形。
+    基准字（correct-only）弱标（confidence=0.35），误认字（wrong 侧）强标（confidence=0.55）。
     """
 
     name = "ConfusionKeyPresence"
     priority = 45
 
-    def __init__(self, confusion_keys: dict | None = None) -> None:
-        # confusion_keys: char -> level（"一级高危"/"二级中频"/"三级通用"）
+    def __init__(self, confusion_keys: dict | None = None, correct_keys: dict | None = None) -> None:
+        # confusion_keys: char -> level（"一级高危"/"二级中频"/"三级通用"），视为 wrong 侧
         self.confusion_keys = confusion_keys or {}
         self._l1 = {ch for ch, lvl in self.confusion_keys.items() if lvl == "一级高危"}
-        self._enabled = bool(self._l1)
+        # correct_keys: char -> level，基准侧字符；排除已在 wrong 侧的字符（双向字已有 wrong 侧强标）
+        correct_only = {ch for ch, lvl in (correct_keys or {}).items() if lvl == "一级高危"}
+        self._l1_correct = correct_only - self._l1
+        self._enabled = bool(self._l1) or bool(self._l1_correct)
 
     @property
     def enabled(self) -> bool:
         return self._enabled
 
     def check(self, text: str, context: DetectorContext) -> Optional[GlyphVerdict]:
-        if not self._enabled or not text:
+        # enabled 状态仅在 GlyphVerifier 构造时通过 `d.enabled` 过滤检测器，
+        # 此处不重复检查（_l1/_l1_correct 空集已提供等价守卫）。
+        if not text:
             return None
-        hits = sorted({ch for ch in text if ch in self._l1})
-        if not hits:
-            return None
-        return GlyphVerdict(
-            status="RARE",
-            confidence=0.55,
-            details=f"confusion_key_presence;chars={''.join(hits)};强制M4",
-            detector_name=self.name,
-            force_review=True,
-        )
+        # 强标：wrong 侧一级高危字命中（误认侧，高嫌疑）
+        if self._l1:
+            wrong_hits = sorted({ch for ch in text if ch in self._l1})
+            if wrong_hits:
+                return GlyphVerdict(
+                    status="RARE",
+                    confidence=0.55,
+                    details=f"confusion_key_wrong;chars={''.join(wrong_hits)};强制M4",
+                    detector_name=self.name,
+                    force_review=True,
+                )
+        # 弱标：correct-only 侧一级高危字命中（基准侧，低嫌疑）
+        if self._l1_correct:
+            correct_only_hits = sorted({ch for ch in text if ch in self._l1_correct})
+            if correct_only_hits:
+                return GlyphVerdict(
+                    status="RARE",
+                    confidence=0.35,
+                    details=f"confusion_key_correct;chars={''.join(correct_only_hits)};建议复核",
+                    detector_name=self.name,
+                    force_review=True,
+                )
+        return None
 
 
 class PhraseErrorDetector:
@@ -413,8 +434,11 @@ class GlyphVerifier:
                 confusion_set[wrong] = correct
         detectors.append(ConfusionSetDetector(confusion_set))
 
-        # ConfusionKeyPresenceDetector（Layer1 基准字侧预筛，一级高危强制 M4 — SPEC#1）
-        detectors.append(ConfusionKeyPresenceDetector(load_confusion_keys()))
+        # ConfusionKeyPresenceDetector（Layer1 分侧预筛：wrong 侧强标 / correct 侧弱标）
+        key_sets = load_confusion_keys_split()
+        detectors.append(ConfusionKeyPresenceDetector(
+            key_sets["wrong"], correct_keys=key_sets["correct"],
+        ))
 
         # PhraseErrorDetector（Layer2 词组错扫描，标记 M6 待语义校验）
         detectors.append(PhraseErrorDetector(load_confusion_phrases()))
