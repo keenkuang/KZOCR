@@ -1,152 +1,1164 @@
 [
   {
-    "wrong": "我术",
-    "correct": "莪术",
-    "category": "形似",
-    "note": "莪术（Curcuma zedoaria）常被误写为'我术'"
+    "wrong": "丙",
+    "correct": "两",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "两 易被误识别为 丙（三级通用）"
   },
   {
-    "wrong": "黄芹",
-    "correct": "黄芩",
-    "category": "形似",
-    "note": "黄芩（Scutellaria baicalensis）与芹菜无关"
+    "wrong": "凡",
+    "correct": "丸",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "丸 易被误识别为 凡（三级通用）"
   },
   {
-    "wrong": "黄芪",
-    "correct": "黄芪",
-    "category": "正确",
-    "note": "注意与'黄芩'区分，黄芪为 Astragalus"
+    "wrong": "及",
+    "correct": "乃",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "乃 易被误识别为 及（三级通用）"
   },
   {
-    "wrong": "半下",
-    "correct": "半夏",
-    "category": "音似",
-    "note": "半夏（Pinellia ternata）—'下'与'夏'方言音近"
+    "wrong": "去",
+    "correct": "云",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "云 易被误识别为 去（三级通用）"
   },
   {
-    "wrong": "白木",
-    "correct": "白术",
-    "category": "形似",
-    "note": "白术（Atractylodes macrocephala）—'术'非'木'"
+    "wrong": "入",
+    "correct": "人",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "人 易被误识别为 入（三级通用）"
   },
   {
-    "wrong": "苍术",
-    "correct": "苍术",
-    "category": "正确",
-    "note": "苍术（Atractylodes lancea），与白术同属异种"
+    "wrong": "无",
+    "correct": "元",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "元 易被误识别为 无（三级通用）"
   },
   {
-    "wrong": "夕草",
-    "correct": "甘草",
-    "category": "形似",
-    "note": "甘草（Glycyrrhiza uralensis）—'甘'误为'夕'"
+    "wrong": "人",
+    "correct": "入",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "入 易被误识别为 人（三级通用）"
   },
   {
-    "wrong": "玉金",
-    "correct": "郁金",
-    "category": "音似",
-    "note": "郁金（Curcuma aromatica）—'郁'音近'玉'"
+    "wrong": "甚",
+    "correct": "其",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "其 易被误识别为 甚（三级通用）"
   },
   {
-    "wrong": "夕加",
-    "correct": "血竭",
-    "category": "字形误",
-    "note": "血竭（Dragon's Blood）OCR 常见形误"
+    "wrong": "丸",
+    "correct": "凡",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "凡 易被误识别为 丸（三级通用）"
+  },
+  {
+    "wrong": "兮",
+    "correct": "分",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "分 易被误识别为 兮（三级通用）"
+  },
+  {
+    "wrong": "加",
+    "correct": "剂",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "剂 易被误识别为 加（一级高危）"
+  },
+  {
+    "wrong": "剂",
+    "correct": "加",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "加 易被误识别为 剂（一级高危）"
+  },
+  {
+    "wrong": "干",
+    "correct": "千",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "千 易被误识别为 干（三级通用）"
+  },
+  {
+    "wrong": "生",
+    "correct": "升",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "升 易被误识别为 生（二级中频）"
+  },
+  {
+    "wrong": "既",
+    "correct": "即",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "即 易被误识别为 既（三级通用）"
+  },
+  {
+    "wrong": "阙",
+    "correct": "厥",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "厥 易被误识别为 阙（二级中频）"
+  },
+  {
+    "wrong": "云",
+    "correct": "去",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "去 易被误识别为 云（三级通用）"
+  },
+  {
+    "wrong": "叅",
+    "correct": "参",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "参 易被误识别为 叅（一级高危）"
+  },
+  {
+    "wrong": "乃",
+    "correct": "及",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "及 易被误识别为 乃（三级通用）"
+  },
+  {
+    "wrong": "右",
+    "correct": "古",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "古 易被误识别为 右（三级通用）"
+  },
+  {
+    "wrong": "古",
+    "correct": "右",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "右 易被误识别为 古（三级通用）"
+  },
+  {
+    "wrong": "仝",
+    "correct": "合",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "合 易被误识别为 仝（三级通用）"
+  },
+  {
+    "wrong": "知",
+    "correct": "和",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "和 易被误识别为 知（二级中频）"
+  },
+  {
+    "wrong": "湍",
+    "correct": "喘",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "喘 易被误识别为 湍（二级中频）"
+  },
+  {
+    "wrong": "漱",
+    "correct": "嗽",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "嗽 易被误识别为 漱（二级中频）"
+  },
+  {
+    "wrong": "士",
+    "correct": "土",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "土 易被误识别为 士（三级通用）"
+  },
+  {
+    "wrong": "寒",
+    "correct": "塞",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "塞 易被误识别为 寒（二级中频）"
+  },
+  {
+    "wrong": "土",
+    "correct": "士",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "士 易被误识别为 土（三级通用）"
+  },
+  {
+    "wrong": "太",
+    "correct": "大",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "大 易被误识别为 太（三级通用）"
+  },
+  {
+    "wrong": "夫",
+    "correct": "天",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "天 易被误识别为 夫（三级通用）"
+  },
+  {
+    "wrong": "大",
+    "correct": "太",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "太 易被误识别为 大（三级通用）"
+  },
+  {
+    "wrong": "天",
+    "correct": "夫",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "夫 易被误识别为 天（三级通用）"
+  },
+  {
+    "wrong": "知",
+    "correct": "如",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "如 易被误识别为 知（三级通用）"
+  },
+  {
+    "wrong": "羌",
+    "correct": "姜",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "姜 易被误识别为 羌（一级高危）"
+  },
+  {
+    "wrong": "有",
+    "correct": "存",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "存 易被误识别为 有（三级通用）"
+  },
+  {
+    "wrong": "蘖",
+    "correct": "孽",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "孽 易被误识别为 蘖（一级高危）"
+  },
+  {
+    "wrong": "秘",
+    "correct": "密",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "密 易被误识别为 秘（三级通用）"
+  },
+  {
+    "wrong": "塞",
+    "correct": "寒",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "寒 易被误识别为 塞（二级中频）"
+  },
+  {
+    "wrong": "才",
+    "correct": "寸",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "寸 易被误识别为 才（三级通用）"
+  },
+  {
+    "wrong": "瘥",
+    "correct": "差",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "差 易被误识别为 瘥（二级中频）"
+  },
+  {
+    "wrong": "已",
+    "correct": "己",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "己 易被误识别为 已（一级高危）"
+  },
+  {
+    "wrong": "巳",
+    "correct": "己",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "己 易被误识别为 巳（一级高危）"
   },
   {
     "wrong": "己",
-    "correct": "己",
-    "category": "笔误",
-    "note": "注意'己'（jǐ）、'已'（yǐ）、'巳'（sì）三者区别"
+    "correct": "已",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "已 易被误识别为 己（一级高危）"
   },
   {
-    "wrong": "姜虫",
-    "correct": "僵虫",
-    "category": "音似",
-    "note": "僵蚕（Bombyx batryticatus）—'僵'音近'姜'"
+    "wrong": "巳",
+    "correct": "已",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "已 易被误识别为 巳（一级高危）"
   },
   {
-    "wrong": "生夕",
-    "correct": "生晒",
-    "category": "形似",
-    "note": "生晒参与'生夕'形似"
+    "wrong": "己",
+    "correct": "巳",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "巳 易被误识别为 己（一级高危）"
   },
   {
-    "wrong": "夕傅",
-    "correct": "血府",
-    "category": "形似",
-    "note": "血府逐瘀汤—'血府'误为'夕傅'"
+    "wrong": "已",
+    "correct": "巳",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "巳 易被误识别为 已（一级高危）"
   },
   {
-    "wrong": "王不流行",
-    "correct": "王不留行",
-    "category": "缺字",
-    "note": "王不留行（Vaccaria segetalis）—缺'留'"
+    "wrong": "千",
+    "correct": "干",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "干 易被误识别为 千（三级通用）"
   },
   {
-    "wrong": "栀了",
-    "correct": "栀子",
-    "category": "形似",
-    "note": "栀子（Gardenia jasminoides）—'子'误为'了'"
+    "wrong": "方",
+    "correct": "彷",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "彷 易被误识别为 方（三级通用）"
   },
   {
-    "wrong": "大黄",
-    "correct": "大黄",
-    "category": "正确",
-    "note": "大黄（Rheum palmatum），注意与'大蓟'区分"
+    "wrong": "癥",
+    "correct": "徵",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "徵 易被误识别为 癥（二级中频）"
   },
   {
-    "wrong": "大吉",
-    "correct": "大蓟",
-    "category": "形似",
-    "note": "大蓟（Cirsium japonicum）—'蓟'误为'吉'"
+    "wrong": "悉",
+    "correct": "息",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "息 易被误识别为 悉（二级中频）"
   },
   {
-    "wrong": "小吉",
-    "correct": "小蓟",
-    "category": "形似",
-    "note": "小蓟（Cirsium setosum）—'蓟'误为'吉'"
+    "wrong": "逾",
+    "correct": "愈",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "愈 易被误识别为 逾（二级中频）"
   },
   {
-    "wrong": "山枝",
-    "correct": "山栀",
-    "category": "音似",
-    "note": "山栀（Gardenia jasminoides 别名）常用，但'枝'应为'栀'"
+    "wrong": "戌",
+    "correct": "戊",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戊 易被误识别为 戌（三级通用）"
   },
   {
-    "wrong": "天丁",
-    "correct": "天丁",
-    "category": "正确",
-    "note": "天丁（皂角刺别名），非'天了'"
+    "wrong": "戍",
+    "correct": "戊",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戊 易被误识别为 戍（三级通用）"
   },
   {
-    "wrong": "双白",
-    "correct": "桑白",
-    "category": "音似",
-    "note": "桑白皮（Morus alba root bark）—'桑'音近'双'"
+    "wrong": "戊",
+    "correct": "戌",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戌 易被误识别为 戊（三级通用）"
   },
   {
-    "wrong": "双枝",
-    "correct": "桑枝",
-    "category": "音似",
-    "note": "桑枝（Morus alba twig）—'桑'音近'双'"
+    "wrong": "戍",
+    "correct": "戌",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戌 易被误识别为 戍（三级通用）"
   },
   {
-    "wrong": "双叶",
-    "correct": "桑叶",
-    "category": "音似",
-    "note": "桑叶（Morus alba leaf）—'桑'音近'双'"
+    "wrong": "戊",
+    "correct": "戍",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戍 易被误识别为 戊（三级通用）"
   },
   {
-    "wrong": "全虫",
-    "correct": "全蝎",
-    "category": "别名等效",
-    "note": "全蝎（Scorpio）别名全虫，两者皆可"
+    "wrong": "戌",
+    "correct": "戍",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戍 易被误识别为 戌（三级通用）"
   },
   {
-    "wrong": "勾藤",
-    "correct": "钩藤",
-    "category": "形似",
-    "note": "钩藤（Uncaria rhynchophylla）—'钩'误为'勾'"
+    "wrong": "戒",
+    "correct": "戎",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戎 易被误识别为 戒（三级通用）"
+  },
+  {
+    "wrong": "戎",
+    "correct": "戒",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "戒 易被误识别为 戎（三级通用）"
+  },
+  {
+    "wrong": "棘",
+    "correct": "戟",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "戟 易被误识别为 棘（一级高危）"
+  },
+  {
+    "wrong": "搏",
+    "correct": "抟",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "抟 易被误识别为 搏（一级高危）"
+  },
+  {
+    "wrong": "抟",
+    "correct": "搏",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "搏 易被误识别为 抟（一级高危）"
+  },
+  {
+    "wrong": "俭",
+    "correct": "敛",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "敛 易被误识别为 俭（二级中频）"
+  },
+  {
+    "wrong": "撒",
+    "correct": "散",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "散 易被误识别为 撒（二级中频）"
+  },
+  {
+    "wrong": "彷",
+    "correct": "方",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "方 易被误识别为 彷（三级通用）"
+  },
+  {
+    "wrong": "元",
+    "correct": "无",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "无 易被误识别为 元（三级通用）"
+  },
+  {
+    "wrong": "即",
+    "correct": "既",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "既 易被误识别为 即（三级通用）"
+  },
+  {
+    "wrong": "曰",
+    "correct": "日",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "日 易被误识别为 曰（三级通用）"
+  },
+  {
+    "wrong": "目",
+    "correct": "日",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "日 易被误识别为 目（三级通用）"
+  },
+  {
+    "wrong": "朋",
+    "correct": "明",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "明 易被误识别为 朋（三级通用）"
+  },
+  {
+    "wrong": "日",
+    "correct": "曰",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "曰 易被误识别为 日（三级通用）"
+  },
+  {
+    "wrong": "存",
+    "correct": "有",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "有 易被误识别为 存（三级通用）"
+  },
+  {
+    "wrong": "末",
+    "correct": "未",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "未 易被误识别为 末（一级高危）"
+  },
+  {
+    "wrong": "未",
+    "correct": "末",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "末 易被误识别为 未（一级高危）"
+  },
+  {
+    "wrong": "补",
+    "correct": "朴",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "朴 易被误识别为 补（一级高危）"
+  },
+  {
+    "wrong": "枚",
+    "correct": "枝",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "枝 易被误识别为 枚（一级高危）"
+  },
+  {
+    "wrong": "拓",
+    "correct": "柘",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "柘 易被误识别为 拓（一级高危）"
+  },
+  {
+    "wrong": "柱",
+    "correct": "桂",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "桂 易被误识别为 柱（一级高危）"
+  },
+  {
+    "wrong": "藁",
+    "correct": "槁",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "槁 易被误识别为 藁（一级高危）"
+  },
+  {
+    "wrong": "药",
+    "correct": "樂",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "樂 易被误识别为 药（三级通用）"
+  },
+  {
+    "wrong": "上",
+    "correct": "止",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "止 易被误识别为 上（二级中频）"
+  },
+  {
+    "wrong": "止",
+    "correct": "正",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "正 易被误识别为 止（二级中频）"
+  },
+  {
+    "wrong": "荡",
+    "correct": "汤",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "汤 易被误识别为 荡（三级通用）"
+  },
+  {
+    "wrong": "泻",
+    "correct": "泄",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "泄 易被误识别为 泻（二级中频）"
+  },
+  {
+    "wrong": "泄",
+    "correct": "泻",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "泻 易被误识别为 泄（二级中频）"
+  },
+  {
+    "wrong": "痰",
+    "correct": "淡",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "淡 易被误识别为 痰（二级中频）"
+  },
+  {
+    "wrong": "青",
+    "correct": "清",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "清 易被误识别为 青（二级中频）"
+  },
+  {
+    "wrong": "湿",
+    "correct": "温",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "温 易被误识别为 湿（二级中频）"
+  },
+  {
+    "wrong": "温",
+    "correct": "湿",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "湿 易被误识别为 温（二级中频）"
+  },
+  {
+    "wrong": "搜",
+    "correct": "溲",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "溲 易被误识别为 搜（二级中频）"
+  },
+  {
+    "wrong": "弱",
+    "correct": "溺",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "溺 易被误识别为 弱（二级中频）"
+  },
+  {
+    "wrong": "炙",
+    "correct": "灸",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "灸 易被误识别为 炙（一级高危）"
+  },
+  {
+    "wrong": "灸",
+    "correct": "炙",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "炙 易被误识别为 灸（一级高危）"
+  },
+  {
+    "wrong": "势",
+    "correct": "热",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "热 易被误识别为 势（二级中频）"
+  },
+  {
+    "wrong": "躁",
+    "correct": "燥",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "燥 易被误识别为 躁（二级中频）"
+  },
+  {
+    "wrong": "其",
+    "correct": "甚",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "甚 易被误识别为 其（三级通用）"
+  },
+  {
+    "wrong": "升",
+    "correct": "生",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "生 易被误识别为 升（二级中频）"
+  },
+  {
+    "wrong": "疽",
+    "correct": "疸",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "疸 易被误识别为 疽（二级中频）"
+  },
+  {
+    "wrong": "疸",
+    "correct": "疽",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "疽 易被误识别为 疸（二级中频）"
+  },
+  {
+    "wrong": "雍",
+    "correct": "痈",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "痈 易被误识别为 雍（二级中频）"
+  },
+  {
+    "wrong": "淡",
+    "correct": "痰",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "痰 易被误识别为 淡（二级中频）"
+  },
+  {
+    "wrong": "痺",
+    "correct": "痹",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "痹 易被误识别为 痺（二级中频）"
+  },
+  {
+    "wrong": "萎",
+    "correct": "痿",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "痿 易被误识别为 萎（二级中频）"
+  },
+  {
+    "wrong": "差",
+    "correct": "瘥",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "瘥 易被误识别为 差（二级中频）"
+  },
+  {
+    "wrong": "徵",
+    "correct": "癥",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "癥 易被误识别为 徵（二级中频）"
+  },
+  {
+    "wrong": "日",
+    "correct": "目",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "目 易被误识别为 日（三级通用）"
+  },
+  {
+    "wrong": "如",
+    "correct": "知",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "知 易被误识别为 如（三级通用）"
+  },
+  {
+    "wrong": "右",
+    "correct": "石",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "石 易被误识别为 右（三级通用）"
+  },
+  {
+    "wrong": "密",
+    "correct": "秘",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "秘 易被误识别为 密（三级通用）"
+  },
+  {
+    "wrong": "径",
+    "correct": "经",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "经 易被误识别为 径（二级中频）"
+  },
+  {
+    "wrong": "洛",
+    "correct": "络",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "络 易被误识别为 洛（二级中频）"
+  },
+  {
+    "wrong": "姜",
+    "correct": "羌",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "羌 易被误识别为 姜（一级高危）"
+  },
+  {
+    "wrong": "者",
+    "correct": "老",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "老 易被误识别为 者（三级通用）"
+  },
+  {
+    "wrong": "老",
+    "correct": "者",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "者 易被误识别为 老（三级通用）"
+  },
+  {
+    "wrong": "蓍",
+    "correct": "耆",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "耆 易被误识别为 蓍（一级高危）"
+  },
+  {
+    "wrong": "帐",
+    "correct": "胀",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "胀 易被误识别为 帐（二级中频）"
+  },
+  {
+    "wrong": "涨",
+    "correct": "胀",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "胀 易被误识别为 涨（二级中频）"
+  },
+  {
+    "wrong": "脈",
+    "correct": "脉",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "脉 易被误识别为 脈（二级中频）"
+  },
+  {
+    "wrong": "藏",
+    "correct": "脏",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "脏 易被误识别为 藏（二级中频）"
+  },
+  {
+    "wrong": "腐",
+    "correct": "腑",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "腑 易被误识别为 腐（二级中频）"
+  },
+  {
+    "wrong": "萸",
+    "correct": "臾",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "臾 易被误识别为 萸（一级高危）"
+  },
+  {
+    "wrong": "勺",
+    "correct": "芍",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "芍 易被误识别为 勺（一级高危）"
+  },
+  {
+    "wrong": "弓",
+    "correct": "芎",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "芎 易被误识别为 弓（一级高危）"
+  },
+  {
+    "wrong": "苓",
+    "correct": "芩",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "芩 易被误识别为 苓（一级高危）"
+  },
+  {
+    "wrong": "茋",
+    "correct": "芪",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "芪 易被误识别为 茋（一级高危）"
+  },
+  {
+    "wrong": "菀",
+    "correct": "苑",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "苑 易被误识别为 菀（一级高危）"
+  },
+  {
+    "wrong": "芩",
+    "correct": "苓",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "苓 易被误识别为 芩（一级高危）"
+  },
+  {
+    "wrong": "苦",
+    "correct": "若",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "若 易被误识别为 苦（三级通用）"
+  },
+  {
+    "wrong": "若",
+    "correct": "苦",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "苦 易被误识别为 若（三级通用）"
+  },
+  {
+    "wrong": "芪",
+    "correct": "茋",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "茋 易被误识别为 芪（一级高危）"
+  },
+  {
+    "wrong": "樂",
+    "correct": "药",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "药 易被误识别为 樂（三级通用）"
+  },
+  {
+    "wrong": "苑",
+    "correct": "菀",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "菀 易被误识别为 苑（一级高危）"
+  },
+  {
+    "wrong": "昌",
+    "correct": "菖",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "菖 易被误识别为 昌（一级高危）"
+  },
+  {
+    "wrong": "痿",
+    "correct": "萎",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "萎 易被误识别为 痿（二级中频）"
+  },
+  {
+    "wrong": "臾",
+    "correct": "萸",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "萸 易被误识别为 臾（一级高危）"
+  },
+  {
+    "wrong": "曷",
+    "correct": "葛",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "葛 易被误识别为 曷（一级高危）"
+  },
+  {
+    "wrong": "浦",
+    "correct": "蒲",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "蒲 易被误识别为 浦（一级高危）"
+  },
+  {
+    "wrong": "耆",
+    "correct": "蓍",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "蓍 易被误识别为 耆（一级高危）"
+  },
+  {
+    "wrong": "靳",
+    "correct": "蕲",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "蕲 易被误识别为 靳（一级高危）"
+  },
+  {
+    "wrong": "韭",
+    "correct": "薤",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "薤 易被误识别为 韭（一级高危）"
+  },
+  {
+    "wrong": "槁",
+    "correct": "藁",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "藁 易被误识别为 槁（一级高危）"
+  },
+  {
+    "wrong": "脏",
+    "correct": "藏",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "藏 易被误识别为 脏（二级中频）"
+  },
+  {
+    "wrong": "孽",
+    "correct": "蘖",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "蘖 易被误识别为 孽（一级高危）"
+  },
+  {
+    "wrong": "呼",
+    "correct": "虖",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "虖 易被误识别为 呼（二级中频）"
+  },
+  {
+    "wrong": "虗",
+    "correct": "虚",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "虚 易被误识别为 虗（二级中频）"
+  },
+  {
+    "wrong": "梢",
+    "correct": "蛸",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "蛸 易被误识别为 梢（一级高危）"
+  },
+  {
+    "wrong": "嫖",
+    "correct": "螵",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "螵 易被误识别为 嫖（一级高危）"
+  },
+  {
+    "wrong": "衂",
+    "correct": "衄",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "衄 易被误识别为 衂（二级中频）"
+  },
+  {
+    "wrong": "衍",
+    "correct": "行",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "行 易被误识别为 衍（二级中频）"
+  },
+  {
+    "wrong": "朴",
+    "correct": "补",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "补 易被误识别为 朴（一级高危）"
+  },
+  {
+    "wrong": "裹",
+    "correct": "裏",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "裏 易被误识别为 裹（一级高危）"
+  },
+  {
+    "wrong": "裏",
+    "correct": "裹",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "裹 易被误识别为 裏（一级高危）"
+  },
+  {
+    "wrong": "储",
+    "correct": "诸",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "诸 易被误识别为 储（三级通用）"
+  },
+  {
+    "wrong": "者",
+    "correct": "诸",
+    "category": "三级通用",
+    "level": "三级通用",
+    "note": "诸 易被误识别为 者（三级通用）"
+  },
+  {
+    "wrong": "燥",
+    "correct": "躁",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "躁 易被误识别为 燥（二级中频）"
+  },
+  {
+    "wrong": "辩",
+    "correct": "辨",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "辨 易被误识别为 辩（二级中频）"
+  },
+  {
+    "wrong": "辫",
+    "correct": "辨",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "辨 易被误识别为 辫（二级中频）"
+  },
+  {
+    "wrong": "辨",
+    "correct": "辩",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "辩 易被误识别为 辨（二级中频）"
+  },
+  {
+    "wrong": "逥",
+    "correct": "通",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "通 易被误识别为 逥（二级中频）"
+  },
+  {
+    "wrong": "耶",
+    "correct": "邪",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "邪 易被误识别为 耶（二级中频）"
+  },
+  {
+    "wrong": "厥",
+    "correct": "阙",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "阙 易被误识别为 厥（二级中频）"
+  },
+  {
+    "wrong": "妨",
+    "correct": "防",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "防 易被误识别为 妨（一级高危）"
+  },
+  {
+    "wrong": "昜",
+    "correct": "阳",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "阳 易被误识别为 昜（二级中频）"
+  },
+  {
+    "wrong": "隂",
+    "correct": "阴",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "阴 易被误识别为 隂（二级中频）"
+  },
+  {
+    "wrong": "咐",
+    "correct": "附",
+    "category": "一级高危",
+    "level": "一级高危",
+    "note": "附 易被误识别为 咐（一级高危）"
+  },
+  {
+    "wrong": "绛",
+    "correct": "降",
+    "category": "二级中频",
+    "level": "二级中频",
+    "note": "降 易被误识别为 绛（二级中频）"
   }
 ]

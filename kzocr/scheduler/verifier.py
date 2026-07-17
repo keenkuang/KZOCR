@@ -25,7 +25,12 @@ import numpy as np
 
 from kzocr.engine.types import GlyphVerdict
 from kzocr.engines import leakage as _leakage
-from kzocr.scheduler.cross_align import Divergence, DivergenceArbitration
+from kzocr.scheduler.cross_align import (
+    Divergence,
+    DivergenceArbitration,
+    load_confusion_keys,
+    load_confusion_phrases,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -216,12 +221,89 @@ class ConfusionSetDetector:
         for wrong, correct in self.confusion_set.items():
             if wrong in text:
                 return GlyphVerdict(
-                    status="UNKNOWN",
+                    status="RARE",
                     confidence=0.6,
                     details=f"confusion;wrong={wrong};correct={correct}",
                     detector_name=self.name,
+                    force_review=True,
                 )
         return None
+
+
+class ConfusionKeyPresenceDetector:
+    """Layer1 前置静态筛查（零算力，最先执行）：OCR 输出含一级高危基准字 → 强制 M4 复核。
+
+    Option B（采纳 + 仅送复核，不阻断主流程）：返回 `status="RARE"`（文本照常采纳）
+    且 `force_review=True`（打标送人工复核队列）。与 orchestrator「视觉仲裁属增强，
+    绝不阻断主流程」原则一致——高频正确字（附子/桂枝/黄芪…）不会被卡在 pending。
+
+    仅对"一级高危"字符无条件强制（SPEC#1 的"强制复核"语义）。二/三级字符不 blanket 强制，
+    交由跨引擎分歧 + Box-Guided VL 拦截——否则日/目、人/入、土/士等高频通用字会淹没 M4 队列。
+    基准字（correct）与误认字（wrong）都纳入 key 集：两者皆为高风险字形。
+    """
+
+    name = "ConfusionKeyPresence"
+    priority = 45
+
+    def __init__(self, confusion_keys: dict | None = None) -> None:
+        # confusion_keys: char -> level（"一级高危"/"二级中频"/"三级通用"）
+        self.confusion_keys = confusion_keys or {}
+        self._l1 = {ch for ch, lvl in self.confusion_keys.items() if lvl == "一级高危"}
+        self._enabled = bool(self._l1)
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def check(self, text: str, context: DetectorContext) -> Optional[GlyphVerdict]:
+        if not self._enabled or not text:
+            return None
+        hits = sorted({ch for ch in text if ch in self._l1})
+        if not hits:
+            return None
+        return GlyphVerdict(
+            status="RARE",
+            confidence=0.55,
+            details=f"confusion_key_presence;chars={''.join(hits)};强制M4",
+            detector_name=self.name,
+            force_review=True,
+        )
+
+
+class PhraseErrorDetector:
+    """Layer2 语义级错词对筛查：扫描 OCR 输出命中错词对 → 标记 M6 待语义校验。
+
+    词组错（黄苓→黄芩、吴萸臾→吴茱萸…）多为同音/语义错，需中医语义 LLM 判定上下文是否合理，
+    故不在文本级直接放行/否决，而是路由到 M6 队列（details 标 `m6=待语义校验`）。
+    无 M6 LLM 时，该标记作为复核队列中的语义待办项。
+    """
+
+    name = "PhraseErrorDetector"
+    priority = 41
+
+    def __init__(self, phrases: list | None = None) -> None:
+        self.phrases = phrases or []
+        self._enabled = bool(self.phrases)
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def check(self, text: str, context: DetectorContext) -> Optional[GlyphVerdict]:
+        if not self._enabled or not text:
+            return None
+        hits = [f"{row.get('wrong')}→{row.get('correct')}"
+                for row in self.phrases
+                if isinstance(row, dict) and row.get("wrong") and row["wrong"] in text]
+        if not hits:
+            return None
+        return GlyphVerdict(
+            status="RARE",
+            confidence=0.5,
+            details="phrase_error;m6=待语义校验;" + ";".join(hits[:8]),
+            detector_name=self.name,
+            force_review=True,
+        )
 
 
 class TermKBMatcher:
@@ -331,6 +413,12 @@ class GlyphVerifier:
                 confusion_set[wrong] = correct
         detectors.append(ConfusionSetDetector(confusion_set))
 
+        # ConfusionKeyPresenceDetector（Layer1 基准字侧预筛，一级高危强制 M4 — SPEC#1）
+        detectors.append(ConfusionKeyPresenceDetector(load_confusion_keys()))
+
+        # PhraseErrorDetector（Layer2 词组错扫描，标记 M6 待语义校验）
+        detectors.append(PhraseErrorDetector(load_confusion_phrases()))
+
         # TermKBMatcher：rare_allowlist.json（list）+ variant_map.json（dict）
         rare_raw = _load_resource("rare_allowlist.json")
         rare_allowlist: set = set()
@@ -359,6 +447,7 @@ class GlyphVerifier:
         has_unknown = False
         has_fail = False
         has_uncertain = False
+        has_force_review = False
         chain: list[str] = []
 
         for detector in self.detectors:
@@ -366,15 +455,29 @@ class GlyphVerifier:
             if verdict is None:
                 continue
             chain.append(detector.name)
+            if getattr(verdict, "force_review", False):
+                has_force_review = True
 
-            # 短路：PASS 或 critical FAIL 直接返回
+            # 短路：PASS 或 critical FAIL 直接返回（保留已累积的 force_review）
             if verdict.status == "PASS":
                 self.last_detector_chain = chain
-                return verdict
+                return GlyphVerdict(
+                    status="PASS",
+                    confidence=verdict.confidence,
+                    details=verdict.details,
+                    detector_name=verdict.detector_name,
+                    force_review=has_force_review or bool(verdict.force_review),
+                )
             if verdict.status == "FAIL":
                 if verdict.details and "severity=critical" in verdict.details:
                     self.last_detector_chain = chain
-                    return verdict
+                    return GlyphVerdict(
+                        status="FAIL",
+                        confidence=verdict.confidence,
+                        details=verdict.details,
+                        detector_name=verdict.detector_name,
+                        force_review=has_force_review or bool(verdict.force_review),
+                    )
                 has_fail = True
 
             if verdict.status == "RARE":
@@ -393,6 +496,7 @@ class GlyphVerifier:
                 confidence=1.0,
                 details="all_detectors_passed",
                 detector_name="GlyphVerifier",
+                force_review=has_force_review,
             )
         if has_rare and not has_fail and not has_unknown and not has_uncertain:
             return GlyphVerdict(
@@ -400,6 +504,7 @@ class GlyphVerifier:
                 confidence=0.8,
                 details="rare_terms_detected",
                 detector_name="GlyphVerifier",
+                force_review=has_force_review,
             )
         if has_uncertain and not has_fail and not has_unknown:
             return GlyphVerdict(
@@ -407,6 +512,7 @@ class GlyphVerifier:
                 confidence=0.5,
                 details=f"has_uncertain={has_uncertain},has_rare={has_rare}",
                 detector_name="GlyphVerifier",
+                force_review=has_force_review,
             )
         # FAIL/UNKNOWN 不在此处做最终裁决，由编排循环判定是否降级
         return GlyphVerdict(
@@ -414,6 +520,7 @@ class GlyphVerifier:
             confidence=0.5,
             details=f"has_fail={has_fail},has_unknown={has_unknown}",
             detector_name="GlyphVerifier",
+            force_review=has_force_review,
         )
 
     def verify_with_vision(
@@ -467,6 +574,7 @@ class GlyphVerifier:
                     f"{';vision_recheck_passed' if vision_verdict and vision_verdict.status == 'PASS' else ''}"
                 ),
                 detector_name="GlyphVerifier",
+                force_review=text_verdict.force_review,
             )
 
         # 无视觉适配器时保留 UNCERTAIN（让编排器决定：不确定页可人工复核）
@@ -485,6 +593,7 @@ class GlyphVerifier:
             confidence=0.3,
             details=";".join(fail_reasons) + f";text_detail={text_verdict.details or ''}",
             detector_name="GlyphVerifier+Vision",
+            force_review=text_verdict.force_review,
         )
 
 
@@ -496,6 +605,13 @@ class GlyphVerifier:
 _ARB_CONF_GATE = 0.65   # conf<0.65 → 强制人工
 _ARB_BOX_PAD = 8        # 裁框外扩 8px（防墨迹晕染）
 _ARB_MIN_BOX = 12       # 框边长下限（px），过小跳过 VL 强制人工
+
+# SPEC#2：Box-Guided VL 内置重点形近清单（一级高危，强化模型区分意识，墨迹磨损也不混淆）
+_ARB_KEY_CONFUSION_HINTS = (
+    "炙≠灸", "芩≠苓", "未≠末", "己≠已≠巳", "朴≠补", "萸≠臾", "加≠剂",
+    "菀≠苑", "抟≠搏", "裹≠裏", "蘖≠孽", "附≠咐", "茋≠芪", "桂≠柱",
+    "芍≠勺", "芎≠弓", "羌≠姜", "藁≠槁", "菖≠昌", "蒲≠浦", "防≠妨",
+)
 
 
 def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
@@ -510,7 +626,10 @@ def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
         for wrong, correct in confusion_set.items():
             if wrong in (a, b) or correct in (a, b):
                 confusion_hints.append(f"{wrong}≠{correct}")
-    confusion_line = "；".join(confusion_hints[:12]) if confusion_hints else "（无）"
+    # 内置一级高危重点清单始终存在，强化 VL 区分意识（SPEC#2）
+    builtin = "；".join(_ARB_KEY_CONFUSION_HINTS)
+    extra = "；".join(confusion_hints[:12])
+    confusion_line = builtin + ("；" + extra if extra else "")
 
     if mode == "box_guided":
         head = (
