@@ -500,7 +500,7 @@ def orchestrate_book(
             char_count=char_count, latency_ms=last_latency,
         )
         db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
-        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN"):
+        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") or getattr(verdict, "force_review", False):
             db.record_anomaly(page_num, verdict=verdict, detector_chain=verifier.last_detector_chain)
         db.update_import(
             page_num, status="imported" if verdict.status in ("PASS", "RARE") else "pending", count=1,

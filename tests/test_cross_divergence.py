@@ -136,8 +136,8 @@ def _read_db(book_code, db_dir):
 def test_cross_align_writes_on_tier1_fail_tier3_success(tmp_path):
     """Tier1 触发毒性剂量 FAIL → Tier3 不同文本（剂量数字分歧）→ cross_divergence 落库。
 
-    注：Tier3 文本含一级高危基准字「附」（附子→附，SPEC#1 强制 M4 复核），按设计不自动采纳、
-    转入人工复核队列（pending）；但跨引擎剂量分歧仍须落库供复核。
+    Tier3 文本含一级高危基准字「附」（附子→附，SPEC#1 强制 M4）：按 Option B 设计，
+    文本**照常采纳**，同时打标送 M4 复核队列（force_review，不阻断主流程）。
     """
     reg = _reg(
         tier1_pages=_text_pages("附子20g"),   # ToxinDose FAIL(critical)
@@ -145,8 +145,8 @@ def test_cross_align_writes_on_tier1_fail_tier3_success(tmp_path):
     )
     cfg = StubConfig(db_dir=str(tmp_path))
     result = orchestrate_book("/fp", "bkc1", cfg, reg)
-    # 含一级高危字 → 强制 M4（不自动采纳）
-    assert len(result.pages) == 0
+    # Option B：含一级高危字仍采纳文本，仅送 M4 复核
+    assert len(result.pages) == 1
 
     rows = _read_db("bkc1", str(tmp_path))
     assert len(rows) >= 1
@@ -154,6 +154,12 @@ def test_cross_align_writes_on_tier1_fail_tier3_success(tmp_path):
     assert any(r["priority"] == "high" for r in rows)
     # 引擎标签正确
     assert any(r["engine_a"] == "t1" and r["engine_b"] == "t3" for r in rows)
+
+    # 一级高危字 → 强制 M4（force_review 进复核队列，detector=ConfusionKeyPresence）
+    db = BookDB("bkc1", db_dir=str(tmp_path))
+    anomalies = db.get_anomalies()
+    db.close()
+    assert any("ConfusionKeyPresence" in (a["detector_chain"] or "") for a in anomalies)
 
 
 def test_high_priority_divergence_routed_to_review_queue(tmp_path):

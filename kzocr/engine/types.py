@@ -27,6 +27,7 @@ class GlyphVerdict:
     confidence: float
     details: Optional[str] = None      # 结构化格式：`key=val;key=val`
     detector_name: str = ""
+    force_review: bool = False         # 强制送人工复核（采纳文本但不阻断主流程，Option B）
 
 
 @dataclass

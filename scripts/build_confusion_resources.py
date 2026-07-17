@@ -162,7 +162,7 @@ def build():
     # Layer1 条目
     layer1 = []
     for (correct, wrong), levels in sorted(l1_groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-        top = min(levels, key=lambda l: PRIO[l])
+        top = min(levels, key=lambda lv: PRIO[lv])
         name = LEVEL_NAME[top]
         layer1.append({
             "wrong": wrong, "correct": correct,
@@ -214,11 +214,6 @@ def build():
         if len(w) == 1 and len(c) == 1:
             if (c, w) not in l1_groups:  # 单字形似且用户表未覆盖 → Layer1
                 l1_groups.setdefault((c, w), set()).add("L2")
-                layer1.append({
-                    "wrong": w, "correct": c,
-                    "category": "二级中频", "level": "二级中频",
-                    "note": row.get("note", f"{c} 易被误识别为 {w}（二级中频，历史curated）"),
-                })
         else:
             layer2_pairs.add((c, w))
 

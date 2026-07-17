@@ -88,7 +88,7 @@ def test_char_count_spike_needs_neighbors():
 def test_confusion_hit():
     det = ConfusionSetDetector({"我术": "莪术"})
     v = det.check("误作我术", _ctx())
-    assert v is not None and v.status == "UNKNOWN"
+    assert v is not None and v.status == "RARE" and v.force_review is True
 
 
 def test_confusion_loader_skips_correct_entries():
@@ -100,13 +100,16 @@ def test_confusion_loader_skips_correct_entries():
 
 
 def test_confusion_resource_filters_correct_entries():
-    # 真实资源含 category=='正确' 条目，加载后不应导致正常文本判 UNKNOWN
+    # 真实资源含 category=='正确' 条目，加载后不应导致正常文本判 UNKNOWN（阻断）
     ver = GlyphVerifier()
     det = next(d for d in ver.detectors if d.name == "ConfusionSetDetector")
     assert det.enabled  # 资源存在应启用
-    # 构造一条"正确"条目词（如"黄芪"在资源中 category 正确）不应触发
+    # 构造一条"正确"条目词（如"黄芪"在资源中 category 正确）不应被阻断（UNKNOWN）
+    # 注：双向拦截改由 ConfusionKeyPresence（非阻断 force_review）承担，
+    # 此处仅保证 ConfusionSetDetector 不对正确文本判 UNKNOWN。
     ctx = _ctx()
-    assert det.check("黄芪常用于补益剂", ctx) is None
+    v = det.check("黄芪常用于补益剂", ctx)
+    assert v is None or v.status != "UNKNOWN"
 
 
 # ── TermKBMatcher ──
@@ -203,6 +206,12 @@ def test_verifier_disabled_detectors_filtered():
 def test_verifier_real_resource_verify_runs():
     # 真实资源加载的 verify 可正常执行（不含危险性文本时应 PASS/RARE）
     ver = GlyphVerifier()
-    assert len(ver.detectors) == 5
+    # 检测器链：毒剂/泄漏/字符尖峰/形近集/基准字前置/词组/术语库
+    expected = {
+        "ToxinDoseDetector", "LeakageDetector", "CharCountSpikeDetector",
+        "ConfusionSetDetector", "ConfusionKeyPresence", "PhraseErrorDetector",
+        "TermKBMatcher",
+    }
+    assert expected.issubset({d.name for d in ver.detectors})
     out = ver.verify("黄芪补气，方用萆薢分清饮", _ctx())
     assert out.status in ("PASS", "RARE", "UNKNOWN")
