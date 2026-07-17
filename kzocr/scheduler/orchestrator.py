@@ -132,25 +132,29 @@ def _run_success_cross_check(
     page_layout: Optional[PageLayout],
     max_time_per_page_ms: int,
     engine_a: str = "tier1",
-) -> None:
+) -> bool:
     """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
 
     纯增强（try/except 不阻断主流程）；无 Tier2 候选时静默跳过（本机无 GPU/密钥时正常行为）。
     High 优先分歧经 record_anomaly 入 M4 队列；allow_cloud_vision 时可选调视觉仲裁。
+
+    Returns:
+        True  = 成功运行且无分歧（共识一致页），供调用方做共识错误抽样
+        False = 未运行 / 无 Tier2 / 文本为空 / 有分歧
     """
     try:
         tier2 = _safe_select_candidates(
             scheduler, registry, 2, page_input, budget, page_layout, overrides,
         )
         if not tier2:
-            return  # 无 Tier2 候选（本机无 GPU/密钥），静默跳过
+            return False  # 无 Tier2 候选（本机无 GPU/密钥），静默跳过
         timeout_cross = min(60000, max_time_per_page_ms) / 1000
         cross_result = _run_single_engine_with_timeout(
             tier2[0], page_input, timeout_cross,
         )
         cross_text = getattr(cross_result, "text", "") or ""
         if not cur_text or not cross_text:
-            return
+            return False
 
         divs = run_cross_align(
             page_num, cur_text, cross_text,
@@ -158,7 +162,7 @@ def _run_success_cross_check(
             engine_a=engine_a, engine_b=tier2[0].meta.name,
         )
         if not divs:
-            return
+            return True  # 无分歧 → 共识一致页
 
         db.write_cross_divergences(
             page_no=page_num, divs=divs,
@@ -179,8 +183,62 @@ def _run_success_cross_check(
             )
             # TODO: allow_cloud_vision 时可调 arbitrate_divergence 对 high 分歧执行 VL 仲裁
             # 复用现有逻辑（orchestrator.py:437-454），record_anomaly 后调用仲裁更新分歧状态
+        return False  # 有分歧 → 非共识页
     except Exception as exc:
         _logger.warning("[orchestrator] success cross-check failed page=%d: %s", page_num, exc)
+        return False
+
+
+def _sample_consensus_error(
+    page_num: int,
+    text: str,
+    page_img,
+    vision_adapter: Optional[VisionRecheckAdapter],
+    db: BookDB,
+    sample_rate: float,
+    bucket: Optional[MultiTokenRateLimiter],
+) -> None:
+    """共识一致页抽样送视觉仲裁：覆盖「两引擎同错」盲区。
+
+    对两引擎文本一致的页面，以 sample_rate 概率抽样，调 VL 模型做整页视觉核对。
+    - 有 VL 且图像可用 → 执行 recheck，FAIL/UNKNOWN 结果入 ConsensusErrorArbitration 队列
+    - 无 VL / 无图像 → 记录抽样命中标记（no_vision_skip），留待人工复核
+    """
+    import random
+
+    if sample_rate <= 0 or not text:
+        return
+    if random.random() >= sample_rate:
+        return  # 未中签
+
+    if vision_adapter is None or page_img is None:
+        db.record_anomaly(
+            page_num,
+            GlyphVerdict(
+                status="UNKNOWN", confidence=0.0,
+                details="consensus_sampled;no_vision_skip",
+            ),
+            detector_chain=["ConsensusErrorArbitration"],
+        )
+        return
+
+    try:
+        if bucket is not None:
+            bucket.acquire()
+        verdict = vision_adapter.recheck(
+            text=text, page_img=page_img,
+            engine_label="consensus-check",
+        )
+        if verdict.status in ("FAIL", "UNKNOWN"):
+            db.record_anomaly(
+                page_num, verdict,
+                detector_chain=["ConsensusErrorArbitration"],
+            )
+    except Exception as exc:
+        _logger.warning(
+            "[orchestrator] consensus_sample vision failed page=%d: %s",
+            page_num, exc,
+        )
 
 
 def _record_engine_usage(
@@ -455,13 +513,22 @@ def orchestrate_book(
                 # 对成功页追加 Tier2 引擎做交叉验证，捕获 GlyphVerifier 抓不到的字符级错误
                 # （因中文形近字 GlyphVerifier 无法判对错，需要双引擎比对）。
                 if getattr(overrides, "enable_cross_check", False) and not budget.exhausted:
-                    _run_success_cross_check(
+                    is_consensus = _run_success_cross_check(
                         page_num, cur_text, page_input,
                         scheduler, registry, db,
                         confusion_set, budget, overrides, page_layout,
                         budget.max_time_per_page_ms,
                         engine_a=t1_engine_name,
                     )
+                    # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）
+                    if is_consensus and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
+                        _sample_consensus_error(
+                            page_num, cur_text,
+                            page_input.img if page_input.img is not None else None,
+                            _get_vision_adapter(), db,
+                            overrides.consensus_sample_rate,
+                            _get_vision_bucket(),
+                        )
 
                 trace.extend(page_trace)
                 continue

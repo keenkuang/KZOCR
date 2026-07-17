@@ -80,6 +80,7 @@ class EngineOverrides:
     backoff_fail_rate: float = 0.5  # 即时失败率 > 此阈值时，对该引擎暂停调度
     rate_limited_until: dict[str, float] = field(default_factory=dict)
     enable_cross_check: bool = False  # 成功页跨引擎采样比对（默认关；需 Tier2 引擎可用）
+    consensus_sample_rate: float = 0.0  # 共识一致页抽样率（0.0=关；0.1=10%；仅 enable_cross_check 时生效）
 
 
 # ── 评分与权重（§4.2 / §4.3）──

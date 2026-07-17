@@ -279,3 +279,64 @@ def test_cross_check_disabled_by_default(tmp_path):
     orchestrate_book("/fp", "bkc7", cfg, reg)  # 默认 overrides=None，enable_cross_check 为 False
     rows = _read_db("bkc7", str(tmp_path))
     assert rows == [], "默认不启用 cross-check，即使 Tier2 可见也应无分歧"
+
+
+def _read_anomalies(book_code, db_dir):
+    """从 BookDB 读取所有异常记录。"""
+    db = BookDB(book_code, db_dir=db_dir)
+    rows = db.get_anomalies()
+    db.close()
+    return rows
+
+
+# ── 共识错误抽样 ──
+def test_consensus_sampling_triggers_on_consensus_page(tmp_path, monkeypatch):
+    """共识一致页 + sample_rate=1.0 → 抽样触发，anomaly 含 ConsensusErrorArbitration。"""
+    # 强制 random.random 返回 0（永远中签）
+    monkeypatch.setattr("random.random", lambda: 0.0)
+    # 共识页：Tier1 PASS + Tier2 返回完全相同文本
+    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"))
+    reg.register_adapter(
+        AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
+        EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补气，方用萆薢分清饮")]),
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    overrides = EngineOverrides(enable_cross_check=True, consensus_sample_rate=1.0)
+    orchestrate_book("/fp", "bkc8", cfg, reg, overrides=overrides)
+
+    anomalies = _read_anomalies("bkc8", str(tmp_path))
+    assert len(anomalies) >= 1
+    assert any("ConsensusErrorArbitration" in (a["detector_chain"] or "") for a in anomalies)
+
+
+def test_consensus_sampling_skipped_when_rate_zero(tmp_path):
+    """consensus_sample_rate=0.0（默认）→ 不触发抽样。"""
+    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"))
+    reg.register_adapter(
+        AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
+        EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补气，方用萆薢分清饮")]),
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    overrides = EngineOverrides(enable_cross_check=True, consensus_sample_rate=0.0)
+    orchestrate_book("/fp", "bkc9", cfg, reg, overrides=overrides)
+
+    anomalies = _read_anomalies("bkc9", str(tmp_path))
+    consensus = [a for a in anomalies if "ConsensusErrorArbitration" in (a["detector_chain"] or "")]
+    assert len(consensus) == 0, "consensus_sample_rate=0 不应触发抽样"
+
+
+def test_consensus_sampling_skipped_when_divergence(tmp_path, monkeypatch):
+    """分歧页（Tier2 返回不同文本）→ 不触发抽样。"""
+    monkeypatch.setattr("random.random", lambda: 0.0)  # 100% 中签
+    reg = _reg(tier1_pages=_text_pages("黄芪补气"))
+    reg.register_adapter(
+        AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
+        EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补肾")]),  # 分歧：气↔肾
+    )
+    cfg = StubConfig(db_dir=str(tmp_path))
+    overrides = EngineOverrides(enable_cross_check=True, consensus_sample_rate=1.0)
+    orchestrate_book("/fp", "bkc10", cfg, reg, overrides=overrides)
+
+    anomalies = _read_anomalies("bkc10", str(tmp_path))
+    consensus = [a for a in anomalies if "ConsensusErrorArbitration" in (a["detector_chain"] or "")]
+    assert len(consensus) == 0, "分歧页不应触发共识抽样"
