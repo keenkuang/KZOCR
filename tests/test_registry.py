@@ -1,335 +1,409 @@
-"""E1 EngineRegistry 与 select_candidates 测试（v0.7 §3 / §4.3）。"""
+"""E1 EngineRegistry 测试（v0.7 §3）。"""
 
 from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from kzocr.engine.types import AdapterMeta, EngineConfig, ProbeResult
 from kzocr.engines.errors import SchedulerError
 from kzocr.scheduler.registry import (
     AVG_LATENCY_DEFAULT_MS,
+    BAYESIAN_C,
+    BAYESIAN_PRIOR,
     GLYPH_PASS_RATE_DEFAULT,
+    EngineRegistration,
     EngineRegistry,
-    select_candidates,
+    EngineStats,
+    _apply_event,
+    _bayesian_score,
+    _probe_one,
     probe_engines,
+    select_candidates,
 )
 
 
-def _meta(
-    name: str,
-    tier: int = 1,
-    requires_network: bool = False,
-    probe: dict | None = None,
-) -> AdapterMeta:
-    return AdapterMeta(
-        name=name,
-        label=name,
-        tier=tier,
-        requires_network=requires_network,
-        probe=probe or {},
+def _am(name: str = "test", tier: int = 1, **kw) -> AdapterMeta:
+    return AdapterMeta(name=name, label=name, tier=tier, kind="page", **kw)
+
+
+def _reg(**kw) -> EngineRegistration:
+    """快速构造注册项（config 自动填入默认值）。"""
+    kw.setdefault("config", EngineConfig())
+    if "meta" not in kw:
+        kw["meta"] = _am()
+    if "stats" not in kw:
+        kw["stats"] = EngineStats()
+    return EngineRegistration(**kw)
+
+
+# ──────── EngineStats ────────
+
+class TestEngineStats:
+    def test_default_values(self):
+        s = EngineStats()
+        assert s.total_calls == 0
+        assert s.total_latency_ms == 0
+        assert s.glyph_pass_count == 0
+        assert s.last_error is None
+
+    def test_recent_avg_latency_empty(self):
+        assert EngineStats().recent_avg_latency_ms == 0.0
+
+    def test_recent_avg_latency(self):
+        s = EngineStats(rolling_latencies=[100.0, 200.0])
+        assert s.recent_avg_latency_ms == 150.0
+
+    def test_recent_fail_rate_empty(self):
+        assert EngineStats().recent_fail_rate == 0.0
+
+    def test_recent_fail_rate_calc(self):
+        s = EngineStats(rolling_failures=[True, False, True])
+        assert s.recent_fail_rate == pytest.approx(1.0 / 3.0)
+
+    def test_decay_fresh(self):
+        assert EngineStats().decay() == 1.0
+
+    def test_decay_past(self):
+        s = EngineStats(last_seen=time.time() - 86400 * 7)
+        assert s.decay(half_life_days=7.0) == pytest.approx(0.5, abs=0.001)
+
+    def test_repr_masks_last_error(self):
+        s = EngineStats(last_error="secret/path/key")
+        assert "<redacted>" in repr(s)
+        assert "secret" not in repr(s)
+
+    def test_repr_no_error(self):
+        s = EngineStats()
+        assert "None" in repr(s)
+
+
+# ──────── EngineRegistration ────────
+
+class TestEngineRegistration:
+    def test_glyph_pass_rate_cold(self):
+        assert _reg().glyph_pass_rate == GLYPH_PASS_RATE_DEFAULT
+
+    def test_glyph_pass_rate_with_data(self):
+        r = _reg(stats=EngineStats(glyph_pass_count=8, glyph_fail_count=2))
+        assert r.glyph_pass_rate == 0.8
+
+    def test_glyph_pass_rate_rare_counts_as_pass(self):
+        r = _reg(stats=EngineStats(glyph_pass_count=5, glyph_rare_count=3, glyph_fail_count=2))
+        assert r.glyph_pass_rate == 0.8
+
+    def test_glyph_pass_rate_unknown_uncertain_no_pass(self):
+        r = _reg(stats=EngineStats(glyph_unknown_count=1, glyph_uncertain_count=1))
+        # total=2, pass+rare=0 → 0.0
+        assert r.glyph_pass_rate == 0.0
+
+    def test_avg_latency_cold(self):
+        r = _reg(stats=EngineStats(total_pages=0, total_latency_ms=0))
+        # total_latency_ms==0 → fallback
+        assert r.avg_latency_per_page_ms == AVG_LATENCY_DEFAULT_MS
+
+    def test_avg_latency_with_data(self):
+        r = _reg(stats=EngineStats(total_pages=10, total_latency_ms=20000))
+        assert r.avg_latency_per_page_ms == 2000.0
+
+    def test_repr_masks_config_and_adapter(self):
+        r = _reg(adapter=object())
+        rep = repr(r)
+        assert "<EngineConfig>" in rep
+        assert "<set>" in rep
+
+
+# ──────── EngineRegistry ────────
+
+class TestEngineRegistry:
+    def _r(self) -> EngineRegistry:
+        return EngineRegistry()
+
+    def test_register_and_get(self):
+        reg = _reg(meta=_am("a1"))
+        r = self._r()
+        r.register(reg)
+        assert r.get("a1") is reg
+
+    def test_get_nonexistent(self):
+        assert self._r().get("nonexistent") is None
+
+    def test_register_adapter(self):
+        r = self._r()
+        result = r.register_adapter(_am("a1"), EngineConfig())
+        assert r.get("a1") is result
+
+    def test_list(self):
+        r = self._r()
+        r.register_adapter(_am("a1"), EngineConfig())
+        r.register_adapter(_am("a2"), EngineConfig())
+        assert len(r.list()) == 2
+
+    def test_list_by_tier(self):
+        r = self._r()
+        t1 = r.register_adapter(_am("a1", tier=1), EngineConfig())
+        t2 = r.register_adapter(_am("a2", tier=2), EngineConfig())
+        assert r.list_by_tier(1) == [t1]
+        assert r.list_by_tier(2) == [t2]
+
+    def test_list_by_tier_excludes_unavailable(self):
+        r = self._r()
+        r.register_adapter(_am("a1", tier=1), EngineConfig(), status="UNAVAILABLE")
+        r.register_adapter(_am("a2", tier=1), EngineConfig(), status="HEALTHY")
+        assert len(r.list_by_tier(1)) == 1
+        assert len(r.list_by_tier(1, include_unavailable=True)) == 2
+
+    def test_mark_unavailable(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig())
+        r.mark_unavailable("a1")
+        assert reg.status == "UNAVAILABLE"
+
+    def test_mark_degraded(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig())
+        r.mark_degraded("a1")
+        assert reg.status == "DEGRADED"
+
+    def test_mark_healthy(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig(), status="UNAVAILABLE")
+        r.mark_healthy("a1")
+        assert reg.status == "HEALTHY"
+
+    def test_set_status_unregistered_raises(self):
+        with pytest.raises(SchedulerError, match="未注册"):
+            self._r().mark_unavailable("nonexistent")
+
+    def test_record_basic(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig())
+        r.record("a1", success=True, glyph="PASS", latency_ms=1000, pages=3)
+        assert reg.stats.total_calls == 1
+        assert reg.stats.total_pages == 3
+        assert reg.stats.total_latency_ms == 1000
+        assert reg.stats.glyph_pass_count == 1
+
+    def test_record_all_glyph_statuses(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig())
+        for g in ("PASS", "FAIL", "UNKNOWN", "RARE", "UNCERTAIN"):
+            r.record("a1", success=True, glyph=g)
+        assert reg.stats.glyph_pass_count == 1
+        assert reg.stats.glyph_fail_count == 1
+        assert reg.stats.glyph_unknown_count == 1
+        assert reg.stats.glyph_rare_count == 1
+        assert reg.stats.glyph_uncertain_count == 1
+
+    def test_record_failure_sets_error(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig())
+        r.record("a1", success=False, error="timeout")
+        assert reg.stats.last_error == "timeout"
+
+    def test_record_unregistered_raises(self):
+        with pytest.raises(SchedulerError, match="未注册"):
+            self._r().record("nonexistent", success=True)
+
+    def test_record_rolling_window(self):
+        r = self._r()
+        reg = r.register_adapter(_am("a1"), EngineConfig())
+        for i in range(105):
+            r.record("a1", success=True, latency_ms=float(i))
+        assert len(reg.stats.rolling_latencies) == 100
+
+    def test_persist_empty_dir(self):
+        r = self._r()
+        r.register_adapter(_am("a1"), EngineConfig())
+        r.persist_benchmarks()  # should not crash
+
+    def test_persist_and_load_roundtrip(self, tmp_path):
+        bdir = str(tmp_path / "bench")
+        r = EngineRegistry(benchmark_dir=bdir)
+        r.register_adapter(_am("paddleocr"), EngineConfig())
+        r.record("paddleocr", success=True, glyph="PASS", latency_ms=4500)
+        r.persist_benchmarks()
+        assert (Path(bdir) / "paddleocr.ndjson").exists()
+        # 加载回新 registry
+        r2 = EngineRegistry(benchmark_dir=bdir)
+        r2.register(_reg(meta=_am("paddleocr")))
+        r2.load_benchmarks()
+        s = r2.get("paddleocr").stats
+        assert s.total_calls == 1
+        assert s.total_latency_ms == 4500
+        assert s.glyph_pass_count == 1
+
+    def test_load_benchmarks_dir_not_exists(self):
+        EngineRegistry(benchmark_dir="/nonexistent/12345").load_benchmarks()
+
+    def test_load_benchmarks_skips_unregistered(self, tmp_path):
+        bdir = str(tmp_path / "bench")
+        Path(bdir).mkdir()
+        (Path(bdir) / "ghost.ndjson").write_text(
+            json.dumps({"engine": "ghost"}) + "\n", encoding="utf-8")
+        r = EngineRegistry(benchmark_dir=bdir)
+        r.load_benchmarks()
+        assert r.list() == []
+
+    def test_apply_event_none_reg(self):
+        _apply_event(None, {})  # should not crash
+
+
+# ──────── _bayesian_score ────────
+
+class TestBayesianScore:
+    def test_cold_start_finite(self):
+        assert _bayesian_score(_reg()) > 0
+
+    def test_with_data(self):
+        r = _reg(stats=EngineStats(
+            total_pages=10, total_latency_ms=10000,
+            glyph_pass_count=9, glyph_fail_count=1,
+        ))
+        assert _bayesian_score(r) > 0
+
+    def test_higher_pass_rate_wins(self):
+        s_hi = EngineStats(total_pages=10, total_latency_ms=10000,
+                            glyph_pass_count=9, glyph_fail_count=1)
+        s_lo = EngineStats(total_pages=10, total_latency_ms=10000,
+                            glyph_pass_count=5, glyph_fail_count=5)
+        assert _bayesian_score(_reg(stats=s_hi)) > _bayesian_score(_reg(stats=s_lo))
+
+    def test_formula_consistency(self):
+        r = _reg(stats=EngineStats(
+            total_pages=5, total_latency_ms=5000,
+            glyph_pass_count=4, glyph_fail_count=1,
+        ))
+        n, pr, lat = 5, 0.8, 1000.0
+        expected = (pr * n + BAYESIAN_C * BAYESIAN_PRIOR) / (n + BAYESIAN_C) * (1.0 / lat)
+        assert _bayesian_score(r) == pytest.approx(expected, rel=0.01)
+
+
+# ──────── select_candidates ────────
+
+def _mk(name: str, tier: int, pass_: int = 5, fail: int = 0,
+        latency_ms: int = 1000, status: str = "HEALTHY") -> EngineRegistration:
+    total = pass_ + fail
+    return _reg(
+        meta=_am(name, tier=tier),
+        stats=EngineStats(
+            total_pages=total, total_latency_ms=latency_ms * total,
+            glyph_pass_count=pass_, glyph_fail_count=fail,
+        ),
+        status=status,
     )
 
 
-def test_register_and_get():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig(api_key_env="X"))
-    assert reg.get("paddleocr") is not None
-    assert reg.get("missing") is None
+class TestSelectCandidates:
+    def test_tier_filter(self):
+        r = EngineRegistry()
+        a1 = _mk("a1", 1)
+        _mk("a2", 2)
+        r.register(a1)
+        r.register(_mk("a2", 2))
+        result = select_candidates(r, 1)
+        assert len(result) == 1
+        assert result[0].meta.name == "a1"
+
+    def test_excludes_unavailable(self):
+        r = EngineRegistry()
+        r.register(_mk("a1", 1, status="UNAVAILABLE"))
+        r.register(_mk("a2", 1))
+        assert len(select_candidates(r, 1)) == 1
+        assert len(select_candidates(r, 1, include_unavailable=True)) == 2
+
+    def test_prefer_speed(self):
+        r = EngineRegistry()
+        fast = _mk("fast", 1, latency_ms=100)
+        slow = _mk("slow", 1, latency_ms=500)
+        r.register(fast)
+        r.register(slow)
+        assert select_candidates(r, 1, prefer="speed")[0].meta.name == "fast"
+
+    def test_prefer_accuracy(self):
+        r = EngineRegistry()
+        r.register(_mk("hi", 1, pass_=9, fail=1))
+        r.register(_mk("lo", 1, pass_=5, fail=5))
+        result = select_candidates(r, 1, prefer="accuracy")
+        assert result[0].meta.name == "hi"
+
+    def test_default_bayesian(self):
+        r = EngineRegistry()
+        r.register(_mk("hi", 1, pass_=9, fail=1, latency_ms=200))
+        r.register(_mk("lo", 1, pass_=5, fail=5, latency_ms=200))
+        assert select_candidates(r, 1)[0].meta.name == "hi"
 
 
-def test_list_by_tier():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg.register_adapter(_meta("sensenova", 2, requires_network=True), EngineConfig())
-    assert {r.meta.name for r in reg.list_by_tier(1)} == {"paddleocr"}
-    assert {r.meta.name for r in reg.list_by_tier(2)} == {"sensenova"}
+# ──────── probe_engines ────────
+
+def _probe_reg(name: str = "test", tier: int = 1, probe: dict | None = None,
+               status: str = "HEALTHY", config: EngineConfig | None = None) -> EngineRegistration:
+    meta = _am(name, tier=tier)
+    if probe is not None:
+        meta.probe = probe
+    return _reg(meta=meta, config=config or EngineConfig(), status=status)
 
 
-def test_cold_start_defaults():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    r = reg.get("paddleocr")
-    assert r.glyph_pass_rate == GLYPH_PASS_RATE_DEFAULT
-    assert r.avg_latency_per_page_ms == AVG_LATENCY_DEFAULT_MS
+class TestProbeEngines:
+    def test_env_key_present(self):
+        reg = _probe_reg(probe={"method": "env", "key": "KZOCR_TEST_BENCH"})
+        with patch.dict(os.environ, {"KZOCR_TEST_BENCH": "1"}, clear=False):
+            _probe_one(reg, None)
+        assert reg.status == "HEALTHY"
 
+    def test_env_key_missing(self):
+        reg = _probe_reg(probe={"method": "env", "key": "KZOCR_TEST_BENCH_MISSING"})
+        with patch.dict(os.environ, {}, clear=False):
+            _probe_one(reg, None)
+        assert reg.status == "UNAVAILABLE"
 
-def test_record_updates_stats_and_derived():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=2000, pages=1)
-    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=2000, pages=1)
-    r = reg.get("paddleocr")
-    assert r.stats.total_pages == 2
-    assert r.glyph_pass_rate == 1.0
-    assert r.avg_latency_per_page_ms == 2000.0
+    def test_env_cached(self):
+        reg = _probe_reg(probe={"method": "env", "key": "KZOCR_TEST_BENCH_CACHE"})
+        _probe_one(reg, ProbeResult(keys={"KZOCR_TEST_BENCH_CACHE": True}))
+        assert reg.status == "HEALTHY"
 
+    def test_file_exists(self, tmp_path):
+        f = tmp_path / "marker.txt"
+        f.write_text("")
+        reg = _probe_reg(probe={"method": "file", "path": str(f)})
+        _probe_one(reg, None)
+        assert reg.status == "HEALTHY"
 
-def test_record_unknown_and_fail_counts():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("x", 1), EngineConfig())
-    reg.record("x", success=False, glyph="FAIL", latency_ms=100, error="boom")
-    reg.record("x", success=True, glyph="UNKNOWN", latency_ms=100)
-    r = reg.get("x")
-    assert r.stats.glyph_fail_count == 1
-    assert r.stats.glyph_unknown_count == 1
-    assert r.stats.last_error == "boom"
-    # FAIL+UNKNOWN 计入分母，PASS 为 0 → 通过率 0
-    assert r.glyph_pass_rate == 0.0
+    def test_file_not_exists(self):
+        reg = _probe_reg(probe={"method": "file", "path": "/nonexistent/marker"})
+        _probe_one(reg, None)
+        assert reg.status == "UNAVAILABLE"
 
+    def test_port_unreachable(self):
+        reg = _probe_reg(probe={"method": "port", "host": "127.0.0.1", "port": 1})
+        _probe_one(reg, None)
+        assert reg.status == "UNAVAILABLE"
 
-def test_record_unknown_engine_raises():
-    reg = EngineRegistry()
-    try:
-        reg.record("nope", success=True)
-    except SchedulerError:
-        pass
-    else:
-        raise AssertionError("未注册引擎应抛 SchedulerError")
+    def test_api_no_url(self):
+        reg = _probe_reg(probe={"method": "api"})
+        _probe_one(reg, None)
+        assert reg.status == "HEALTHY"
 
+    def test_api_invalid_url(self):
+        reg = _probe_reg(probe={"method": "api", "url": "http://[::1]:99999"})
+        _probe_one(reg, None)
+        assert reg.status == "UNAVAILABLE"
 
-def test_select_candidates_tier_filter_and_rank():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("rapidocr", 1), EngineConfig())
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=1000, pages=10)
-    reg.record("rapidocr", success=True, glyph="FAIL", latency_ms=5000, pages=10)
-    cands = select_candidates(reg, tier=1)
-    names = [c.meta.name for c in cands]
-    assert names[0] == "paddleocr"  # 评分更高者优先
-    assert set(names) == {"paddleocr", "rapidocr"}
+    def test_no_method_keeps_status(self):
+        reg = _probe_reg(status="DEGRADED")
+        _probe_one(reg, None)
+        assert reg.status == "DEGRADED"
 
-
-def test_select_candidates_prefer_accuracy():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.register_adapter(_meta("b", 1), EngineConfig())
-    reg.record("a", success=True, glyph="FAIL", latency_ms=1000, pages=5)
-    reg.record("b", success=True, glyph="PASS", latency_ms=1000, pages=5)
-    cands = select_candidates(reg, tier=1, prefer="accuracy")
-    assert cands[0].meta.name == "b"
-
-
-def test_select_candidates_prefer_speed():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.register_adapter(_meta("b", 1), EngineConfig())
-    reg.record("a", success=True, glyph="PASS", latency_ms=8000, pages=5)
-    reg.record("b", success=True, glyph="PASS", latency_ms=500, pages=5)
-    cands = select_candidates(reg, tier=1, prefer="speed")
-    assert cands[0].meta.name == "b"
-
-
-def test_select_candidates_empty_for_missing_tier():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    assert select_candidates(reg, tier=9) == []
-
-
-def test_record_glyph_rare_and_uncertain_counted():
-    """glyph 契约：RARE/UNCERTAIN 不再被静默丢弃，且 RARE 计入通过率分子。"""
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("x", 1), EngineConfig())
-    reg.record("x", success=True, glyph="RARE", latency_ms=100)
-    reg.record("x", success=True, glyph="UNCERTAIN", latency_ms=100)
-    reg.record("x", success=True, glyph="PASS", latency_ms=100)
-    r = reg.get("x")
-    assert r.stats.glyph_rare_count == 1
-    assert r.stats.glyph_uncertain_count == 1
-    # 通过率 = (PASS + RARE) / 全部样本 = (1 + 1) / 3
-    assert r.glyph_pass_rate == (1 + 1) / 3
-
-
-def test_avg_latency_no_zero_division():
-    """有页数但从未记录延迟时，avg_latency 返回保守默认值而非 0（修复除零）。"""
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("x", 1), EngineConfig())
-    reg.record("x", success=True)  # 不传 latency_ms
-    r = reg.get("x")
-    assert r.avg_latency_per_page_ms == AVG_LATENCY_DEFAULT_MS
-
-
-def test_select_candidates_no_zero_division():
-    """有页数、无延迟记录时 select_candidates 不应崩溃（_bayesian_score 不除零）。"""
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.register_adapter(_meta("b", 1), EngineConfig())
-    reg.record("a", success=True, glyph="PASS")
-    reg.record("b", success=True, glyph="PASS")
-    cands = select_candidates(reg, tier=1)
-    assert len(cands) == 2
-
-
-def test_benchmark_persist_and_load_roundtrip(tmp_path):
-    """NDJSON 追加式持久化：写 → 重建 → 统计一致（§7.1）。"""
-    d = str(tmp_path / "benchmarks")
-    reg = EngineRegistry(benchmark_dir=d)
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=2000, pages=3)
-    reg.record("paddleocr", success=True, glyph="FAIL", latency_ms=1000, pages=2)
-    reg.persist_benchmarks()
-
-    reg2 = EngineRegistry(benchmark_dir=d)
-    reg2.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg2.load_benchmarks()
-    r = reg2.get("paddleocr")
-    assert r.stats.total_pages == 5
-    assert r.stats.total_latency_ms == 3000
-    assert r.stats.glyph_pass_count == 1
-    assert r.stats.glyph_fail_count == 1
-    assert r.glyph_pass_rate == 0.5  # (PASS + RARE) / 全部 = (1+0)/2
-
-
-def test_benchmark_persist_is_append_only(tmp_path):
-    """多次 persist 应为跨进程追加，而非覆写（O(1)，不丢历史）。"""
-    d = str(tmp_path / "benchmarks")
-    reg = EngineRegistry(benchmark_dir=d)
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=100, pages=1)
-    reg.persist_benchmarks()
-    reg.record("paddleocr", success=True, glyph="PASS", latency_ms=100, pages=1)
-    reg.persist_benchmarks()
-
-    reg2 = EngineRegistry(benchmark_dir=d)
-    reg2.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    reg2.load_benchmarks()
-    assert reg2.get("paddleocr").stats.total_pages == 2
-
-
-def test_benchmark_persist_no_dir_is_noop():
-    """无 benchmark_dir 时 persist 不应抛，且 pending 被清空。"""
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("x", 1), EngineConfig())
-    reg.record("x", success=True, glyph="PASS")
-    reg.persist_benchmarks()
-    assert reg._pending == []
-
-
-def test_benchmark_load_missing_dir_is_noop():
-    """benchmark 目录不存在时 load 不应抛（冷启动）。"""
-    reg = EngineRegistry(benchmark_dir="/nonexistent/benchmarks")
-    reg.register_adapter(_meta("x", 1), EngineConfig())
-    reg.load_benchmarks()
-    assert reg.get("x").stats.total_pages == 0
-
-
-def test_mark_unavailable_excludes_from_candidates():
-    """UNAVAILABLE 引擎默认从候选中排除（§4.1 资源过滤）。"""
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.register_adapter(_meta("b", 1), EngineConfig())
-    reg.mark_unavailable("a")
-    cands = select_candidates(reg, tier=1)
-    assert [c.meta.name for c in cands] == ["b"]
-
-
-def test_mark_unavailable_unknown_raises():
-    reg = EngineRegistry()
-    try:
-        reg.mark_unavailable("nope")
-    except SchedulerError:
-        pass
-    else:
-        raise AssertionError("未注册引擎 mark 应抛 SchedulerError")
-
-
-def test_mark_degraded_still_selectable():
-    """DEGRADED 仍可选（仅 UNAVAILABLE 被排除）。"""
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.mark_degraded("a")
-    cands = select_candidates(reg, tier=1)
-    assert [c.meta.name for c in cands] == ["a"]
-
-
-def test_include_unavailable_keeps_unavailable():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.mark_unavailable("a")
-    cands = select_candidates(reg, tier=1, include_unavailable=True)
-    assert [c.meta.name for c in cands] == ["a"]
-
-
-def test_mark_healthy_restores():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("a", 1), EngineConfig())
-    reg.mark_unavailable("a")
-    assert reg.get("a").status == "UNAVAILABLE"
-    reg.mark_healthy("a")
-    assert reg.get("a").status == "HEALTHY"
-
-
-def test_probe_env_missing_marks_unavailable():
-    reg = EngineRegistry()
-    reg.register_adapter(
-        _meta("sensenova", 2, probe={"method": "env", "key": "KZOCR_NO_SUCH_KEY_XYZ"}),
-        EngineConfig(),
-    )
-    probe_engines(reg)
-    assert reg.get("sensenova").status == "UNAVAILABLE"
-
-
-def test_probe_env_present_marks_healthy(monkeypatch):
-    reg = EngineRegistry()
-    reg.register_adapter(
-        _meta("sensenova", 2, probe={"method": "env", "key": "KZOCR_PROBE_KEY"}),
-        EngineConfig(),
-    )
-    monkeypatch.setenv("KZOCR_PROBE_KEY", "xyz")
-    probe_engines(reg)
-    assert reg.get("sensenova").status == "HEALTHY"
-
-
-def test_probe_file_present_and_missing(tmp_path):
-    f = tmp_path / "model.bin"
-    reg = EngineRegistry()
-    reg.register_adapter(
-        _meta("shizhengpt", 3, probe={"method": "file", "path": str(f)}),
-        EngineConfig(),
-    )
-    probe_engines(reg)
-    assert reg.get("shizhengpt").status == "UNAVAILABLE"  # 文件尚不存在
-    f.write_text("x")
-    probe_engines(reg)
-    assert reg.get("shizhengpt").status == "HEALTHY"
-
-
-def test_probe_port_uses_tcp(monkeypatch):
-    reg = EngineRegistry()
-    reg.register_adapter(
-        _meta("paddleocr_vl16", 3, probe={"method": "port", "port": 18080}),
-        EngineConfig(),
-    )
-    monkeypatch.setattr("kzocr.scheduler.registry._tcp_reachable", lambda h, p: False)
-    probe_engines(reg)
-    assert reg.get("paddleocr_vl16").status == "UNAVAILABLE"
-    monkeypatch.setattr("kzocr.scheduler.registry._tcp_reachable", lambda h, p: True)
-    probe_engines(reg)
-    assert reg.get("paddleocr_vl16").status == "HEALTHY"
-
-
-def test_probe_no_config_keeps_status():
-    reg = EngineRegistry()
-    reg.register_adapter(_meta("paddleocr", 1), EngineConfig())
-    probe_engines(reg)
-    assert reg.get("paddleocr").status == "HEALTHY"  # 空 probe，不强制探测
-
-
-def test_probe_api_validates_url(monkeypatch):
-    reg = EngineRegistry()
-    reg.register_adapter(
-        _meta("sensenova", 2, probe={"method": "api", "url": "https://api.sensenova.com/v1"}),
-        EngineConfig(),
-    )
-    monkeypatch.setattr("kzocr.scheduler.registry.validate_url", lambda url: url)
-    probe_engines(reg)
-    assert reg.get("sensenova").status == "HEALTHY"
-
-
-def test_probe_uses_probe_result_cache(monkeypatch):
-    reg = EngineRegistry()
-    reg.register_adapter(
-        _meta("paddleocr_vl16", 3, probe={"method": "port", "port": 18080}),
-        EngineConfig(),
-    )
-    # 端口实际不可达（TCP 探测 False），但 ProbeResult 缓存标记可达 → 应使用缓存
-    monkeypatch.setattr("kzocr.scheduler.registry._tcp_reachable", lambda h, p: False)
-    probe_engines(reg, probe_result=ProbeResult(ports={"18080": True}))
-    assert reg.get("paddleocr_vl16").status == "HEALTHY"
+    def test_probe_engines_call_all(self):
+        r = EngineRegistry()
+        r.register(_probe_reg("has_key", probe={"method": "env", "key": "KZOCR_TEST_BENCH"}))
+        r.register(_probe_reg("no_key", probe={"method": "env", "key": "KZOCR_TEST_BENCH_MISSING"}))
+        with patch.dict(os.environ, {"KZOCR_TEST_BENCH": "1"}, clear=False):
+            probe_engines(r)
+        assert r.get("has_key").status == "HEALTHY"
+        assert r.get("no_key").status == "UNAVAILABLE"
