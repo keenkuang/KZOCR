@@ -54,6 +54,21 @@ class FakeBookAdapter:
         raise NotImplementedError
 
 
+class CapturingBookAdapter:
+    """记录 run_book 调用参数的全书引擎适配器桩（用于验证 max_pages 透传）。"""
+
+    def __init__(self, pages: list[PageResult] | None = None):
+        self.pages = pages or [PageResult(page_num=0, text="黄芪补气，方用萆薢分清饮")]
+        self.run_book_kwargs: dict | None = None
+
+    def run_book(self, pdf_path: str, **kwargs) -> BookResult:
+        self.run_book_kwargs = dict(kwargs)
+        return BookResult(book_code="test", title="Test Book", pages=self.pages)
+
+    def run_page(self, pi: PageInput) -> AdapterPageResult:
+        raise NotImplementedError
+
+
 class FakePageAdapter:
     """页级引擎适配器桩。"""
 
@@ -229,6 +244,24 @@ def test_budget_exhaustion(monkeypatch):
     result = orchestrate_book("/fp", "bk08", cfg, reg)
     # 只处理了 2 页（page0, page1）
     assert len(result.pages) == 2
+
+
+# ── 8.5 Tier1 run_book 接收 max_pages（orchestrator 卡顿修复回归）──
+def test_tier1_run_book_receives_max_pages(monkeypatch):
+    """orchestrate_book 必须把 budget.max_pages 透传给 Tier1 适配器的 run_book，
+    否则 run_book 会全本扫描几百页古籍导致长时间卡顿（根因）。"""
+    adapter = CapturingBookAdapter()
+    reg = EngineRegistry()
+    reg.register_adapter(
+        AdapterMeta(name="t1", label="T1", tier=1, batch_capable=True),
+        EngineConfig(),
+        adapter=adapter,
+    )
+    cfg = StubConfig(max_pages=5)
+    monkeypatch.setattr(_orc, "render_pages", lambda pdf, cfg, dpi=150: _render_gen(1))
+    orchestrate_book("/fp", "bk-max", cfg, reg)
+    assert adapter.run_book_kwargs is not None
+    assert adapter.run_book_kwargs.get("max_pages") == 5
 
 
 # ── 9. 竖排页跳过 Tier1（§4.1 / §11.6）→ Tier3 兜底 ──

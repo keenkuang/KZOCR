@@ -188,8 +188,15 @@ class EngineRunner(Protocol):
         """页级执行：输入单页图像，返回归一化结果。"""
         ...
 
-    def run_book(self, pdf_path: str, *, book_code: str = "") -> "BookResult":
-        """书级执行：输入 PDF 路径，返回全书结果。仅在 kind='book' 时支持。"""
+    def run_book(
+        self, pdf_path: str, *, book_code: str = "", max_pages: int = 0
+    ) -> "BookResult":
+        """书级执行：输入 PDF 路径，返回全书结果。仅在 kind='book' 时支持。
+
+        Args:
+            max_pages: 处理页数上限（0 = 全本）。编排器据此对齐逐页循环的实际处理范围，
+                避免对几百页的古籍做无谓的全本前置 OCR（orchestrator 卡顿根因）。
+        """
         ...
 
 

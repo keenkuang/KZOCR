@@ -60,13 +60,21 @@ class PaddleOCRAdapter:
         res = engine.ocr(img, return_word_box=True)
         return _parse_ppocr_result(res)
 
-    def run_book(self, pdf_path: str, book_code: str = "") -> BookResult:
-        """书级执行：逐页渲染 → run_page → BookResult。"""
+    def run_book(self, pdf_path: str, book_code: str = "", max_pages: int = 0) -> BookResult:
+        """书级执行：逐页渲染 → run_page → BookResult。
+
+        Args:
+            max_pages: 处理页数上限（0 = 全本）。编排器传入 budget.max_pages 以对齐
+                逐页循环的实际范围，避免对几百页古籍做无谓全本前置 OCR。
+        """
         import fitz
         doc = fitz.open(pdf_path)
         try:
+            page_count = doc.page_count
+            if max_pages and max_pages > 0:
+                page_count = min(max_pages, page_count)
             pages = []
-            for i in range(doc.page_count):
+            for i in range(page_count):
                 pix = doc[i].get_pixmap(dpi=150)
                 img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                     pix.height, pix.width, pix.n
@@ -180,13 +188,21 @@ class RapidOCRAdapter:
         out, _ = self._engine(img)
         return _parse_rapidocr_result(out)
 
-    def run_book(self, pdf_path: str, book_code: str = "") -> BookResult:
-        """书级执行：逐页渲染 → run_page → BookResult。"""
+    def run_book(self, pdf_path: str, book_code: str = "", max_pages: int = 0) -> BookResult:
+        """书级执行：逐页渲染 → run_page → BookResult。
+
+        Args:
+            max_pages: 处理页数上限（0 = 全本）。编排器传入 budget.max_pages 以对齐
+                逐页循环的实际范围，避免对几百页古籍做无谓全本前置 OCR。
+        """
         import fitz
         doc = fitz.open(pdf_path)
         try:
+            page_count = doc.page_count
+            if max_pages and max_pages > 0:
+                page_count = min(max_pages, page_count)
             pages = []
-            for i in range(doc.page_count):
+            for i in range(page_count):
                 pix = doc[i].get_pixmap(dpi=150)
                 img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                     pix.height, pix.width, pix.n

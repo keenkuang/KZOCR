@@ -71,12 +71,14 @@ class BookPipelineAdapter:
         from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
         self._pipeline = BookPipeline(config)
 
-    def run_book(self, pdf_path: str, *, book_code: str, **kw) -> BookResult:
+    def run_book(self, pdf_path: str, *, book_code: str, max_pages: int = 0, **kw) -> BookResult:
         """处理全书并返回主线归一化 BookResult（G1 闭环）。
 
         Args:
             pdf_path: PDF 路径。
             book_code: 真实书籍编码（G2 主键一致；空则降级 "TCM-UNK"）。
+            max_pages: 处理页数上限（0 = 全本）。编排器传入 budget.max_pages 以对齐
+                逐页循环的实际范围，避免对几百页古籍做无谓全本前置 OCR。
             **kw: 透传给 book_result_from_tcm_ocr（title/author/...）。
         """
         if self._pipeline is None:
@@ -92,6 +94,9 @@ class BookPipelineAdapter:
             engine_label=self.engine_name,
             **kw,
         )
+        # 对齐编排器逐页循环的实际处理范围（与 Tier1 前置 OCR 一致）
+        if max_pages and max_pages > 0 and len(book_result.pages) > max_pages:
+            book_result.pages = book_result.pages[:max_pages]
         # 落库统一由 run_engine（KZOCR_PERSIST_DB 开关）处理，避免与适配器内落库双重写。
         # 适配器仅负责产出归一化 BookResult；run_engine 已持有真实 book_code。
         return book_result

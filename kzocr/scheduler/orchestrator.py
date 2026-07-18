@@ -420,7 +420,9 @@ def orchestrate_book(
             adapter = tier1_candidates[0].adapter
             if adapter is None:
                 raise RuntimeError("Tier1 engine has no adapter injected")
-            tier1_result = adapter.run_book(pdf_path, book_code=book_code)
+            tier1_result = adapter.run_book(
+                pdf_path, book_code=book_code, max_pages=budget.max_pages
+            )
         except Exception as exc:
             _logger.error("[orchestrator] Tier 1 book engine failed: %s", exc)
         else:
