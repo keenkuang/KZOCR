@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
+
+
+if TYPE_CHECKING:
+    from kzocr.scheduler.scheduler import Budget
 
 
 def _safe_int(val: str, default: int, name: str = "") -> int:
@@ -21,6 +26,66 @@ def _safe_int(val: str, default: int, name: str = "") -> int:
     except (TypeError, ValueError):
         logger.warning("[config] %s='%s' 不是有效整数，使用默认值 %d", name, val, default)
         return default
+
+
+def _safe_bool(val: str, default: bool) -> bool:
+    """安全解析布尔环境变量，True 为 "1"/"true" 等。"""
+    return val.lower() in ("1", "true", "yes") if val else default
+
+
+@dataclass
+class SchedulerConfig:
+    """v0.7 调度器配置（§7.3）。由 ``from_env()`` 从环境变量构造。"""
+
+    max_tier1_engines: int = 2
+    max_tier2_engines: int = 1
+    max_tier3_engines: int = 1
+    max_pages: int = 50
+    total_timeout_s: int = 7200
+    max_time_per_page_ms: int = 120000
+    benchmark_dir: str = ""
+    trace_dir: str = ""
+    engine_parallel: bool = False
+    allow_cloud_vision: bool = False
+    tier_limit: int = 3
+    cross_check: bool = False
+    consensus_sample_rate: float = 0.0
+    persist_db: bool = False
+    db_dir: str = ""
+    half_life_days: float = 7.0
+
+    @classmethod
+    def from_env(cls) -> "SchedulerConfig":
+        """从环境变量构造 SchedulerConfig（§7.3 完整映射）。"""
+        return cls(
+            max_tier1_engines=_safe_int(os.environ.get("KZOCR_MAX_TIER1_ENGINES", "2"), 2, "KZOCR_MAX_TIER1_ENGINES"),
+            max_tier2_engines=_safe_int(os.environ.get("KZOCR_MAX_TIER2_ENGINES", "1"), 1, "KZOCR_MAX_TIER2_ENGINES"),
+            max_tier3_engines=_safe_int(os.environ.get("KZOCR_MAX_TIER3_ENGINES", "1"), 1, "KZOCR_MAX_TIER3_ENGINES"),
+            max_pages=_safe_int(os.environ.get("KZOCR_MAX_PAGES", "50"), 50, "KZOCR_MAX_PAGES"),
+            total_timeout_s=_safe_int(os.environ.get("KZOCR_TOTAL_TIMEOUT", "7200"), 7200, "KZOCR_TOTAL_TIMEOUT"),
+            max_time_per_page_ms=_safe_int(os.environ.get("KZOCR_MAX_TIME_PER_PAGE_MS", "120000"), 120000, "KZOCR_MAX_TIME_PER_PAGE_MS"),
+            benchmark_dir=os.environ.get("KZOCR_BENCHMARK_DIR", ""),
+            trace_dir=os.environ.get("KZOCR_TRACE_DIR", ""),
+            engine_parallel=_safe_bool(os.environ.get("KZOCR_ENGINE_PARALLEL", ""), False),
+            allow_cloud_vision=_safe_bool(os.environ.get("KZOCR_ALLOW_CLOUD_VISION", ""), False),
+            tier_limit=_safe_int(os.environ.get("KZOCR_TIER_LIMIT", "3"), 3, "KZOCR_TIER_LIMIT"),
+            cross_check=_safe_bool(os.environ.get("KZOCR_ENABLE_CROSS_CHECK", ""), False),
+            consensus_sample_rate=float(os.environ.get("KZOCR_CONSENSUS_SAMPLE_RATE", "0.0") or "0.0"),
+            persist_db=_safe_bool(os.environ.get("KZOCR_PERSIST_DB", ""), False),
+            db_dir=os.environ.get("KZOCR_DB_DIR", ""),
+            half_life_days=float(os.environ.get("KZOCR_DECAY_HALF_LIFE_DAYS", "7.0") or "7.0"),
+        )
+
+    def to_budget(self) -> Budget:
+        """构造 ``Budget`` 供编排主循环使用。"""
+        from kzocr.scheduler.scheduler import Budget
+
+        return Budget(
+            max_pages=self.max_pages,
+            max_wall_clock_ms=self.total_timeout_s * 1000,
+            max_time_per_page_ms=self.max_time_per_page_ms,
+            allow_cloud_vision=self.allow_cloud_vision,
+        )
 
 
 @dataclass
@@ -64,6 +129,8 @@ class Config:
     kzocr_output_dir: str = ""  # will be set by from_env() / load_config()
     # v0.5 AMEND D0: 缓存 TTL（秒），默认 24h
     cache_ttl_seconds: int = 86400
+    # v0.7 调度器配置（§7.3）
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -112,6 +179,7 @@ def load_config() -> "Config":
     cfg.use_vlm = os.environ.get("KZOCR_USE_VLM", "0") in ("1", "true", "True")
     cfg.vlm_engine = os.environ.get("KZOCR_VLM_ENGINE", "auto")
     cfg.allow_cloud_vision = os.environ.get("KZOCR_ALLOW_CLOUD_VISION", "0") in ("1", "true", "True")
+    cfg.scheduler = SchedulerConfig.from_env()
     return cfg
 
 

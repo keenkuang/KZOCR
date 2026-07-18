@@ -19,6 +19,7 @@ from typing import Optional
 from kzocr.engine.types import PageLayout
 from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
 from kzocr.engines.errors import PinnedEngineUnavailableError
+from kzocr.config import SchedulerConfig
 
 _logger = logging.getLogger(__name__)
 
@@ -86,7 +87,9 @@ class EngineOverrides:
 # ── 评分与权重（§4.2 / §4.3）──
 
 
-def _compute_bayesian_score(reg: EngineRegistration) -> float:
+def _compute_bayesian_score(
+    reg: EngineRegistration, half_life_days: float = DECAY_HALF_LIFE_DAYS
+) -> float:
     """完整权重评分（§4.2）：pass_rate × (1000 / max(latency, 1)) × decay。
 
     - glyph_pass_rate 已含贝叶斯平均（§3.5）
@@ -96,7 +99,7 @@ def _compute_bayesian_score(reg: EngineRegistration) -> float:
     """
     pass_rate = reg.glyph_pass_rate
     latency = max(reg.avg_latency_per_page_ms, 1.0)
-    decay = reg.stats.decay(DECAY_HALF_LIFE_DAYS)
+    decay = reg.stats.decay(half_life_days)
     long_score = pass_rate * (1000.0 / latency) * decay
 
     # 近期滚动指标
@@ -162,8 +165,17 @@ class EngineScheduler:
     接入 `SchedulerConfig`（§7.3）留待 E5 集成阶段，此处以内置默认 + 构造覆盖实现。
     """
 
-    def __init__(self, tier_limits: Optional[dict[int, int]] = None) -> None:
-        self.tier_limits: dict[int, int] = dict(tier_limits or DEFAULT_TIER_LIMITS)
+    def __init__(
+        self,
+        tier_limits: Optional[dict[int, int]] = None,
+        scheduler_config: Optional[SchedulerConfig] = None,
+    ) -> None:
+        self.scheduler_config = scheduler_config or SchedulerConfig()
+        self.tier_limits: dict[int, int] = tier_limits or self._default_tier_limits()
+
+    def _default_tier_limits(self) -> dict[int, int]:
+        c = self.scheduler_config
+        return {1: c.max_tier1_engines, 2: c.max_tier2_engines, 3: c.max_tier3_engines}
 
     def _max_engines(self, tier: int) -> int:
         return self.tier_limits.get(tier, 1)
@@ -257,7 +269,7 @@ class EngineScheduler:
 
         # ── 第 7 步：加权排序 ──
         def _score(e: EngineRegistration) -> float:
-            base = _compute_bayesian_score(e)
+            base = _compute_bayesian_score(e, self.scheduler_config.half_life_days)
             return domain_adjust(base, e, page_info, page_layout)
 
         if overrides and overrides.prefer == "speed":

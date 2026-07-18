@@ -331,12 +331,22 @@ def orchestrate_book(
         registry: 已构建并 probe 的引擎注册中心（B5，由调用方 E5 传入）。
         overrides: 引擎覆盖（pinned_engine / prefer）。
     """
-    budget = Budget(
-        max_pages=getattr(config, "max_pages", 50),
-        max_wall_clock_ms=int(getattr(config, "total_timeout_s", 7200)) * 1000,
-        max_time_per_page_ms=getattr(config, "max_time_per_page_ms", 120000),
-        allow_cloud_vision=bool(getattr(config, "allow_cloud_vision", False)),
-    )
+    scheduler_cfg = getattr(config, "scheduler", None)
+    if scheduler_cfg is not None:
+        budget = Budget(
+            max_pages=scheduler_cfg.max_pages,
+            max_wall_clock_ms=scheduler_cfg.total_timeout_s * 1000,
+            max_time_per_page_ms=scheduler_cfg.max_time_per_page_ms,
+            allow_cloud_vision=scheduler_cfg.allow_cloud_vision,
+        )
+    else:
+        # 向后兼容：旧调用方可能传 attribute bag 而非 Config 实例
+        budget = Budget(
+            max_pages=getattr(config, "max_pages", 50),
+            max_wall_clock_ms=int(getattr(config, "total_timeout_s", 7200)) * 1000,
+            max_time_per_page_ms=getattr(config, "max_time_per_page_ms", 120000),
+            allow_cloud_vision=bool(getattr(config, "allow_cloud_vision", False)),
+        )
     verifier = GlyphVerifier()
     # 形近字黑名单（供跨引擎分歧对齐标记 high 优先级，失败路径比对时复用）
     confusion_set = load_confusion_set()

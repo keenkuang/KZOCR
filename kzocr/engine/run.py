@@ -47,7 +47,7 @@ VLM_ENGINE_LABEL = "PaddleOCR-VL-1.6"
 
 def _init_v07_registry(cfg) -> EngineRegistry:
     """E5: 根据配置构建 v0.7 EngineRegistry，注册可用引擎适配器。"""
-    reg = EngineRegistry()
+    reg = EngineRegistry(benchmark_dir=cfg.scheduler.benchmark_dir)
     if cfg.use_mock:
         reg.register_adapter(
             AdapterMeta(name="mock", label="Mock", tier=1, kind="book", batch_capable=True),
@@ -111,9 +111,10 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
     cfg = config if config is not None else app_config.config
     logger.info("[engine] v0.7 编排调度系统")
     registry = _init_v07_registry(cfg)
+    sc = cfg.scheduler
     overrides = EngineOverrides(
-        enable_cross_check=os.environ.get("KZOCR_ENABLE_CROSS_CHECK", "0") in ("1", "true"),
-        consensus_sample_rate=float(os.environ.get("KZOCR_CONSENSUS_SAMPLE_RATE", "0")),
+        enable_cross_check=sc.cross_check,
+        consensus_sample_rate=sc.consensus_sample_rate,
     )
     book = orchestrate_book(
         pdf_path=pdf_path,
@@ -127,13 +128,13 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
     except Exception:
         logger.warning("[engine] TOC enrich 失败，跳过", exc_info=True)
     # Phase 2：落库到 BookDB（按书分库，系统 of record）。
-    # 默认关闭，仅当 KZOCR_PERSIST_DB=1 时启用，避免影响既有调用方/测试。
-    if os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True"):
+    # 默认关闭，仅当 scheduler.persist_db=True 时启用。
+    if sc.persist_db:
         try:
             from kzocr.storage.db import BookDB
             BookDB.persist_book_result(
                 book,
-                db_dir=os.environ.get("KZOCR_DB_DIR", ""),
+                db_dir=sc.db_dir,
             )
         except Exception:
             logger.warning("[engine] BookDB 落库失败，跳过", exc_info=True)
@@ -735,14 +736,14 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
         # 一次展开所有页（避免 doc[i+1] 在 mock 下出错）
         all_pages = list(doc)
         # 页数上限保护（防资源耗尽 DoS），B6 裁决默认 50
-        max_pages = int(os.environ.get("KZOCR_MAX_PAGES", "50"))
+        max_pages = cfg.scheduler.max_pages
         if max_pages and len(all_pages) > max_pages:
             logger.warning("[VLM] PDF 页数 %d 超过上限 %d，仅处理前 %d 页", len(all_pages), max_pages, max_pages)
             all_pages = all_pages[:max_pages]
             total_pages = len(all_pages)
 
         # B6: wall-clock 总预算闸（到点即停后续页）
-        total_timeout = int(os.environ.get("KZOCR_TOTAL_TIMEOUT", "7200"))
+        total_timeout = cfg.scheduler.total_timeout_s
         _start_ts = time.monotonic()
 
         for i, page in enumerate(all_pages):
