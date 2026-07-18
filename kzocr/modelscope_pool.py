@@ -125,7 +125,7 @@ _PROVIDER_SPECS: List[ProviderSpec] = [
         name="zai",
         base_url="https://api.z.ai/api/paas/v4",
         api_key_env="ZAI_API_KEY",
-        api_key_fallback="",  # CHANGELOG key 被截断（78184ed8…）
+        api_key_fallback="",  # 密钥经环境变量注入，不入库
         models=_ZAI_MODELS,
         vision=True,
     ),
@@ -133,7 +133,7 @@ _PROVIDER_SPECS: List[ProviderSpec] = [
         name="zhipu",
         base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key_env="ZHIPU_API_KEY",
-        api_key_fallback="",  # CHANGELOG key 被截断（77313fa0…）
+        api_key_fallback="",  # 密钥经环境变量注入，不入库
         models=_ZHIPU_MODELS,
         vision=True,
     ),

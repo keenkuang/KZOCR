@@ -1,9 +1,23 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-10T22:00+08
-> 最后更新：2026-07-10 22:00 CST
+> 文档版本：v2026-07-18T20:00+08
+> 最后更新：2026-07-18 20:00 CST
 
 ---
+
+## v2026-07-18 — v0.20 DB 分层 + 字符级 bbox + 跨引擎分歧门控 + 性能基准
+
+> **615 tests**（全量通过）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
+
+| 模块 | 说明 |
+|------|------|
+| DB 分层 | BookDB 新增 `book`/`page`/`line` 内容表（含 `char_boxes` JSON）；`to_zai_prisma` 重构为「打包导出 / 导入校对包」闭环；旧 `custom.db` 冻结；tcm_ocr 平行栈经 `BookPipelineAdapter` 对接主线 `kzocr.engine`，产出主线 `BookResult` 并走主线 `BookDB`/导出闭环 |
+| 字符级 bbox | `AdapterPageResult.char_boxes` 落地（`return_word_box=True`），真实引擎单页 801 逐字框落库读回一致；开销基准证明开启逐字框为**零成本**（<1%） |
+| conf≤0.90 门控 | RapidOCR 适配器置信度传递修复（此前写死 0.7 且丢弃 score）；低置信度 PASS 页挂起待人工复核（`record_anomaly(CONF_LOW)`），`KZOCR_CONF_GATE` 可配 |
+| 性能基准 | DPI 72 vs 150、进程级单例稳定性、引擎倍速（RapidOCR 单页≈PaddleOCR 1/13）结论归档 `docs/benchmark/engine-perf.md`；char_boxes 零成本基准补跑 |
+| 引擎适配器 | `PaddleOCRAdapter` 迁移 `predict`（弃用 `.ocr`）+ 新增弃用告警回归测试（静态源码检查 + 真实引擎动态断言） |
+| orchestrator | 修复全路径卡顿（`run_book` 无视 `max_pages` 全本扫描）；e2e 扩面对齐 orchestrator 版心裁切管线，分歧数字严格可比（5 本古籍分歧/页 7.8–15.6） |
+| 视觉回看 | GLM-4V-Flash 接入 + 真实端到端验证（图形校验 FAIL/PASS 判定合理，确认模型看图非盲答） |
 
 ## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
 
@@ -647,7 +661,7 @@ TCM_OCR_CLOUD_LLM_API_KEY / TCM_OCR_CLOUD_LLM_BASE_URL / TCM_OCR_CLOUD_LLM_MODEL
 
 | 类型 | 模型名 | 上下文 | 用途 | Key 状态 |
 |------|--------|--------|------|---------|
-| 视觉 VLM | `glm-4.6v-flash` | — | 免费图文识别 | ✅ `78184ed8…BrliYI3atOniwJzc` |
+| 视觉 VLM | `glm-4.6v-flash` | — | 免费图文识别 | ✅ 已配置（密钥经环境变量注入，不入库） |
 | 纯文本 | `glm-4.7-flash` | — | 免费校对 | ✅ 同上 |
 | 纯文本 | `glm-4.5-flash` | 128K | 免费校对 | ✅ 同上 |
 
@@ -655,6 +669,6 @@ TCM_OCR_CLOUD_LLM_API_KEY / TCM_OCR_CLOUD_LLM_BASE_URL / TCM_OCR_CLOUD_LLM_MODEL
 
 | 类型 | 模型名（大写标准） | 用途 | Key 状态 |
 |------|------------------|------|---------|
-| 视觉 VLM | `GLM-4.6V-Flash` | 图文识别 | ✅ `77313fa0…D7gxdga59tzqnwfB` 已测通 |
+| 视觉 VLM | `GLM-4.6V-Flash` | 图文识别 | ✅ 已测通（密钥经环境变量注入，不入库） |
 | 纯文本 | `GLM-4.7-Flash` | 文本校对 | ✅ 同上 |
 ```
