@@ -290,6 +290,25 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("shell", choices=["bash", "zsh", "fish"], help="shell 类型")
     pc.set_defaults(func=cmd_completion)
 
+    # benchmark 子命令组（§7.1）
+    from kzocr.cli_benchmark import cmd_bench_status, cmd_bench_history, cmd_bench_run, cmd_bench_reset
+    pb = sub.add_parser("benchmark", help="引擎性能基准查询与管理")
+    bsub = pb.add_subparsers(dest="bench_cmd", required=False)
+    # status（默认）
+    bs = bsub.add_parser("status", help="显示引擎统计")
+    bs.set_defaults(bench_func=cmd_bench_status)
+    # history
+    bh = bsub.add_parser("history", help="显示原始 NDJSON 事件")
+    bh.add_argument("--engine", default="", help="按引擎名筛选")
+    bh.set_defaults(bench_func=cmd_bench_history)
+    # run
+    br = bsub.add_parser("run", help="运行一轮快速基准（probe + 注册）")
+    br.set_defaults(bench_func=cmd_bench_run)
+    # reset
+    brs = bsub.add_parser("reset", help="清空 benchmark 目录")
+    brs.add_argument("--force", action="store_true", help="跳过确认提示")
+    brs.set_defaults(bench_func=cmd_bench_reset)
+
     from kzocr.cli_review import build_review_parser
     build_review_parser(sub)
     return p
@@ -299,6 +318,8 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if hasattr(args, "bench_func"):
+            return args.bench_func(args)
         return args.func(args)
     except khub_client.KHUBError as e:
         log.error("%s", e)
