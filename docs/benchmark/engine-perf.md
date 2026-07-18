@@ -2,7 +2,7 @@
 
 > 归档日期：2026-07-18
 > 数据源：`scripts/bench_engine_compare.py`（DPI 对比）+ `scripts/bench_paddle_perf.py`（多页连续）+ `scripts/bench_char_boxes.py`（char_boxes 开销对照）
-> 关联提交：`8cf0289`（PaddleOCR 进程级单例 + CPU 推理优化）、`5f2a4d8`、`53b4f84`
+> 关联提交：`8cf0289`（PaddleOCR 进程级单例 + CPU 推理优化）、`5f2a4d8`、`53b4f84`、`d99e3fb`（char_boxes 开销对照基准）
 
 ## 1. 测试环境
 
