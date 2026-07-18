@@ -89,8 +89,8 @@ class FakePageAdapter:
         return self.responses.pop(0)
 
 
-def _text_pages(*texts):
-    return [PageResult(page_num=i, text=t) for i, t in enumerate(texts)]
+def _text_pages(*texts, confidence: float = 0.9):
+    return [PageResult(page_num=i, text=t, confidence=confidence) for i, t in enumerate(texts)]
 
 
 def _page_result(text):
@@ -234,7 +234,7 @@ def test_cross_divergence_arbitrated_by_vision(tmp_path, monkeypatch):
 def test_cross_check_on_success_page(tmp_path):
     """enable_cross_check=True + Tier2 可用 → 成功页触发 cross-check，分歧落库。"""
     reg = _reg(
-        tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"),  # PASS
+        tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮", confidence=0.97),  # PASS 且高置信，越过 conf 门控
         # Tier2 不设 requires_network（cross-check 引擎可以是本地 CPU 引擎，不需要 allow_cloud_vision）
     )
     reg.register_adapter(
@@ -294,8 +294,8 @@ def test_consensus_sampling_triggers_on_consensus_page(tmp_path, monkeypatch):
     """共识一致页 + sample_rate=1.0 → 抽样触发，anomaly 含 ConsensusErrorArbitration。"""
     # 强制 random.random 返回 0（永远中签）
     monkeypatch.setattr("random.random", lambda: 0.0)
-    # 共识页：Tier1 PASS + Tier2 返回完全相同文本
-    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"))
+    # 共识页：Tier1 PASS + Tier2 返回完全相同文本（高置信，越过 conf 门控）
+    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮", confidence=0.97))
     reg.register_adapter(
         AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
         EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补气，方用萆薢分清饮")]),
@@ -389,7 +389,7 @@ def test_consensus_sampling_vision_fail_triggers_anomaly(tmp_path, monkeypatch):
             ),
     )
 
-    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮"))
+    reg = _reg(tier1_pages=_text_pages("黄芪补气，方用萆薢分清饮", confidence=0.97))
     reg.register_adapter(
         AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
         EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补气，方用萆薢分清饮")]),

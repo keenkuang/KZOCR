@@ -219,7 +219,16 @@ class RapidOCRAdapter:
 
 
 def _parse_rapidocr_result(out) -> AdapterPageResult:
-    """将 RapidOCR 原始输出解析为 AdapterPageResult。"""
+    """将 RapidOCR 原始输出解析为 AdapterPageResult。
+
+    RapidOCR 返回 ``list[[box, text, score], ...]``：
+    - box 为 4 点 quad（``(4,2)`` 转 list）；
+    - text 为识别文本；
+    - score 为**字符串化**的逐行置信度（RapidOCR 内部已 ``str()``）。
+
+    此处取逐行 score 计算页级置信度，并透传 ``char_confidences``，
+    使 conf≤0.90 门控对 RapidOCR 真正生效（此前 score 被丢弃、confidence 写死 0.7）。
+    """
     if not out:
         return AdapterPageResult(text="", confidence=0.0, boxes=[], char_confidences=[])
     texts: list[str] = []
@@ -234,9 +243,15 @@ def _parse_rapidocr_result(out) -> AdapterPageResult:
         texts.append(text)
         if quad and isinstance(quad, (list, tuple)) and len(quad) == 4:
             boxes.append(_quad_to_rect(quad))
+        # 第三项（若有）为逐行置信度；RapidOCR 已字符串化，需转回 float
+        if len(item) >= 3:
+            try:
+                confs.append(float(item[2]))
+            except (TypeError, ValueError):
+                pass
     return AdapterPageResult(
         text="".join(texts),
-        confidence=0.7,
+        confidence=sum(confs) / len(confs) if confs else 0.0,
         boxes=boxes if boxes else None,
         char_confidences=confs if confs else None,
     )

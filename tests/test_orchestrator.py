@@ -24,6 +24,7 @@ from kzocr.scheduler import orchestrator as _orc
 from kzocr.scheduler.orchestrator import orchestrate_book
 from kzocr.scheduler.registry import EngineRegistry
 from kzocr.scheduler.scheduler import EngineOverrides
+from kzocr.storage.db import BookDB
 
 
 # ── 桩类型 ──
@@ -37,6 +38,7 @@ class StubConfig:
     pub_era: str = ""
     output_dir: str = ""
     trace_dir: str = ""  # 空 = 禁用 trace 写出
+    db_dir: str = ""     # BookDB 目录（默认 cwd / KZOCR_DB_DIR）
 
 
 class FakeBookAdapter:
@@ -308,3 +310,55 @@ def test_pinned_engine_overrides_selection(monkeypatch):
     )
     assert len(result.pages) == 1
     assert "pinned" in result.pages[0].text
+
+
+# ── 11. conf≤gate 置信度门控 ──
+def test_conf_gate_low_conf_held_for_review(tmp_path):
+    """引擎置信度 ≤ 门限的 PASS 页：不自动入库（pending）+ 记录 conf_low 异常。
+
+    验证门控修正前的关键缺陷：低置信度 PASS 页原本在 continue 前已被 imported，
+    兜底门控（循环末尾）对其不可达，导致低置信度页直接入库。
+    """
+    pages = [PageResult(page_num=0, text="黄芪补气，方用萆薢分清饮", confidence=0.82)]
+    reg = _reg(tier1_pages=pages)
+    result = orchestrate_book(
+        "/fp", "bk_gate_low", StubConfig(db_dir=str(tmp_path)), reg
+    )
+    # 文本仍产出（只是挂起待复核）
+    assert len(result.pages) == 1
+    assert not result.failed_pages
+    db = BookDB("bk_gate_low", db_dir=str(tmp_path))
+    assert db.get_page_progress(0)["import_status"] == "pending"
+    anomalies = db.get_unresolved_anomalies()
+    assert any(a["page_num"] == 0 and "conf_low" in a["details"] for a in anomalies)
+
+
+def test_conf_gate_high_conf_imported(tmp_path):
+    """引擎置信度 > 门限的 PASS 页：正常入库（imported），无 gate 异常。"""
+    pages = [PageResult(page_num=0, text="黄芪补气，方用萆薢分清饮", confidence=0.97)]
+    reg = _reg(tier1_pages=pages)
+    result = orchestrate_book(
+        "/fp", "bk_gate_high", StubConfig(db_dir=str(tmp_path)), reg
+    )
+    assert len(result.pages) == 1
+    db = BookDB("bk_gate_high", db_dir=str(tmp_path))
+    assert db.get_page_progress(0)["import_status"] == "imported"
+    anomalies = db.get_unresolved_anomalies()
+    assert not any("conf_low" in a["details"] for a in anomalies)
+
+
+def test_conf_gate_threshold_env(monkeypatch, tmp_path):
+    """门限可配置：把 _CONF_GATE 提升到 0.95 后，conf=0.93 的 PASS 页也被挂起。
+
+    （生产环境该常量由环境变量 KZOCR_CONF_GATE 在模块导入时赋值，这里直接
+      monkeypatch 模块级常量以验证门控确实读取阈值。）
+    """
+    monkeypatch.setattr(_orc, "_CONF_GATE", 0.95)
+    pages = [PageResult(page_num=0, text="黄芪补气，方用萆薢分清饮", confidence=0.93)]
+    reg = _reg(tier1_pages=pages)
+    orchestrate_book("/fp", "bk_gate_env", StubConfig(db_dir=str(tmp_path)), reg)
+    db = BookDB("bk_gate_env", db_dir=str(tmp_path))
+    assert db.get_page_progress(0)["import_status"] == "pending"
+    anomalies = db.get_unresolved_anomalies()
+    assert any(a["page_num"] == 0 and "conf_low" in a["details"] for a in anomalies)
+

@@ -40,6 +40,11 @@ from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveControll
 from kzocr.engines.ratelimit import MultiTokenRateLimiter
 import numpy as np
 
+# ── conf≤gate 置信度门控阈值 ──
+# 引擎识别置信度 ≤ 此值的页在通过字形校验后仍挂起待人工复核（不自动入库）。
+# 可用环境变量 KZOCR_CONF_GATE 调整（默认 0.90，与 conf≤0.90 门控一致）。
+_CONF_GATE = float(os.environ.get("KZOCR_CONF_GATE", "0.90"))
+
 _logger = logging.getLogger(__name__)
 
 
@@ -532,6 +537,33 @@ def orchestrate_book(
                 db.init_page(page_num, char_count=len(cur_text), engine_label=t1_engine_name)
                 db.update_ocr(page_num, status="success", char_count=len(cur_text), latency_ms=t1_elapsed_per_page)
                 db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
+
+                # ── conf≤gate 门控：低置信度 PASS 页挂起待人工复核 ──
+                # 门控必须在 PASS 分支的 continue 之前判定：兜底门控（本循环末尾）
+                # 对 PASS 页不可达（已提前 continue），否则低置信度页会被直接 imported。
+                _page_conf = (
+                    tier1_result.pages[page_num].confidence
+                    if tier1_result and page_num < len(tier1_result.pages)
+                    else 1.0
+                )
+                if _page_conf <= _CONF_GATE:
+                    db.update_import(page_num, status="pending", count=1)
+                    db.record_anomaly(
+                        page_num,
+                        GlyphVerdict(
+                            status=verdict.status,
+                            confidence=_page_conf,
+                            details=(
+                                f"conf_low;engine_conf={_page_conf:.3f};"
+                                f"gate={_CONF_GATE:.2f}"
+                            ),
+                            force_review=True,
+                        ),
+                        detector_chain=["ConfGate"],
+                    )
+                    trace.extend(page_trace)
+                    continue
+
                 db.update_import(page_num, status="imported", count=1)
 
                 # ── 增强路径：成功页跨引擎采样比对（enable_cross_check 时激活）──
@@ -669,10 +701,10 @@ def orchestrate_book(
             char_count=char_count, latency_ms=last_latency,
         )
         db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
-        # 异常入队条件：验证未通过 / 强制复核 / 引擎置信度 ≤ 0.90
+        # 异常入队条件：验证未通过 / 强制复核 / 引擎置信度 ≤ 门限
         _page_conf = (tier1_result.pages[page_num].confidence
-                      if tier1_result and page_num < len(tier1_result.pages) else 0.9)
-        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") or getattr(verdict, "force_review", False) or _page_conf <= 0.90:
+                      if tier1_result and page_num < len(tier1_result.pages) else _CONF_GATE)
+        if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") or getattr(verdict, "force_review", False) or _page_conf <= _CONF_GATE:
             db.record_anomaly(page_num, verdict=verdict, detector_chain=verifier.last_detector_chain)
         db.update_import(
             page_num, status="imported" if verdict.status in ("PASS", "RARE") else "pending", count=1,

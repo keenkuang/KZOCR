@@ -78,19 +78,36 @@ def test_parse_rapidocr_empty():
 
 def test_parse_rapidocr_normal():
     data = [
-        ([[10, 20], [30, 20], [30, 40], [10, 40]], "补气"),
-        ([[50, 20], [70, 20], [70, 40], [50, 40]], "方用"),
+        ([[10, 20], [30, 20], [30, 40], [10, 40]], "补气", 0.95),
+        ([[50, 20], [70, 20], [70, 40], [50, 40]], "方用", 0.90),
     ]
     r = _parse_rapidocr_result(data)
     assert r.text == "补气方用"
     assert r.boxes == [[10, 20, 30, 40], [50, 20, 70, 40]]
+    # 置信度传递：逐行 score 计算页级置信度 + 透传 char_confidences
+    assert abs(r.confidence - 0.925) < 0.01
+    assert r.char_confidences == [0.95, 0.90]
+
+
+def test_parse_rapidocr_real_format():
+    """RapidOCR 真实输出：list[[box(list), text, score(str)], ...]（score 已字符串化）。"""
+    data = [
+        [[[10, 20], [30, 20], [30, 40], [10, 40]], "补气", "0.95"],
+        [[[50, 20], [70, 20], [70, 40], [50, 40]], "方用", "0.90"],
+    ]
+    r = _parse_rapidocr_result(data)
+    assert r.text == "补气方用"
+    assert abs(r.confidence - 0.925) < 0.01
+    assert r.char_confidences == [0.95, 0.90]
 
 
 def test_parse_rapidocr_skips_empty_text():
     data = [
-        ([[10, 20], [30, 20], [30, 40], [10, 40]], ""),
-        ([[50, 20], [70, 20], [70, 40], [50, 40]], "方用"),
+        ([[10, 20], [30, 20], [30, 40], [10, 40]], "", 0.99),
+        ([[50, 20], [70, 20], [70, 40], [50, 40]], "方用", 0.90),
     ]
     r = _parse_rapidocr_result(data)
     assert r.text == "方用"
     assert len(r.boxes) == 1
+    # 空文本行的 score 不应计入页级置信度
+    assert r.char_confidences == [0.90]
