@@ -320,6 +320,8 @@ def main(argv=None) -> int:
     try:
         if hasattr(args, "bench_func"):
             return args.bench_func(args)
+        if hasattr(args, "review_func"):
+            return args.review_func(args)
         return args.func(args)
     except khub_client.KHUBError as e:
         log.error("%s", e)

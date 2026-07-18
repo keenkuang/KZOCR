@@ -51,39 +51,35 @@ def test_resolve_anomaly(db_with_anomalies):
 
 # ── CLI 模拟测试 ──
 
-def test_review_list_no_anomalies(monkeypatch):
+def test_review_manifest_no_anomalies(monkeypatch):
     td = tempfile.mkdtemp()
     os.environ["KZOCR_DB_DIR"] = td
     db = BookDB("empty-book", db_dir=td)
     db.close()
-    from kzocr.cli_review import cmd_review_list
+    monkeypatch.setattr("kzocr.cli_review.load_config",
+                        lambda: type("Cfg", (), {"scheduler": type("S", (), {"db_dir": td})()})())
+    from kzocr.cli_review import cmd_review_manifest
     from argparse import Namespace
-    args = Namespace(book_code="empty-book", limit=50)
-    rc = cmd_review_list(args)
+    args = Namespace(book_code="empty-book")
+    rc = cmd_review_manifest(args)
     assert rc == 0
     for f in os.listdir(td):
         os.remove(os.path.join(td, f))
     os.rmdir(td)
 
 
-def test_review_show_resolve(monkeypatch, capsys):
-    td = tempfile.mkdtemp()
-    os.environ["KZOCR_DB_DIR"] = td
-    db = BookDB("demo", db_dir=td)
-    db.init_page(5)
-    db.record_anomaly(5, GlyphVerdict(status="FAIL", confidence=1.0), ["TestDet"])
-    db.close()
-    from kzocr.cli_review import cmd_review_show, cmd_review_resolve
+def test_review_apply_with_data(monkeypatch, capsys, db_with_anomalies):
+    td = db_with_anomalies
+    monkeypatch.setattr("kzocr.cli_review.load_config",
+                        lambda: type("Cfg", (), {"scheduler": type("S", (), {"db_dir": td})()})())
+    from kzocr.cli_review import cmd_review_manifest, cmd_review_apply
     from argparse import Namespace
-    args = Namespace(book_code="demo", id=1)
-    rc = cmd_review_show(args)
+    # manifest
+    args = Namespace(book_code="test-book")
+    rc = cmd_review_manifest(args)
     assert rc == 0
-    args2 = Namespace(book_code="demo", id=1, status="fixed", note="已修正")
-    rc2 = cmd_review_resolve(args2)
+    out, _ = capsys.readouterr()
+    assert "test-book" in out
+    # apply
+    rc2 = cmd_review_apply(args)
     assert rc2 == 0
-    db2 = BookDB("demo", db_dir=td)
-    assert len(db2.get_unresolved_anomalies("demo")) == 0
-    db2.close()
-    for f in os.listdir(td):
-        os.remove(os.path.join(td, f))
-    os.rmdir(td)
