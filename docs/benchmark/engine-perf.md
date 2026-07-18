@@ -80,7 +80,7 @@
 - **结论**：开启 `return_word_box=True` 的额外开销落在测量噪声内（< 1%，绝对增量 ≈ 0），可视为**零成本**。逐字框由识别头顺带输出，不触发额外的检测/识别前向，因此对端到端吞吐无实质影响。DPI 72 与 150 下开销同构（均为识别头增量），故仅以 DPI 72 代表。
 - **遗留项（已消解）**：原「char_boxes 开启后二次耗时」待跟进 → 已实测，结论为零成本，不再阻塞。
 
-> ⚠️ 实现注记（非性能）：PaddleOCR 3.7.0 已将 `.ocr()` 标记为弃用（DeprecationWarning，建议改用 `predict`），当前仍可正常返回（含 `return_word_box`）。适配器迁移到 `predict` 属独立 follow-up，不影响本结论。
+> ⚠️ 实现注记（非性能）：PaddleOCR 3.7.0 已将 `.ocr()` 标记为弃用（建议改用 `predict`）。`PaddleOCRAdapter` 已迁移到 `predict`（`return_word_box` 行为一致，`predict` 路径实测与 `.ocr` 输出逐字相同：37 行 / 801 字框）。`tcm_ocr` 平行栈用的是 MinerU `PytorchPaddleOCR`（`det=True/False` 签名，不弃用），不在本次迁移范围。
 
 ### 6.2 测试环境固定
 - 硬件随时间可能变化（本机 CPU 型号、负载），跨机器数值不可直接比较；本文数值仅表征**相对关系**（DPI 倍数、引擎倍速、单例稳定性），结论不依赖绝对秒数。

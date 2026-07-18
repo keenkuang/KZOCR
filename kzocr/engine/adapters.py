@@ -31,8 +31,8 @@ class PaddleOCRAdapter:
 
     **性能优化**：
     - 进程级单例引擎，避免重复加载模型（~4min on CPU）
-    - 启用 MKLDNN + rec_batch_num=6 加速 CPU 推理
-    - 跳过角分类（use_angle_cls=False，古籍扫描页无旋转）
+    - 启用 MKLDNN + text_recognition_batch_size=6 加速 CPU 推理
+    - 跳过行朝向分类（use_textline_orientation=False，古籍扫描页无旋转）
     """
 
     _engine_global = None  # 进程级单例
@@ -45,8 +45,8 @@ class PaddleOCRAdapter:
             import logging as _log
             _log.getLogger("ppocr").setLevel(_log.WARNING)
             cls._engine_global = PaddleOCR(
-                use_angle_cls=False,
-                rec_batch_num=6,
+                use_textline_orientation=False,
+                text_recognition_batch_size=6,
             )
         return cls._engine_global
 
@@ -57,7 +57,8 @@ class PaddleOCRAdapter:
         engine = self._get_engine()
         img = page.img
         # return_word_box=True → 额外返回逐字 text_word / text_word_boxes（字符级 bbox）
-        res = engine.ocr(img, return_word_box=True)
+        # 注：PaddleOCR ≥3.7 弃用 .ocr()，改用 .predict()（输出格式一致）
+        res = engine.predict(img, return_word_box=True)
         return _parse_ppocr_result(res)
 
     def run_book(self, pdf_path: str, book_code: str = "", max_pages: int = 0) -> BookResult:

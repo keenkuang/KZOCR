@@ -46,7 +46,7 @@ def test_parse_ppocr_list_format():
 def test_parse_ppocr_paddlex_page_format():
     """PaddleX 页面级 OCRResult（dict 子类）：rec_texts / rec_polys / text_word_boxes。
 
-    对应真实引擎 eng.ocr(img, return_word_box=True) 的输出结构。
+    对应真实引擎 eng.predict(img, return_word_box=True) 的输出结构。
     """
     data = [{
         "rec_texts": ["补气", "方用"],

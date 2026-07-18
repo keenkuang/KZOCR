@@ -2,8 +2,8 @@
 """char_boxes 耗时基准：量化开启 return_word_box（字符级 bbox）的额外开销。
 
 对比同一页在两种模式下 PaddleOCR 的端到端耗时（含解析）：
-- OFF: engine.ocr(img, return_word_box=False)  行级识别
-- ON : engine.ocr(img, return_word_box=True)   行级 + 逐字 bbox（生产默认）
+- OFF: engine.predict(img, return_word_box=False)  行级识别
+- ON : engine.predict(img, return_word_box=True)   行级 + 逐字 bbox（生产默认）
 
 复用 PaddleOCRAdapter 进程级单例，避免重复加载模型；两种模式共享同一
 检测/识别图，开销仅来自逐字 bbox 头，因此相对开销与 DPI 近似无关——
@@ -34,7 +34,7 @@ def bench(pdf: str, pages: int, dpi: int) -> dict:
 
     # 预热：生产默认 ON 模式触发首图构图（不计入基准）
     warm = _render(doc, 0, dpi)
-    engine.ocr(warm, return_word_box=True)
+    engine.predict(warm, return_word_box=True)
     print(">>> 预热完成（ON 模式首图构图，已丢弃）")
 
     off_times, on_times, char_counts, line_counts = [], [], [], []
@@ -42,12 +42,12 @@ def bench(pdf: str, pages: int, dpi: int) -> dict:
         img = _render(doc, i, dpi)
 
         t0 = time.time()
-        res_off = engine.ocr(img, return_word_box=False)
+        res_off = engine.predict(img, return_word_box=False)
         _parse_ppocr_result(res_off)
         off_times.append(time.time() - t0)
 
         t0 = time.time()
-        res_on = engine.ocr(img, return_word_box=True)
+        res_on = engine.predict(img, return_word_box=True)
         r_on = _parse_ppocr_result(res_on)
         on_times.append(time.time() - t0)
 
