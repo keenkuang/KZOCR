@@ -1,7 +1,7 @@
 # 引擎性能基线对比结论（PaddleOCR vs RapidOCR）
 
 > 归档日期：2026-07-18
-> 数据源：`scripts/bench_engine_compare.py`（DPI 对比）+ `scripts/bench_paddle_perf.py`（多页连续）
+> 数据源：`scripts/bench_engine_compare.py`（DPI 对比）+ `scripts/bench_paddle_perf.py`（多页连续）+ `scripts/bench_char_boxes.py`（char_boxes 开销对照）
 > 关联提交：`8cf0289`（PaddleOCR 进程级单例 + CPU 推理优化）、`5f2a4d8`、`53b4f84`
 
 ## 1. 测试环境
@@ -66,10 +66,21 @@
 
 ## 6. 已知观察与遗留项
 
-### 6.1 字符级 bbox 现状（已澄清）
-- 本次基准（2026-07-18）跑在 char_boxes 落地之前，`run_page` 返回的**行级** `boxes` 长度为 0、`text` 正常，故基准未计入字符级 bbox 开销。
-- 现状（DB 分层 Phase 1 / PR #19 之后）：`PaddleOCRAdapter` 已启用 `return_word_box=True`（`adapters.py:60`），`char_boxes` 字段可正常返回（真实引擎单页 801 个逐字框，见 DB 分层验证）。RapidOCR 无字符级框，`char_boxes=None`。
-- **遗留项**：当前基线未包含「开启 char_boxes 后」的二次耗时对比。开启逐字框解析会额外增加 `return_word_box` 后处理的开销，但其对端到端耗时的影响量级尚未量化。若需评估汉字级 bbox 的生产成本，应补一轮「关 / 开 char_boxes」对照基准（属独立 follow-up，不阻塞本结论）。
+### 6.1 字符级 bbox 开销（已实测，2026-07-18）
+- 早期基准（DB 分层 Phase 1 之前）跑在 char_boxes 落地之前，`run_page` 返回的**行级** `boxes` 长度为 0，故未计入字符级 bbox 开销。
+- 现状：`PaddleOCRAdapter` 已启用 `return_word_box=True`（`adapters.py:60`），`char_boxes` 字段正常返回（真实引擎单页 801 个逐字框，见 DB 分层验证）。RapidOCR 无字符级框，`char_boxes=None`。
+- **char_boxes 耗时对照基准**（`scripts/bench_char_boxes.py`，DPI=72，5 页，同页先后跑 OFF `return_word_box=False` / ON `return_word_box=True`，含解析）：
+
+  | 模式 | 单页均值(s) | 5 页逐字框总量 | 行数 |
+  |------|------------:|---------------:|-----:|
+  | OFF（关逐字框） | 21.1 | 0 | 0 |
+  | ON（开逐字框）  | 21.0 | 3521 | 171 |
+  | **增量** | **−0.1s（−0.3%）** | — | — |
+
+- **结论**：开启 `return_word_box=True` 的额外开销落在测量噪声内（< 1%，绝对增量 ≈ 0），可视为**零成本**。逐字框由识别头顺带输出，不触发额外的检测/识别前向，因此对端到端吞吐无实质影响。DPI 72 与 150 下开销同构（均为识别头增量），故仅以 DPI 72 代表。
+- **遗留项（已消解）**：原「char_boxes 开启后二次耗时」待跟进 → 已实测，结论为零成本，不再阻塞。
+
+> ⚠️ 实现注记（非性能）：PaddleOCR 3.7.0 已将 `.ocr()` 标记为弃用（DeprecationWarning，建议改用 `predict`），当前仍可正常返回（含 `return_word_box`）。适配器迁移到 `predict` 属独立 follow-up，不影响本结论。
 
 ### 6.2 测试环境固定
 - 硬件随时间可能变化（本机 CPU 型号、负载），跨机器数值不可直接比较；本文数值仅表征**相对关系**（DPI 倍数、引擎倍速、单例稳定性），结论不依赖绝对秒数。
