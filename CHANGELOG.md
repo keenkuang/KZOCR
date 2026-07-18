@@ -1,23 +1,26 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-18T20:00+08
-> 最后更新：2026-07-18 20:00 CST
+> 文档版本：v2026-07-19T20:00+08
+> 最后更新：2026-07-19 20:00 CST
 
 ---
 
-## v2026-07-18 — v0.20 DB 分层 + 字符级 bbox + 跨引擎分歧门控 + 性能基准
+## v2026-07-19 — v0.20 v0.7 调度器层完整落地 + 校对反馈闭环
 
-> **615 tests**（全量通过）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
+> **685 tests**（全量通过）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
 
 | 模块 | 说明 |
 |------|------|
-| DB 分层 | BookDB 新增 `book`/`page`/`line` 内容表（含 `char_boxes` JSON）；`to_zai_prisma` 重构为「打包导出 / 导入校对包」闭环；旧 `custom.db` 冻结；tcm_ocr 平行栈经 `BookPipelineAdapter` 对接主线 `kzocr.engine`，产出主线 `BookResult` 并走主线 `BookDB`/导出闭环 |
-| 字符级 bbox | `AdapterPageResult.char_boxes` 落地（`return_word_box=True`），真实引擎单页 801 逐字框落库读回一致；开销基准证明开启逐字框为**零成本**（<1%） |
-| conf≤0.90 门控 | RapidOCR 适配器置信度传递修复（此前写死 0.7 且丢弃 score）；低置信度 PASS 页挂起待人工复核（`record_anomaly(CONF_LOW)`），`KZOCR_CONF_GATE` 可配 |
-| 性能基准 | DPI 72 vs 150、进程级单例稳定性、引擎倍速（RapidOCR 单页≈PaddleOCR 1/13）结论归档 `docs/benchmark/engine-perf.md`；char_boxes 零成本基准补跑 |
-| 引擎适配器 | `PaddleOCRAdapter` 迁移 `predict`（弃用 `.ocr`）+ 新增弃用告警回归测试（静态源码检查 + 真实引擎动态断言） |
-| orchestrator | 修复全路径卡顿（`run_book` 无视 `max_pages` 全本扫描）；e2e 扩面对齐 orchestrator 版心裁切管线，分歧数字严格可比（5 本古籍分歧/页 7.8–15.6） |
-| 视觉回看 | GLM-4V-Flash 接入 + 真实端到端验证（图形校验 FAIL/PASS 判定合理，确认模型看图非盲答） |
+| v0.7 调度器核心 | EngineRegistry（注册中心 + NDJSON 基准持久化 + 贝叶斯评分 + probe_engines） + EngineScheduler（九步候选选择：pinned/tier/竖排/cloud/backoff/429/预算/加权/Top-N/轮询） + GlyphVerifier + Orchestrator 全部完整实现并运行 |
+| SchedulerConfig | 统一管理 16 个调度环境变量，替换 orchestrator/run_engine/VLM 中散装 env read |
+| review_manifest | 人工校对清单（P0/P1/P2 优先级） + feedback_apply 回写 BookDB |
+| CLI benchmark | `kzocr benchmark status/history/run/reset` 子命令 |
+| DB 分层 + Celery | BookDB 内容表 + 导出/导入闭环 + Celery 生产链路 KZOCR_PERSIST_DB 持久化 |
+| 字符级 bbox | char_boxes 落地，零成本开销基准落地 |
+| conf≤0.90 门控 | RapidOCR 置信度传递修复 + 低置信 PASS 页挂起复核 |
+| 引擎适配器 | PaddleOCRAdapter 迁移 predict + 弃用告警回归测试 + AllEnginesFailedError 异常 |
+| 性能基准 | DPI 72/150、进程单例、引擎倍速结论归档 |
+| 视觉回看 | GLM-4V-Flash 生产接线 + 端到端验证 |
 
 ## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
 
