@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""多古籍跨引擎分歧对齐扩面验证（轻量路径）。
+"""多古籍跨引擎分歧对齐扩面验证（与 orchestrator 全路径对齐的渲染管线）。
 
-绕过 orchestrator 重流水线，直接：
-  渲染(150dpi) → PaddleOCR + RapidOCR 双引擎 → run_cross_align（与 orchestrator 同一函数）
-  → 汇总每本书的「总分歧 / 高优先级分歧」数量，验证跨引擎分歧对齐在更多古籍上的泛化性。
+渲染阶段复用 orchestrator 全路径的同一管线（_pdf_page_to_numpy + 版心裁切
+_crop_to_body + 最长边≤2048 缩放），使双引擎分歧数字与 orchestrator 全路径
+（秘方求真/验方新编 的参考数）严格可比，不再混入「全页 vs 版心裁切」的方法论差异。
 
+双引擎比对仍走轻量直驱（绕过 orchestrator 逐页验证/落库），仅渲染与主编排对齐。
 依赖：paddleocr、rapidocr_onnxruntime（本机已装）。
 用法：
   python scripts/e2e_expand_books.py --pdf <书1.pdf> --pdf <书2.pdf> --pages 20
@@ -21,22 +22,32 @@ import fitz
 import numpy as np
 
 from kzocr.engine.adapters import PaddleOCRAdapter, RapidOCRAdapter
+from kzocr.engine.run import _crop_to_body, _pdf_page_to_numpy
 from kzocr.engine.types import PageInput
 from kzocr.scheduler.cross_align import load_confusion_set, run_cross_align
 
 
-def render_page(pdf: str, page_num: int, dpi: int = 150) -> np.ndarray:
+def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048) -> np.ndarray:
+    """渲染单页为 (H,W,3) RGB，并应用与 orchestrator 全路径一致的版心裁切 + 缩放。
+
+    对齐目的：orchestrator 全路径用 render_pages（_pdf_page_to_numpy + _crop_to_body +
+    最长边≤max_pixels 缩放）做版心裁切，去掉两引擎共错的页眉/页脚；扩面脚本此前用全页
+    渲染，导致分歧绝对数偏高。此处复用同一管线，使分歧数字与 orchestrator 全路径严格可比。
+    """
     doc = fitz.open(pdf)
     try:
-        pix = doc[page_num].get_pixmap(dpi=dpi)
-        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
-            pix.height, pix.width, pix.n
-        )
-        if img.shape[2] == 4:
-            img = img[:, :, :3]
-        return img
+        img = _pdf_page_to_numpy(doc[page_num], dpi=dpi)
     finally:
         doc.close()
+    img = _crop_to_body(img, page_num=page_num)
+    h, w = img.shape[:2]
+    scale = min(max_pixels / max(h, w), 1.0)
+    if scale < 1.0:
+        from PIL import Image as PILImage
+        pil = PILImage.fromarray(img)
+        pil = pil.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
+        img = np.array(pil)
+    return img
 
 
 def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set) -> dict:
@@ -97,9 +108,9 @@ def main() -> int:
         print("[ERR] 未提供任何 PDF（用 --pdf 或 --list）", flush=True)
         return 2
 
-    print(f"[info] 加载 PaddleOCRAdapter ...", flush=True)
+    print("[info] 加载 PaddleOCRAdapter ...", flush=True)
     paddle = PaddleOCRAdapter()
-    print(f"[info] 加载 RapidOCRAdapter ...", flush=True)
+    print("[info] 加载 RapidOCRAdapter ...", flush=True)
     rapid = RapidOCRAdapter()
     confusion_set = load_confusion_set()
 
