@@ -603,6 +603,22 @@ class PagePipeline:
                         "text": text,
                         "confidence": confidence,
                     }
+
+                    # §3.3 字符级 bbox（仅 PaddleOCR 引擎，复用已有 extract_char_bboxes）。
+                    # orig_line_h/orig_line_w 取行 ROI 自身尺寸 roi.shape[:2]，
+                    # 切勿传整页高/宽；extract_char_bboxes 直接返回页绝对坐标，不再偏移。
+                    if engine_name == "paddleocr" and hasattr(engine, "recognize_char_level"):
+                        try:
+                            char_details = engine.recognize_char_level(roi)
+                            if char_details:
+                                line["char_bboxes"] = engine.extract_char_bboxes(
+                                    [x1, y1, x2, y2],
+                                    char_details,
+                                    roi.shape[0],
+                                    roi.shape[1],
+                                )
+                        except Exception as e:
+                            logger.debug("字符级识别失败 (行 bbox=%s): %s", [x1, y1, x2, y2], e)
                 except Exception as e:
                     logger.debug("引擎 %s 识别失败: %s", engine_name, e)
                     continue

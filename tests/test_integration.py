@@ -115,7 +115,7 @@ def test_tier1_fails_tier3_takes_over(mini_pdf, tdb):
     reg = EngineRegistry()
     # Tier1: 抛出异常的书级引擎
     class FailingBookAdapter:
-        def run_book(self, pdf): raise RuntimeError("T1 crash")
+        def run_book(self, pdf, **kwargs): raise RuntimeError("T1 crash")
         def run_page(self, pi): raise NotImplementedError
     reg.register_adapter(
         AdapterMeta(name="t1_fail", label="T1 Fail", tier=1, batch_capable=True),
@@ -138,7 +138,7 @@ class MockPageAdapter:
     """页级 mock 适配器。"""
     def __init__(self, texts: list[str]):
         self.texts = list(texts)
-    def run_book(self, pdf): raise NotImplementedError
+    def run_book(self, pdf, **kwargs): raise NotImplementedError
     def run_page(self, pi: PageInput) -> AdapterPageResult:
         t = self.texts.pop(0) if self.texts else "fallback"
         return AdapterPageResult(text=t)
@@ -149,7 +149,7 @@ def test_all_tiers_fail(mini_pdf, tdb):
     os.environ["KZOCR_DB_DIR"] = tdb
     reg = EngineRegistry()
     class FailAdapter:
-        def run_book(self, pdf): raise RuntimeError("fail")
+        def run_book(self, pdf, **kwargs): raise RuntimeError("fail")
         def run_page(self, pi): raise RuntimeError("fail")
     for tier, name, kw in [(1, "t1_fail", {"batch_capable": True}),
                             (2, "t2_fail", {"requires_network": True}),

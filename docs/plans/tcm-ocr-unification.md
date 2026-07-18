@@ -115,17 +115,11 @@ Celery 任务仍直接调 `process_book`（不经适配器），不受影响。
 
 ### 3.4 统一落库（G2）
 
-落库放在**适配器**层（book_code 已知、真实），不在 `process_book` 内（避免 "TCM-UNK" 主键）：
+落库**统一由 `run_engine` 处理**（`kzocr/engine/run.py:131` 的 `KZOCR_PERSIST_DB` 开关，以真实 `book_code` 落 `BookDB.persist_book_result`）。**适配器 `run_book` 不再内嵌落库**——否则「run_engine → 适配器 → run_engine 再次落库」会双重写（虽 UPSERT 幂等无数据丢失，但 kimi 路径每本多一次全量 DB 写，且与主线 `PaddleOCRAdapter.run_book` 不落库、`run_engine` 统一落库的做法不一致）。
 
-```python
-# engine_runners.py BookPipelineAdapter.run_book 末尾
-book_result = book_result_from_tcm_ocr(...)
-if os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True"):
-    from kzocr.storage.db import BookDB
-    BookDB.persist_book_result(book_result, db_dir=os.environ.get("KZOCR_DB_DIR", ""))
-return book_result
-```
-与 Phase 1/2 主线完全一致（`run_engine` 同开关）。**不删除** book_pipeline 自建 snake_case SQLite（Celery 下游读者仍在），但明确主线 BookDB 为**权威 of record**，新读/导出均走主线 BookDB。
+> 实施修正（code review WARNING）：初版设计把落库放在适配器内，复审发现与 `run_engine` 落库重复，已改为仅由 `run_engine` 落库，适配器只产出归一化 `BookResult`。
+
+**不删除** book_pipeline 自建 snake_case SQLite（Celery 下游读者仍在），但明确主线 BookDB 为**权威 of record**，新读/导出均走主线 BookDB。
 
 > **已知分歧（WARNING）**：上述落库仅发生在「主线 `run_engine` → 适配器 `run_book`」路径。`celery_tasks/tasks.py` 仍直接调 `process_book`（不经适配器），**不会**走 `KZOCR_PERSIST_DB` 落主线 BookDB——Celery 生产链路仍只写自建 snake_case SQLite + Postgres 归档。本轮**刻意不改造 Celery 路径**（避免触碰生产异步链路）；其统一落库留作后续任务。测试以适配器路径为准，Celery 路径仅保证不被改动破坏。
 

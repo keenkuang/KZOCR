@@ -60,7 +60,7 @@ class PaddleOCRAdapter:
         res = engine.ocr(img, return_word_box=True)
         return _parse_ppocr_result(res)
 
-    def run_book(self, pdf_path: str) -> BookResult:
+    def run_book(self, pdf_path: str, book_code: str = "") -> BookResult:
         """书级执行：逐页渲染 → run_page → BookResult。"""
         import fitz
         doc = fitz.open(pdf_path)
@@ -77,7 +77,7 @@ class PaddleOCRAdapter:
                     page_num=i, text=result.text, confidence=result.confidence,
                     char_boxes=result.char_boxes,
                 ))
-            return BookResult(book_code="", title="", pages=pages)
+            return BookResult(book_code=book_code, title="", pages=pages)
         finally:
             doc.close()
 
@@ -180,7 +180,7 @@ class RapidOCRAdapter:
         out, _ = self._engine(img)
         return _parse_rapidocr_result(out)
 
-    def run_book(self, pdf_path: str) -> BookResult:
+    def run_book(self, pdf_path: str, book_code: str = "") -> BookResult:
         """书级执行：逐页渲染 → run_page → BookResult。"""
         import fitz
         doc = fitz.open(pdf_path)
@@ -197,7 +197,7 @@ class RapidOCRAdapter:
                     page_num=i, text=result.text, confidence=result.confidence,
                     char_boxes=result.char_boxes,
                 ))
-            return BookResult(book_code="", title="", pages=pages)
+            return BookResult(book_code=book_code, title="", pages=pages)
         finally:
             doc.close()
 

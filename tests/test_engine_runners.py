@@ -57,17 +57,20 @@ def test_book_pipeline_adapter_run_page_raises():
 
 def test_book_pipeline_adapter_no_init_raises():
     adapter = BookPipelineAdapter("test_book")
-    with pytest.raises(RuntimeError, match="not initialized"):
-        adapter.run_book("fake.pdf")
+    with pytest.raises(RuntimeError, match="pipeline_config"):
+        adapter.run_book("fake.pdf", book_code="TEST")
 
 
 def test_book_pipeline_adapter_with_mock_pipeline():
     adapter = BookPipelineAdapter("test_book")
     mock_pipeline = MagicMock()
     mock_pipeline.process_book.return_value = BookResult(book_code="test", title="test")
+    mock_pipeline.page_results = []
     adapter._pipeline = mock_pipeline
-    result = adapter.run_book("fake.pdf")
-    assert result.book_code == "test"
+    # run_book 始终用传入的 book_code 经转换器产出 BookResult（忽略 process_book 返回值）
+    result = adapter.run_book("fake.pdf", book_code="TEST")
+    assert result.book_code == "TEST"
+    assert result.pages == []
 
 
 # ── v0.7 run_engine 集成 ──

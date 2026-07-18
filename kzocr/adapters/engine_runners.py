@@ -19,6 +19,7 @@ from kzocr.engine.types import (
     BookResult,
     PageInput,
 )
+from kzocr.tcm_ocr.pipeline.book_result_convert import book_result_from_tcm_ocr
 
 
 class MockAdapter:
@@ -27,7 +28,7 @@ class MockAdapter:
     def __init__(self, book_code: str = "TCM-MOCK-001") -> None:
         self.book_code = book_code
 
-    def run_book(self, pdf_path: str) -> BookResult:
+    def run_book(self, pdf_path: str, **kwargs) -> BookResult:
         from kzocr.engine.mock import mock_book_result
         result = mock_book_result(book_code=self.book_code)
         # 确保每个 page 的 text 字段填充（E4 _join_paragraphs 回退机制依赖）
@@ -55,10 +56,14 @@ class BookPipelineAdapter:
     加载失败。
     """
 
-    def __init__(self, engine_name: str = "kimi", temperature: float = 0.0) -> None:
+    def __init__(self, engine_name: str = "kimi", pipeline_config: Optional[dict] = None, temperature: float = 0.0) -> None:
         self.engine_name = engine_name
         self.temperature = temperature
+        self._pipeline_config = pipeline_config
         self._pipeline = None
+        # pipeline_config 在构造时即传入则预初始化（run.py:_init_v07_registry 注入）
+        if pipeline_config:
+            self._ensure_pipeline(pipeline_config)
 
     def _ensure_pipeline(self, config: dict) -> None:
         if self._pipeline is not None:
@@ -66,14 +71,30 @@ class BookPipelineAdapter:
         from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
         self._pipeline = BookPipeline(config)
 
-    def run_book(self, pdf_path: str, pipeline_config: Optional[dict] = None) -> BookResult:
-        """处理全书。pipeline_config 仅在首次初始化时使用。"""
-        if pipeline_config:
-            self._ensure_pipeline(pipeline_config)
+    def run_book(self, pdf_path: str, *, book_code: str, **kw) -> BookResult:
+        """处理全书并返回主线归一化 BookResult（G1 闭环）。
+
+        Args:
+            pdf_path: PDF 路径。
+            book_code: 真实书籍编码（G2 主键一致；空则降级 "TCM-UNK"）。
+            **kw: 透传给 book_result_from_tcm_ocr（title/author/...）。
+        """
         if self._pipeline is None:
-            raise RuntimeError("BookPipelineAdapter not initialized: call with pipeline_config first")
-        result = self._pipeline.process_book(pdf_path, self.engine_name)
-        return result
+            if self._pipeline_config is None:
+                raise RuntimeError(
+                    "BookPipelineAdapter 未配置 pipeline_config：请在 __init__ 传入"
+                )
+            self._ensure_pipeline(self._pipeline_config)
+        self._pipeline.process_book(pdf_path, book_code or "TCM-UNK")
+        book_result = book_result_from_tcm_ocr(
+            self._pipeline.page_results,
+            book_code=book_code or "TCM-UNK",
+            engine_label=self.engine_name,
+            **kw,
+        )
+        # 落库统一由 run_engine（KZOCR_PERSIST_DB 开关）处理，避免与适配器内落库双重写。
+        # 适配器仅负责产出归一化 BookResult；run_engine 已持有真实 book_code。
+        return book_result
 
     def run_page(self, page: PageInput) -> AdapterPageResult:
         raise NotImplementedError(f"{self.engine_name} is a book-level engine; use run_book()")
@@ -89,7 +110,7 @@ class VlmPageAdapter:
         self.engine_name = engine_name
         self.temperature = temperature
 
-    def run_book(self, pdf_path: str) -> BookResult:
+    def run_book(self, pdf_path: str, **kwargs) -> BookResult:
         raise NotImplementedError(
             f"{self.engine_name} is a page-level VLM engine; use run_page()"
         )

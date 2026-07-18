@@ -61,7 +61,7 @@ def _init_v07_registry(cfg) -> EngineRegistry:
         reg.register_adapter(
             AdapterMeta(name="kimi", label="Kimi Pipeline", tier=1, kind="book", batch_capable=True),
             EC(),
-            adapter=BookPipelineAdapter("kimi", temperature=0.0),
+            adapter=BookPipelineAdapter("kimi", pipeline_config=_build_engine_config(), temperature=0.0),
         )
     # Tier 1: 本地 CPU OCR 引擎（无密钥、无 GPU 时可用）
     _try_register_local_engine(reg, "paddleocr", "PaddleOCR PP-OCRv6", tier=1 if not cfg.kimi_engine_dir else 2)

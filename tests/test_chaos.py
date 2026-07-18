@@ -65,7 +65,7 @@ def test_tier2_failure_falls_to_tier3():
     """注入 Tier2 异常，验证降级到 Tier3。"""
 
     class FailAdapter:
-        def run_book(self, pdf):
+        def run_book(self, pdf, **kwargs):
             return BookResult(book_code="x", title="x", pages=[PageResult(page_num=0, text="正文")])
         def run_page(self, pi):
             raise RuntimeError("T2 crash")
@@ -73,7 +73,7 @@ def test_tier2_failure_falls_to_tier3():
     tier3_texts = iter(["黄芪补气"])
 
     class Tier3Adapter:
-        def run_book(self, pdf):
+        def run_book(self, pdf, **kwargs):
             raise NotImplementedError
         def run_page(self, pi):
             t = next(tier3_texts)
@@ -100,7 +100,7 @@ def test_all_tiers_fail_returns_failed_pages():
     class AlwaysFail:
         def __init__(self):
             self.calls = 0
-        def run_book(self, pdf):
+        def run_book(self, pdf, **kwargs):
             raise RuntimeError("book fail")
         def run_page(self, pi):
             raise RuntimeError("page fail")

@@ -69,7 +69,7 @@ class FakeBookAdapter:
     def __init__(self, pages=None):
         self.pages = pages or []
 
-    def run_book(self, pdf_path):
+    def run_book(self, pdf_path, **kwargs):
         return BookResult(book_code="test", title="Test", pages=self.pages)
 
     def run_page(self, pi):
@@ -80,7 +80,7 @@ class FakePageAdapter:
     def __init__(self, responses=None):
         self.responses = list(responses or [])
 
-    def run_book(self, pdf_path):
+    def run_book(self, pdf_path, **kwargs):
         raise NotImplementedError
 
     def run_page(self, pi):

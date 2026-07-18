@@ -12,6 +12,7 @@
 
 import json
 import logging
+import os
 import shutil
 import sqlite3
 from datetime import datetime
@@ -120,9 +121,15 @@ def archive_to_postgresql(
         _archive_proofread_records(book_id, db_book, db_pg)
         logger.info("[%s] ProofreadRecord 归档完成", book_id)
 
-        # 2. 归档引擎结果
-        _archive_engine_results(book_id, db_book, db_pg)
-        logger.info("[%s] LineEngineResult 归档完成", book_id)
+        # 2. 归档引擎结果（决策 #2：默认停写逐行 OCR，仅留 BookContentTree）
+        if os.environ.get("KZOCR_ARCHIVE_LINE_RESULTS", "0") in ("1", "true", "True"):
+            _archive_engine_results(book_id, db_book, db_pg)
+            logger.info("[%s] LineEngineResult 归档完成", book_id)
+        else:
+            logger.info(
+                "[%s] 跳过逐行 OCR 归档（KZOCR_ARCHIVE_LINE_RESULTS 未启用，决策 #2）",
+                book_id,
+            )
 
         # 3. 归档 ContentNode 树
         _archive_content_tree(book_id, db_book, db_pg)

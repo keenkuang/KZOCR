@@ -188,7 +188,7 @@ class EngineRunner(Protocol):
         """页级执行：输入单页图像，返回归一化结果。"""
         ...
 
-    def run_book(self, pdf_path: str) -> "BookResult":
+    def run_book(self, pdf_path: str, *, book_code: str = "") -> "BookResult":
         """书级执行：输入 PDF 路径，返回全书结果。仅在 kind='book' 时支持。"""
         ...
 

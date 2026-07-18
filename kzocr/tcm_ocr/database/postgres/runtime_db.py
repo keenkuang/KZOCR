@@ -2009,14 +2009,13 @@ class RuntimeDB:
                 """
                 SELECT
                     (SELECT COUNT(*) FROM LineCorrectionArchive WHERE book_registry_id = %s) as correction_count,
-                    (SELECT COUNT(*) FROM OCRLineResultArchive WHERE book_registry_id = %s) as ocr_result_count,
                     (SELECT COUNT(*) FROM PageRenderLog WHERE book_registry_id = %s) as render_count,
                     (SELECT COUNT(*) FROM FormulaCompositionArchive WHERE book_registry_id = %s) as formula_count,
                     (SELECT COUNT(*) FROM NegationAlertLog WHERE line_id IN (
                         SELECT original_line_id FROM LineCorrectionArchive WHERE book_registry_id = %s
                     )) as negation_alert_count
                 """,
-                (book_registry_id,) * 5,
+                (book_registry_id,) * 4,
             )
             result = cursor.fetchone()
             return dict(result) if result else {}
