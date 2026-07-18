@@ -256,6 +256,29 @@ def process_book_task(
         # 执行处理（简化：process_book 内部处理进度）
         result = pipeline.process_book(pdf_path=pdf_path, book_id=book_id)
 
+        # ── DB 分层闭环：将 tcm_ocr 产出持久化到主线 BookDB ──
+        # KZOCR_PERSIST_DB=1 时触发（与 run_engine 落库开关一致），失败不影响
+        # 主流程（log 告警），确保生产链路不因落库异常中断。
+        if os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True"):
+            try:
+                from kzocr.tcm_ocr.pipeline.book_result_convert import book_result_from_tcm_ocr
+                from kzocr.storage.db import BookDB
+
+                book_result = book_result_from_tcm_ocr(
+                    pipeline.page_results,
+                    book_code=book_id,
+                    engine_label="tcm_ocr",
+                )
+                BookDB.persist_book_result(
+                    book_result,
+                    db_dir=config.get("db_dir", os.environ.get("KZOCR_DB_DIR", "")),
+                )
+                logger.info("[%s] 主线 BookDB 落库完成: %d pages", book_id, len(book_result.pages))
+            except Exception as exc:
+                logger.error(
+                    "[%s] 主线 BookDB 落库失败: %s", book_id, exc, exc_info=True,
+                )
+
         # 更新状态为完成
         _update_book_status(book_id, "completed", book_library_dir, {
             "completed_at": datetime.now().isoformat(),
