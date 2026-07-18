@@ -20,13 +20,48 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from celery import Celery, Task
-from celery.exceptions import MaxRetriesError, SoftTimeLimitExceeded
+from celery.exceptions import SoftTimeLimitExceeded
 
 from kzocr.tcm_ocr.celery_tasks import config as celery_config
 from kzocr.tcm_ocr.pipeline.archival import archive_to_postgresql
 from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# 辅助：DB 分层闭环（tcm_ocr → 主线 BookDB）
+# =============================================================================
+
+
+def _persist_to_mainline_bookdb(
+    page_results: List[Dict[str, Any]],
+    book_id: str,
+    db_dir: str,
+) -> None:
+    """把 tcm_ocr 的 BookPipeline.page_results 转换并持久化到主线 BookDB。
+
+    KZOCR_PERSIST_DB=1 时由 process_book_task 调用（与 run_engine 落库开关一致）。
+    落库失败仅记录告警、不抛出，确保生产链路不因落库异常中断。
+
+    Args:
+        page_results: BookPipeline.process_book 填充的 self.page_results。
+        book_id: 书籍唯一标识（作为 BookDB 主键）。
+        db_dir: BookDB 存放目录。
+    """
+    try:
+        from kzocr.tcm_ocr.pipeline.book_result_convert import book_result_from_tcm_ocr
+        from kzocr.storage.db import BookDB
+
+        book_result = book_result_from_tcm_ocr(
+            page_results,
+            book_code=book_id,
+            engine_label="tcm_ocr",
+        )
+        BookDB.persist_book_result(book_result, db_dir=db_dir)
+        logger.info("[%s] 主线 BookDB 落库完成: %d pages", book_id, len(book_result.pages))
+    except Exception as exc:
+        logger.error("[%s] 主线 BookDB 落库失败: %s", book_id, exc, exc_info=True)
 
 # =============================================================================
 # Celery 应用实例
@@ -208,7 +243,7 @@ def process_book_task(
 
     Raises:
         FileNotFoundError: PDF 文件不存在
-        MaxRetriesError: 达到最大重试次数
+        MaxRetriesExceededError: 达到最大重试次数（由 celery 在 self.retry 耗尽时抛出）
     """
     book_library_dir = config.get("book_library_dir", "/mnt/agents/output/tcm_ocr_library")
 
@@ -260,24 +295,11 @@ def process_book_task(
         # KZOCR_PERSIST_DB=1 时触发（与 run_engine 落库开关一致），失败不影响
         # 主流程（log 告警），确保生产链路不因落库异常中断。
         if os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True"):
-            try:
-                from kzocr.tcm_ocr.pipeline.book_result_convert import book_result_from_tcm_ocr
-                from kzocr.storage.db import BookDB
-
-                book_result = book_result_from_tcm_ocr(
-                    pipeline.page_results,
-                    book_code=book_id,
-                    engine_label="tcm_ocr",
-                )
-                BookDB.persist_book_result(
-                    book_result,
-                    db_dir=config.get("db_dir", os.environ.get("KZOCR_DB_DIR", "")),
-                )
-                logger.info("[%s] 主线 BookDB 落库完成: %d pages", book_id, len(book_result.pages))
-            except Exception as exc:
-                logger.error(
-                    "[%s] 主线 BookDB 落库失败: %s", book_id, exc, exc_info=True,
-                )
+            _persist_to_mainline_bookdb(
+                pipeline.page_results,
+                book_id,
+                config.get("db_dir", os.environ.get("KZOCR_DB_DIR", "")),
+            )
 
         # 更新状态为完成
         _update_book_status(book_id, "completed", book_library_dir, {
@@ -297,13 +319,15 @@ def process_book_task(
         logger.error("[%s] 任务失败: %s", book_id, exc, exc_info=True)
         _update_book_status(book_id, "failed", book_library_dir, {"error": str(exc)})
 
-        # 重试
+        # 重试（达到最大重试次数时 celery 内部抛出 MaxRetriesExceededError）
         if self.request.retries < self.max_retries:
             logger.info("[%s] 将在 %d 秒后重试", book_id, self.default_retry_delay)
             raise self.retry(exc=exc, countdown=self.default_retry_delay)
         else:
             logger.error("[%s] 达到最大重试次数，放弃", book_id)
-            raise MaxRetriesError(f"处理书籍 {book_id} 达到最大重试次数") from exc
+            # celery 5.4+ 已移除旧版异常类，改由 self.retry 耗尽时自动抛出
+            # MaxRetriesExceededError，故不再显式引用该类。
+            raise self.retry(exc=exc)
 
 
 # =============================================================================
