@@ -33,6 +33,11 @@ class PinnedEngineUnavailableError(SchedulerError):
     """手动指定引擎不可用（§4.1 覆盖检查）。"""
 
 
+class AllEnginesFailedError(SchedulerError):
+    """所有可用引擎均失败（§7 E5）。编排主循环中所有 tier 引擎尝试完毕后
+    所有页均未成功时抛出，供上层调用方（如 CLI / Celery）决定是否降级。"""
+
+
 class ApiError(OcrError):
     """API 调用失败（HTTP 错误/超时）。"""
 
