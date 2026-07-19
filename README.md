@@ -27,7 +27,7 @@
 | **Web 面板** | 书籍管理/方剂详情/引擎看板/校对工作台/跨书搜索 |
 | **REST API** | 8 个 JSON 端点，支持第三方系统集成 |
 | **Docker 部署** | 一键 docker compose up |
-| **批量处理** | `kzocr batch` 扫描目录批量处理 PDF |
+| **Celery 异步** | 独立 worker 消费任务，redis broker/backend |
 
 ---
 

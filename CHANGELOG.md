@@ -7,7 +7,7 @@
 
 ## v2026-07-19 — v0.20 v0.7 调度器层完整落地 + 校对反馈闭环
 
-> **685 tests**（全量通过）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
+> **690 tests**（全量通过，2 例 benchmark 标记默认 CI 排除）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
 
 | 模块 | 说明 |
 |------|------|
@@ -21,6 +21,7 @@
 | 引擎适配器 | PaddleOCRAdapter 迁移 predict + 弃用告警回归测试 + AllEnginesFailedError 异常 |
 | 性能基准 | DPI 72/150、进程单例、引擎倍速结论归档 |
 | 视觉回看 | GLM-4V-Flash 生产接线 + 端到端验证 |
+| Celery Worker 部署文档 | README 新增 Celery Worker 节（docker compose redis+worker、broker 环境变量、镜像不含 OCR 引擎说明） |
 
 ## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
 
