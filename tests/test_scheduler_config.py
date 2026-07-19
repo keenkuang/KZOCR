@@ -31,7 +31,7 @@ class TestSchedulerConfigDefaults:
         assert sc.engine_parallel is False
         assert sc.allow_cloud_vision is False
         assert sc.tier_limit == 3
-        assert sc.cross_check is False
+        assert sc.cross_check is True  # 自 v0.7 稳定后默认开
         assert sc.consensus_sample_rate == 0.0
         assert sc.persist_db is False
         assert sc.db_dir == ""

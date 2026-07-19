@@ -14,14 +14,11 @@ from kzocr.engine.types import AdapterMeta, EngineConfig, ProbeResult
 from kzocr.engines.errors import SchedulerError
 from kzocr.scheduler.registry import (
     AVG_LATENCY_DEFAULT_MS,
-    BAYESIAN_C,
-    BAYESIAN_PRIOR,
     GLYPH_PASS_RATE_DEFAULT,
     EngineRegistration,
     EngineRegistry,
     EngineStats,
     _apply_event,
-    _bayesian_score,
     _probe_one,
     probe_engines,
 )
@@ -292,8 +289,8 @@ class TestEngineRegistry:
         r.register(_reg(meta=_am("paddleocr")))
         r.load_benchmarks()
         s = r.get("paddleocr").stats
-        assert s.total_calls == 1  # 损坏行导致文件级跳过（except 在外层），后续有效行不处理
-        assert s.glyph_pass_count == 1
+        assert s.total_calls == 2  # 修复后：损坏行被跳过，同文件其余有效行仍被加载
+        assert s.glyph_pass_count == 2
 
     def test_persist_benchmarks_pending_cleared_without_dir(self):
         """无 benchmark_dir 时 persist 不清 pending（空操作）。"""
@@ -302,36 +299,6 @@ class TestEngineRegistry:
         assert len(r._pending) == 1
         r.persist_benchmarks()
         assert len(r._pending) == 0  # 清空 pending
-
-
-# ──────── _bayesian_score ────────
-
-class TestBayesianScore:
-    def test_cold_start_finite(self):
-        assert _bayesian_score(_reg()) > 0
-
-    def test_with_data(self):
-        r = _reg(stats=EngineStats(
-            total_pages=10, total_latency_ms=10000,
-            glyph_pass_count=9, glyph_fail_count=1,
-        ))
-        assert _bayesian_score(r) > 0
-
-    def test_higher_pass_rate_wins(self):
-        s_hi = EngineStats(total_pages=10, total_latency_ms=10000,
-                            glyph_pass_count=9, glyph_fail_count=1)
-        s_lo = EngineStats(total_pages=10, total_latency_ms=10000,
-                            glyph_pass_count=5, glyph_fail_count=5)
-        assert _bayesian_score(_reg(stats=s_hi)) > _bayesian_score(_reg(stats=s_lo))
-
-    def test_formula_consistency(self):
-        r = _reg(stats=EngineStats(
-            total_pages=5, total_latency_ms=5000,
-            glyph_pass_count=4, glyph_fail_count=1,
-        ))
-        n, pr, lat = 5, 0.8, 1000.0
-        expected = (pr * n + BAYESIAN_C * BAYESIAN_PRIOR) / (n + BAYESIAN_C) * (1.0 / lat)
-        assert _bayesian_score(r) == pytest.approx(expected, rel=0.01)
 
 
 # ──────── probe_engines ────────

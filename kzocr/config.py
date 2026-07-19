@@ -48,7 +48,7 @@ class SchedulerConfig:
     engine_parallel: bool = False
     allow_cloud_vision: bool = False
     tier_limit: int = 3
-    cross_check: bool = False
+    cross_check: bool = True  # 自 v0.7 稳定后默认开；设 KZOCR_ENABLE_CROSS_CHECK=0 关闭
     consensus_sample_rate: float = 0.0
     persist_db: bool = False
     db_dir: str = ""
@@ -69,7 +69,7 @@ class SchedulerConfig:
             engine_parallel=_safe_bool(os.environ.get("KZOCR_ENGINE_PARALLEL", ""), False),
             allow_cloud_vision=_safe_bool(os.environ.get("KZOCR_ALLOW_CLOUD_VISION", ""), False),
             tier_limit=_safe_int(os.environ.get("KZOCR_TIER_LIMIT", "3"), 3, "KZOCR_TIER_LIMIT"),
-            cross_check=_safe_bool(os.environ.get("KZOCR_ENABLE_CROSS_CHECK", ""), False),
+            cross_check=_safe_bool(os.environ.get("KZOCR_ENABLE_CROSS_CHECK", ""), True),
             consensus_sample_rate=float(os.environ.get("KZOCR_CONSENSUS_SAMPLE_RATE", "0.0") or "0.0"),
             persist_db=_safe_bool(os.environ.get("KZOCR_PERSIST_DB", ""), False),
             db_dir=os.environ.get("KZOCR_DB_DIR", ""),

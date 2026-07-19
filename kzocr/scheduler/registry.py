@@ -31,8 +31,6 @@ from kzocr.security.egress import validate_url
 # ── 冷启动与贝叶斯评分常量（v0.7 §3.5）──
 GLYPH_PASS_RATE_DEFAULT = 0.5  # 中等置信度假设，非 0
 AVG_LATENCY_DEFAULT_MS = 10000.0  # 10s 保守估计，非 0
-BAYESIAN_C = 7  # 贝叶斯常数，控制先验权重
-BAYESIAN_PRIOR = 0.7  # 全局先验通过率
 
 
 @dataclass
@@ -303,9 +301,12 @@ class EngineRegistry:
                         line = line.strip()
                         if not line:
                             continue
-                        _apply_event(self.get(engine), json.loads(line))
-            except (json.JSONDecodeError, OSError):
-                continue
+                        try:
+                            _apply_event(self.get(engine), json.loads(line))
+                        except (json.JSONDecodeError, OSError):
+                            continue  # 单行损坏或单行读取失败：跳过该行，不放弃整文件
+            except OSError:
+                continue  # 文件打开/遍历失败：跳过整文件
 
 
 def _apply_event(reg: Optional[EngineRegistration], ev: dict) -> None:
@@ -330,17 +331,6 @@ def _apply_event(reg: Optional[EngineRegistration], ev: dict) -> None:
     if not ev.get("success", True):
         s.last_error = ev.get("error")
     s.last_seen = float(ev.get("ts", s.last_seen))
-
-
-def _bayesian_score(reg: EngineRegistration) -> float:
-    """贝叶斯平均评分（v0.7 §3.5）：
-
-    score = (pass_rate × n + C × prior) / (n + C) × (1 / latency_avg)
-    """
-    n = reg.stats.total_pages
-    pass_rate = reg.glyph_pass_rate
-    latency = reg.avg_latency_per_page_ms
-    return (pass_rate * n + BAYESIAN_C * BAYESIAN_PRIOR) / (n + BAYESIAN_C) * (1.0 / latency)
 
 
 def probe_engines(
