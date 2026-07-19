@@ -7,6 +7,7 @@ import time
 import tempfile
 
 import fitz
+import pytest
 
 from kzocr.config import Config
 from kzocr.engine.run import run_engine
@@ -24,6 +25,7 @@ def _create_pdf(n_pages: int = 100) -> str:
     return pdf.name
 
 
+@pytest.mark.benchmark
 def test_full_book_100_pages():
     """100 页 mock 全书编排应在 60s 内完成。"""
     pdf = _create_pdf(100)
@@ -43,6 +45,7 @@ def test_full_book_100_pages():
         os.rmdir(td)
 
 
+@pytest.mark.benchmark
 def test_full_book_10_pages():
     """10 页 mock 全书编排应在 30s 内完成（新增检测器后阈值放宽）。"""
     pdf = _create_pdf(10)

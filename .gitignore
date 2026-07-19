@@ -23,3 +23,9 @@ kzocr/resources/learned_confusion.json
 
 # 真实书端到端验证产物（scripts/e2e_cross_engine_realbook.py 生成）
 e2e_db/
+
+# 运行时生成产物（非源码，含 BookDB 数据，禁止误提交）
+db/
+e2e_expand/
+e2e_vl_db/
+mock.ndjson

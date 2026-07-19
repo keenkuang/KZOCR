@@ -29,3 +29,9 @@ include = ["kzocr*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 性能基准测试（墙钟断言，机器负载下偶发失败）默认不跑；
+# 显式运行：pytest -m benchmark
+addopts = ["-m", "not benchmark"]
+markers = [
+    "benchmark: 性能基准测试，依赖机器速度，CI 默认跳过，需显式 -m benchmark 运行",
+]
