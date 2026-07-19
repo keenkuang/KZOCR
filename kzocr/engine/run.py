@@ -21,6 +21,7 @@ import fitz
 import numpy as np
 
 from kzocr import config as app_config
+from kzocr.config import Config
 from .types import BookResult, PageResult, ParagraphResult, LineResult
 from kzocr.engines.errors import (
     ApiError,
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 VLM_ENGINE_LABEL = "PaddleOCR-VL-1.6"
 
 
-def _init_v07_registry(cfg) -> EngineRegistry:
+def _init_v07_registry(cfg: Config) -> EngineRegistry:
     """E5: 根据配置构建 v0.7 EngineRegistry，注册可用引擎适配器。"""
     reg = EngineRegistry(benchmark_dir=cfg.scheduler.benchmark_dir)
     if cfg.use_mock:
@@ -107,7 +108,7 @@ def _try_register_local_engine(
             pass  # rapidocr 未安装
 
 
-def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> BookResult:
+def run_engine(pdf_path: str, book_code: str | None = None, config: Config | None = None) -> BookResult:
     cfg = config if config is not None else app_config.config
     logger.info("[engine] v0.7 编排调度系统")
     registry = _init_v07_registry(cfg)
@@ -196,7 +197,7 @@ def _map_cloudllm_env() -> None:
         os.environ["GLM_MODEL"] = os.environ["KZOCR_LLM_MODEL"]
 
 
-def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
+def _run_real(pdf_path: str, cfg: Config, book_code: str | None = None) -> BookResult:
     """调用 kimi tcm_ocr 的 BookPipeline（需安装引擎依赖并配置环境）。"""
     _map_cloudllm_env()
 
@@ -233,7 +234,7 @@ def _run_real(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
     return book
 
 
-def _read_deliverable(result, lib_dir: str, book_id: str) -> str:
+def _read_deliverable(result: object, lib_dir: str, book_id: str) -> str:
     """从 BookPipeline.process_book 的返回字典里取出最终 Markdown。"""
     if isinstance(result, dict):
         for attr in ("final_markdown", "markdown", "final_text"):
@@ -296,7 +297,7 @@ def _markdown_to_pages(markdown: str, book_code: str) -> list[PageResult]:
 # =============================================================================
 
 
-def _init_vlm_adapter(cfg) -> object:
+def _init_vlm_adapter(cfg: Config) -> object:
     """初始化 VLM 适配器，带 SenseNova → PaddleOCR-VL 降级链。
 
     引擎选择（按优先级）：
@@ -343,7 +344,7 @@ def _init_vlm_adapter(cfg) -> object:
     return adapter
 
 
-def _pdf_page_to_numpy(page, dpi: int = 150) -> np.ndarray:
+def _pdf_page_to_numpy(page: "fitz.Page", dpi: int = 150) -> np.ndarray:
     """将 PyMuPDF page 渲染为 (H, W, 3) RGB numpy 数组。
 
     自动处理 RGBA（alpha 通道）和灰度页面的通道转换。
@@ -448,7 +449,7 @@ def _vlm_postprocess(text: str) -> str:
 # ── D3: VLM 逐页缓存（断点续跑）──
 
 
-def _compute_config_hash(cfg) -> str:
+def _compute_config_hash(cfg: Config) -> str:
     """计算 VLM 相关配置的哈希，用于判断缓存是否有效。
 
     包含关键的 VLM 配置变量。配置变更时缓存自动失效。
@@ -466,7 +467,7 @@ def _compute_config_hash(cfg) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def _get_vlm_cache_dir(cfg, safe_book_code: str) -> Path | None:
+def _get_vlm_cache_dir(cfg: Config, safe_book_code: str) -> Path | None:
     """返回 VLM 缓存目录路径。若 kzocr_output_dir 未设置则返回 None（无缓存）。"""
     if not cfg.kzocr_output_dir:
         return None
@@ -515,7 +516,7 @@ def _save_cache_text(cache_dir: Path, page_num: int, text: str, config_hash: str
 # ── D2: VLM 单页处理（含输出长度检查）──
 
 
-def _process_vlm_page(vlm, img: np.ndarray, supports_two_page: bool, next_img: np.ndarray | None = None) -> str:
+def _process_vlm_page(vlm: object, img: np.ndarray, supports_two_page: bool, next_img: np.ndarray | None = None) -> str:
     """处理单页 VLM 识别。返回文本。若文本过长可能抛出 OverSizeError。"""
     imgs = [img]
     if supports_two_page and next_img is not None:
@@ -619,7 +620,7 @@ def _merge_cross_page_breaks(pages_text: list[str]) -> list[str]:
     return result
 
 
-def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
+def _run_vlm(pdf_path: str, cfg: Config, book_code: str | None = None) -> BookResult:
     """绕过 BookPipeline，用 PaddleOCR-VL-1.6 直接逐页 VLM OCR。
 
     流程：PDF 渲染 → VLM 逐页识别 → Markdown 拼接 + 结构化填充 → BookResult。
@@ -703,7 +704,7 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
                 processed_text = _process_vlm_page(vlm, img, supports_two_page, next_ctx)
             except (ApiError, RateLimitedError):
                 # D2: transient API error → retry with exponential backoff
-                def _retry_fn():
+                def _retry_fn() -> str:
                     retry_img = _crop_to_body(_pdf_page_to_numpy(page))
                     retry_ctx = None
                     if supports_two_page and i < len(all_pages) - 1:

@@ -28,7 +28,7 @@ class MockAdapter:
     def __init__(self, book_code: str = "TCM-MOCK-001") -> None:
         self.book_code = book_code
 
-    def run_book(self, pdf_path: str, **kwargs) -> BookResult:
+    def run_book(self, pdf_path: str, **kwargs: object) -> BookResult:
         from kzocr.engine.mock import mock_book_result
         result = mock_book_result(book_code=self.book_code)
         # 确保每个 page 的 text 字段填充（E4 _join_paragraphs 回退机制依赖）
@@ -71,7 +71,7 @@ class BookPipelineAdapter:
         from kzocr.tcm_ocr.pipeline.book_pipeline import BookPipeline
         self._pipeline = BookPipeline(config)
 
-    def run_book(self, pdf_path: str, *, book_code: str, max_pages: int = 0, **kw) -> BookResult:
+    def run_book(self, pdf_path: str, *, book_code: str, max_pages: int = 0, **kw: object) -> BookResult:
         """处理全书并返回主线归一化 BookResult（G1 闭环）。
 
         Args:
@@ -115,7 +115,7 @@ class VlmPageAdapter:
         self.engine_name = engine_name
         self.temperature = temperature
 
-    def run_book(self, pdf_path: str, **kwargs) -> BookResult:
+    def run_book(self, pdf_path: str, **kwargs: object) -> BookResult:
         raise NotImplementedError(
             f"{self.engine_name} is a page-level VLM engine; use run_page()"
         )

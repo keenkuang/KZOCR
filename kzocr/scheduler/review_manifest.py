@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
+from kzocr.storage.db import BookDB
+
 
 @dataclass
 class ReviewIssue:
@@ -36,7 +38,7 @@ class ReviewManifest:
     pages: list[ReviewPageItem]
 
 
-def build_review_manifest(db) -> ReviewManifest:
+def build_review_manifest(db: BookDB) -> ReviewManifest:
     """从 BookDB 的 unresolved anomalies 构建审核清单。
 
     Args:
@@ -92,7 +94,7 @@ def build_review_manifest(db) -> ReviewManifest:
     )
 
 
-def feedback_apply(manifest: ReviewManifest, db) -> int:
+def feedback_apply(manifest: ReviewManifest, db: BookDB) -> int:
     """将审核清单中人工修正的条目回写到底层 BookDB。
 
     遍历 manifest 中所有 page，对其中 issues 的 ``expected`` 字段有值的条目，

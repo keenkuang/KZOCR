@@ -95,7 +95,7 @@ class AdaptiveRateLimiter:
         max_interval: float = 60.0,
         max_entries: int = 10000,
         store: Optional[RateLimitStore] = None,
-    ):
+    ) -> None:
         self._base = base_interval
         self._max = max_interval
         self._current = base_interval
@@ -201,7 +201,7 @@ class MultiTokenRateLimiter:
         # 发起请求…
     """
 
-    def __init__(self, tokens: int, window_seconds: float, key: str = "default"):
+    def __init__(self, tokens: int, window_seconds: float, key: str = "default") -> None:
         if tokens < 1 or tokens > 100000:
             raise ValueError("tokens must be between 1 and 100000")
         if window_seconds <= 0:
@@ -283,7 +283,7 @@ class RateLimitStore:
     重启后配额不丢失（除非使用 :memory:）。
     """
 
-    def __init__(self, db_path: str = ":memory:"):
+    def __init__(self, db_path: str = ":memory:") -> None:
         import sqlite3
 
         self._conn = sqlite3.connect(db_path, check_same_thread=False)

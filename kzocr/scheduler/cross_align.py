@@ -86,7 +86,7 @@ def align_boxes_to_text(
     return out
 
 
-def _load_confusion_file(path: Path, *, raw: bool = False):
+def _load_confusion_file(path: Path, *, raw: bool = False) -> dict[str, str] | list[dict]:
     """从单个 JSON 文件加载形近字黑名单。
 
     raw=False（默认）：返回 {wrong: correct}（跳过 category=='正确'/wrong==correct）。
@@ -119,7 +119,7 @@ def _load_confusion_file(path: Path, *, raw: bool = False):
     return out
 
 
-def validate_confusion_rows(rows):
+def validate_confusion_rows(rows: list[dict]) -> None:
     """运行时自检黑名单（用户规范）：捕获自匹配(no-op)与结构错误。
 
     每次加载黑名单时自动调用（程序启动即执行），发现异常仅告警不中断主流程，

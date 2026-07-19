@@ -31,6 +31,8 @@ from kzocr.scheduler.cross_align import (
     load_confusion_keys_split,
     load_confusion_phrases,
 )
+from kzocr.config import Config
+from kzocr.engines.ratelimit import MultiTokenRateLimiter
 
 _logger = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ class HerbEntry:
 _RESOURCE_CACHE: dict = {}
 
 
-def _load_resource(name: str):
+def _load_resource(name: str) -> object | None:
     """从 kzocr/resources 加载 JSON，返回解析后的对象。缺失时返回 None。"""
     if name in _RESOURCE_CACHE:
         return _RESOURCE_CACHE[name]
@@ -375,7 +377,7 @@ class GlyphVerifier:
     def __init__(
         self,
         detectors: list[Detector] | None = None,
-        config=None,
+        config: Config | None = None,
     ) -> None:
         if detectors is None:
             detectors = self._init_detectors(config)
@@ -387,7 +389,7 @@ class GlyphVerifier:
         self.last_detector_chain: list[str] = []
 
     @staticmethod
-    def _init_detectors(config=None) -> list[Detector]:
+    def _init_detectors(config: Config | None = None) -> list[Detector]:
         """从 kzocr/resources 加载真实检测器链（B6 资源 list→dict/set 归一化）。"""
         detectors: list[Detector] = []
 
@@ -930,9 +932,9 @@ class VisionRecheckAdapter:
     def arbitrate_divergence(
         self,
         divergence: "Divergence",
-        page_img,
+        page_img: Optional[np.ndarray],
         confusion_set: Optional[dict] = None,
-        bucket=None,
+        bucket: Optional[MultiTokenRateLimiter] = None,
     ) -> "DivergenceArbitration":
         """分歧级视觉仲裁（Box-Guided VL）。
 

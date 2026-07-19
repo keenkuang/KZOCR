@@ -38,7 +38,7 @@ class PaddleOCRAdapter:
     _engine_global = None  # 进程级单例
 
     @classmethod
-    def _get_engine(cls):
+    def _get_engine(cls) -> object | None:
         """获取进程级单例 PaddleOCR 引擎。"""
         if cls._engine_global is None:
             from paddleocr import PaddleOCR
@@ -91,14 +91,14 @@ class PaddleOCRAdapter:
             doc.close()
 
 
-def _quad_to_rect(quad) -> list[int]:
+def _quad_to_rect(quad: list[list[float]]) -> list[int]:
     """将 quad [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] 转为 [x1,y1,x2,y2] 矩形。"""
     xs = [p[0] for p in quad]
     ys = [p[1] for p in quad]
     return [min(xs), min(ys), max(xs), max(ys)]
 
 
-def _parse_ppocr_result(res) -> AdapterPageResult:
+def _parse_ppocr_result(res: object) -> AdapterPageResult:
     """将 PaddleOCR 原始输出解析为 AdapterPageResult。
 
     支持两种格式：

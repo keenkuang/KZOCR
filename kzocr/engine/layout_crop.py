@@ -34,7 +34,7 @@ _DOC_LAYOUT_MODEL = None
 _DOC_LAYOUT_MODEL_TRIED = False
 
 
-def _get_doclayout_model():
+def _get_doclayout_model() -> object | None:
     """懒加载 PP-DocLayoutV3 模型（仅 paddlex 可用时）。失败返回 None。"""
     global _DOC_LAYOUT_MODEL, _DOC_LAYOUT_MODEL_TRIED
     if _DOC_LAYOUT_MODEL_TRIED:

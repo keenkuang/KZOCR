@@ -40,7 +40,7 @@ class CharCountBaseline:
     取前 `window` 页的中位数作为 baseline，乘以 1.5 作为阈值。
     """
 
-    def __init__(self, window: int = 50):
+    def __init__(self, window: int = 50) -> None:
         self.window = window
         self.baseline: Optional[float] = None
         self._counts: list[int] = []

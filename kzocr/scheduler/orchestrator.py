@@ -23,6 +23,8 @@ import threading
 from typing import Optional
 from collections.abc import Iterator
 
+from kzocr.config import Config
+
 from kzocr.engine.types import (
     AdapterPageResult,
     BookResult,
@@ -33,9 +35,14 @@ from kzocr.engine.types import (
     PageResult,
 )
 from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
-from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
+from kzocr.scheduler.scheduler import Budget, EngineOverrides, EngineScheduler, PageInfo
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionRecheckAdapter
-from kzocr.scheduler.cross_align import run_cross_align, load_confusion_set, align_boxes_to_text
+from kzocr.scheduler.cross_align import (
+    align_boxes_to_text,
+    Divergence,
+    load_confusion_set,
+    run_cross_align,
+)
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
 from kzocr.engines.ratelimit import MultiTokenRateLimiter
@@ -49,7 +56,7 @@ _CONF_GATE = float(os.environ.get("KZOCR_CONF_GATE", "0.90"))
 _logger = logging.getLogger(__name__)
 
 
-def render_pages(pdf_path: str, config=None, dpi: int = 150) -> Iterator[PageInput]:
+def render_pages(pdf_path: str, config: Config | None = None, dpi: int = 150) -> Iterator[PageInput]:
     """流式生成逐页 PageInput（N2）。真实渲染复用 engine/run.py:_pdf_page_to_numpy。
 
     预处理：版心裁剪（去页眉/页脚/侧边空白）+ 尺寸缩放（适配 VL 模型限制 2048px）。
@@ -79,7 +86,15 @@ def render_pages(pdf_path: str, config=None, dpi: int = 150) -> Iterator[PageInp
         doc.close()
 
 
-def _safe_select_candidates(scheduler, registry, tier, page_input, budget, page_layout, overrides):
+def _safe_select_candidates(
+    scheduler: EngineScheduler,
+    registry: EngineRegistry,
+    tier: int,
+    page_input: PageInput,
+    budget: Budget,
+    page_layout: Optional[PageLayout],
+    overrides: Optional[EngineOverrides],
+) -> list[EngineRegistration]:
     """select_candidates 的健壮包装：异常时返回空，不拖垮编排。"""
     try:
         return scheduler.select_candidates(
@@ -95,9 +110,7 @@ def _safe_select_candidates(scheduler, registry, tier, page_input, budget, page_
         return []
 
 
-def _page_info(page_input: PageInput, page_layout: Optional[PageLayout]):
-    from kzocr.scheduler.scheduler import PageInfo
-
+def _page_info(page_input: PageInput, page_layout: Optional[PageLayout]) -> PageInfo:
     is_vertical = bool(page_layout and page_layout.is_vertical)
     return PageInfo(page_num=page_input.page_num, is_vertical=is_vertical)
 
@@ -134,7 +147,7 @@ def _run_success_cross_check(
     db: BookDB,
     confusion_set: dict,
     budget: Budget,
-    overrides,
+    overrides: Optional[EngineOverrides],
     page_layout: Optional[PageLayout],
     max_time_per_page_ms: int,
     vision_adapter: Optional[VisionRecheckAdapter] = None,
@@ -210,7 +223,7 @@ def _run_success_cross_check(
 
 def _arbitrate_high_divergences(
     page_num: int,
-    high: list,
+    high: list[Divergence],
     page_img: Optional[np.ndarray],
     vision_adapter: Optional[VisionRecheckAdapter],
     bucket: Optional[MultiTokenRateLimiter],
@@ -255,7 +268,7 @@ def _arbitrate_high_divergences(
 def _sample_consensus_error(
     page_num: int,
     text: str,
-    page_img,
+    page_img: Optional[np.ndarray],
     vision_adapter: Optional[VisionRecheckAdapter],
     db: BookDB,
     sample_rate: float,
@@ -365,7 +378,14 @@ def _write_trace(trace_dir: str, book_code: str, trace: list[EngineCallRecord]) 
     _logger.info("[orchestrator] trace written: %s (%d records)", path, len(trace))
 
 
-def _log_engine_report(book_code, pages_text, failed_pages, uncertain_pages, counter, elapsed_s):
+def _log_engine_report(
+    book_code: str | None,
+    pages_text: list[str],
+    failed_pages: dict[int, str],
+    uncertain_pages: dict[int, GlyphVerdict],
+    counter: dict[str, int],
+    elapsed_s: float,
+) -> None:
     _logger.info(
         "[orchestrator] book=%s pages=%d failed=%d uncertain=%d engine_usage=%s elapsed=%.1fs",
         book_code or "unknown",
@@ -380,7 +400,7 @@ def _log_engine_report(book_code, pages_text, failed_pages, uncertain_pages, cou
 def orchestrate_book(
     pdf_path: str,
     book_code: str | None,
-    config,
+    config: Config,
     registry: EngineRegistry,
     overrides: Optional[EngineOverrides] = None,
 ) -> BookResult:

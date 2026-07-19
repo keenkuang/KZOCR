@@ -4,12 +4,14 @@
 """
 from __future__ import annotations
 
+import argparse
+
 from kzocr.config import load_config
 from kzocr.scheduler.review_manifest import build_review_manifest, feedback_apply
 from kzocr.storage.db import BookDB
 
 
-def cmd_review_manifest(args) -> int:
+def cmd_review_manifest(args: argparse.Namespace) -> int:
     """``kzocr review manifest <book_code>`` — 生成全书审核清单。"""
     cfg = load_config()
     db = BookDB(args.book_code, db_dir=cfg.scheduler.db_dir)
@@ -25,7 +27,7 @@ def cmd_review_manifest(args) -> int:
         db.close()
 
 
-def cmd_review_apply(args) -> int:
+def cmd_review_apply(args: argparse.Namespace) -> int:
     """``kzocr review apply <book_code>`` — 回写审核修正到 BookDB。"""
     cfg = load_config()
     db = BookDB(args.book_code, db_dir=cfg.scheduler.db_dir)
@@ -41,7 +43,7 @@ def cmd_review_apply(args) -> int:
         db.close()
 
 
-def build_review_parser(sub) -> None:
+def build_review_parser(sub: argparse._SubParsersAction) -> None:
     """在子命令解析器上注册 review 子命令组。"""
     from kzocr.cli_review import cmd_review_manifest, cmd_review_apply
     pv = sub.add_parser("review", help="审核清单生成与修正回写")

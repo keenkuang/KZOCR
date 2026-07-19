@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import shutil
 from pathlib import Path
 
@@ -20,7 +21,7 @@ def _load_registry(benchmark_dir: str) -> EngineRegistry:
     return reg
 
 
-def cmd_bench_status(args) -> int:
+def cmd_bench_status(args: argparse.Namespace) -> int:
     """``kzocr benchmark status`` — 显示各引擎统计。"""
     cfg = load_config()
     reg = _load_registry(cfg.scheduler.benchmark_dir)
@@ -45,7 +46,7 @@ def cmd_bench_status(args) -> int:
     return 0
 
 
-def cmd_bench_history(args) -> int:
+def cmd_bench_history(args: argparse.Namespace) -> int:
     """``kzocr benchmark history`` — 显示原始 NDJSON 事件。"""
     cfg = load_config()
     benchmark_dir = cfg.scheduler.benchmark_dir
@@ -61,7 +62,7 @@ def cmd_bench_history(args) -> int:
     return 0
 
 
-def cmd_bench_run(args) -> int:
+def cmd_bench_run(args: argparse.Namespace) -> int:
     """``kzocr benchmark run`` — 构造注册中心、探测可用引擎、显示统计。"""
     cfg = load_config()
     reg = _load_registry(cfg.scheduler.benchmark_dir)
@@ -73,7 +74,7 @@ def cmd_bench_run(args) -> int:
     return cmd_bench_status(args)
 
 
-def cmd_bench_reset(args) -> int:
+def cmd_bench_reset(args: argparse.Namespace) -> int:
     """``kzocr benchmark reset`` — 清空 benchmark 目录。"""
     cfg = load_config()
     benchmark_dir = cfg.scheduler.benchmark_dir
