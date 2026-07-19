@@ -1,7 +1,39 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-19T19:02+08
-> 最后更新：2026-07-19 19:02 CST
+> 文档版本：v2026-07-19T17:20+08
+> 最后更新：2026-07-19 17:20 CST
+
+---
+
+## v2026-07-19 — v0.21.0 零资源收口（卫生/注解/测试/默认跨校验）
+
+> **740 tests**（740 passed + 2 skipped；净增 8 = ratelimit 新测试 + 注册表纯逻辑测试）；ruff --select ANN 核心模块清零；覆盖率核心模块 83%、ratelimit 90%。自 v0.20.0 以来 ~30 笔提交通通无运行时变更。
+
+| 模块 | 说明 |
+|------|------|
+
+### 文档漂移闭环
+- **轮询采样** §2.3/§4.1 同步 + tier_limits 可突破策略明确
+- **decay/record** 签名对齐、伪代码修正
+- **EngineRegistry 线程锁** 删 `self._lock` 声明+标注单线程设计
+- **scheduler/__init__.py** 「待实现」→「已落地」
+
+### 代码卫生
+- **死代码清理** registry.py 模块级 `select_candidates` + ratelimit.py MultiTokenRateLimiter.acquire 不可达耗尽路径
+- **_bayesian_score 清扫** 函数+常量+测试一并删除（`EngineScheduler._compute_bayesian_score` 覆盖）
+- **load_benchmarks 逐行容错** JSONDecodeError 下放逐行级，单行损坏不丢整文件
+
+### 类型注解
+- **web/app.py 50 处 ANN** 核心模块最后一处排除文件退出排除
+
+### 默认行为
+- **跨引擎校验默认开启** `cross_check: bool = True`
+
+### 测试增强
+- **add_learned_confusion** 5 例纯逻辑单测（文件读写/去重/损坏恢复/缓存同步）
+- **registry 纯逻辑** 4 例（glyph 状态累加/路径穿越/损坏文件/pending）
+- **ratelimit.py 9 例** 覆盖 wait/register/store 恢复/80% 分支/refill，覆盖率 68%→90%
+- **版本+徽章同步**
 
 ---
 

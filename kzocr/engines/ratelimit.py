@@ -250,19 +250,6 @@ class MultiTokenRateLimiter:
                 self._available -= 1
                 return 0.0
 
-            # 令牌耗尽 → 等待下一窗口
-            if elapsed >= self._window:
-                # 窗口已过，兜底 refill
-                self._available = self._max_tokens - 1
-                self._window_start = now
-                return 0.0
-
-            wait = self._window - elapsed
-            time.sleep(wait)
-            self._refill()
-            self._available -= 1
-            return wait
-
     def _refill(self) -> None:
         """内部刷新令牌：若已超当前窗口则重置。"""
         now = time.monotonic()
