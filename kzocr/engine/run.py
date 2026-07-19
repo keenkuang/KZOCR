@@ -371,83 +371,6 @@ def _crop_to_body(img: np.ndarray, padding: int = 10, page_num: int = 0) -> np.n
     return _crop_to_body_fallback(img, padding)
 
 
-def _crop_to_body_cv2(img: np.ndarray, padding: int = 10) -> np.ndarray:
-    """cv2 行检测版心裁剪（MinerU 不可用时的降级方案）。
-
-    检测文字行区域，合并相邻行，过滤孤立小行（页码等）。
-    """
-    try:
-        import cv2
-    except ImportError:
-        return _crop_to_body_fallback(img, padding)
-
-    h, w = img.shape[:2]
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.shape[2] == 3 else img
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    h_proj = np.sum(binary < 128, axis=1)
-    h_thresh = np.max(h_proj) * 0.05
-
-    text_rows = []
-    in_row = False
-    row_start = 0
-    for y in range(h):
-        if h_proj[y] > h_thresh and not in_row:
-            in_row = True
-            row_start = y
-        elif h_proj[y] <= h_thresh and in_row:
-            in_row = False
-            if y - row_start >= 5:
-                text_rows.append((row_start, y))
-    if in_row:
-        text_rows.append((row_start, h))
-
-    if not text_rows or not _merge_text_rows(text_rows, padding):
-        return _crop_to_body_fallback(img, padding)
-
-    merged = _merge_text_rows(text_rows, padding)
-
-    # 跳过顶部和底部的孤立行
-    if len(merged) > 2:
-        heights = [end - start for start, end in merged]
-        median_h = sorted(heights)[len(heights) // 2]
-        merged = [(start, end) for start, end in merged if end - start > median_h / 3]
-
-    if not merged:
-        return _crop_to_body_fallback(img, padding)
-
-    top = max(0, merged[0][0] - padding)
-    bottom = min(h, merged[-1][1] + padding)
-
-    col_proj = np.sum(binary[top:bottom, :] < 128, axis=0)
-    col_thresh = np.max(col_proj) * 0.02
-    left = 0
-    for x in range(w):
-        if col_proj[x] > col_thresh:
-            left = max(0, x - padding)
-            break
-    right = w
-    for x in range(w - 1, -1, -1):
-        if col_proj[x] > col_thresh:
-            right = min(w, x + padding)
-            break
-
-    return img[top:bottom, left:right]
-
-
-def _merge_text_rows(text_rows: list, padding: int = 10) -> list:
-    """合并相邻文字行。"""
-    if not text_rows:
-        return []
-    merged = [text_rows[0]]
-    for row_start, row_end in text_rows[1:]:
-        prev_rs, prev_re = merged[-1]
-        if row_start - prev_re < max(3, padding * 2):
-            merged[-1] = (prev_rs, row_end)
-        else:
-            merged.append((row_start, row_end))
-    return merged
-
 
 def _crop_to_body_fallback(img: np.ndarray, padding: int = 10) -> np.ndarray:
     """纯投影法版心裁剪（cv2 不可用时的降级方案）。"""
@@ -793,9 +716,13 @@ def _run_vlm(pdf_path: str, cfg, book_code: str | None = None) -> BookResult:
                         backoff=BACKOFF_CONFIGS["api"],
                         error_types=(ApiError,),
                     )
-                except RetryExhaustedError as rexc:
-                    failed_pages[i + 1] = f"API error after retries: {rexc}"
-                    logger.warning("[VLM] 第 %d 页 API 错误重试耗尽，跳过：%s", i + 1, rexc)
+                except Exception as rexc:
+                    # 捕获重试耗尽（RetryExhaustedError）及重试中出现的其它异常
+                    # （如 OverSizeError / OcrError）。这些异常生于 except 块内，
+                    # 不会被同级 except 捕获，若直接冲出会终止整轮 VLM、丢失后续页；
+                    # 故在此兜底标记本页失败并 continue。
+                    failed_pages[i + 1] = f"API/VLM error after retries: {rexc}"
+                    logger.warning("[VLM] 第 %d 页 API/VLM 错误重试耗尽，跳过：%s", i + 1, rexc)
                     continue
             except OverSizeError:
                 # D2: 输出过长 → 降低 DPI 后重试

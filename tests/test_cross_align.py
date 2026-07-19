@@ -21,6 +21,30 @@ def test_strip_punct_removes_punct_and_ws():
     assert strip_punct("") == ""
 
 
+def test_align_boxes_a_aligned_to_stripped_text():
+    """boxes_a 与去标点后的 a 等长时，分歧点的 boxes 正确取自对应位置。"""
+    a = "附子三钱"
+    b = "附子二钱"
+    boxes_a = [[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3], [3, 3, 4, 4]]
+    divs = align_engines(a, b, confusion_set=CONFUSION, boxes_a=boxes_a)
+    # 唯一分歧：a 的「三」(位置 2) 被替换为 b 的「二」
+    assert len(divs) == 1
+    assert divs[0].a_seg == "三"
+    assert divs[0].boxes == [[2, 2, 3, 3]]
+
+
+def test_align_boxes_a_length_mismatch_no_crash():
+    """boxes_a 长度与去标点后的 a 不符时，放弃框而非 IndexError / 静默错配。"""
+    a = "附子三钱"
+    b = "附子二钱"
+    # 长度不符（多于/少于字符数）均不得崩溃，且不应产生错位框
+    for bad in ([[0, 0, 1, 1]], [[0, 0, 1, 1]] * 10):
+        divs = align_engines(a, b, confusion_set=CONFUSION, boxes_a=bad)
+        assert divs
+        assert all(d.boxes == [] for d in divs)
+
+
+
 def test_align_engines_identical_no_divergence():
     text = "治宜清热解毒利水消肿"
     divs = align_engines(text, text, confusion_set=CONFUSION)

@@ -227,26 +227,6 @@ def load_confusion_phrases(path: Optional[Path] = None, *, reload: bool = False)
     return _PHRASE_CACHE
 
 
-def search_phrase_errors(text: str, phrases: Optional[list] = None) -> list:
-    """Layer2 词级：扫描文本命中哪些错词对。返回 [{wrong, correct, level, category}]。"""
-    if not text:
-        return []
-    phrases = phrases if phrases is not None else load_confusion_phrases()
-    hits = []
-    for row in phrases:
-        if not isinstance(row, dict):
-            continue
-        wrong = row.get("wrong")
-        if wrong and wrong in text:
-            hits.append({
-                "wrong": wrong,
-                "correct": row.get("correct"),
-                "level": row.get("level", ""),
-                "category": row.get("category", ""),
-            })
-    return hits
-
-
 def add_learned_confusion(wrong: str, correct: str, source: str = "") -> bool:
     """把新发现的形近混淆对追加到 `learned_confusion.json`（原子写入，去重）。
 
@@ -380,7 +360,11 @@ def align_engines(
         ctx_l, ctx_r = max(0, i1 - ctx), min(n, i2 + ctx)
         a_seg = a[i1:i2]
         b_seg = b[j1:j2]
-        boxes = [boxes_a[k] for k in range(i1, i2)] if (boxes_a and i2 > i1) else []
+        # boxes_a 应与去标点后的 a 等长；长度不符则放弃框，避免 IndexError / 静默错配
+        if boxes_a and i2 > i1 and len(boxes_a) == len(a):
+            boxes = [boxes_a[k] for k in range(i1, i2)]
+        else:
+            boxes = []
         divs.append(
             Divergence(
                 page_no=0,
