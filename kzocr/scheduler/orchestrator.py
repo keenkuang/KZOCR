@@ -136,12 +136,15 @@ def _run_success_cross_check(
     overrides,
     page_layout: Optional[PageLayout],
     max_time_per_page_ms: int,
+    vision_adapter: Optional[VisionRecheckAdapter] = None,
+    bucket: Optional[MultiTokenRateLimiter] = None,
     engine_a: str = "tier1",
 ) -> bool:
     """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
 
     纯增强（try/except 不阻断主流程）；无 Tier2 候选时静默跳过（本机无 GPU/密钥时正常行为）。
-    High 优先分歧经 record_anomaly 入 M4 队列；allow_cloud_vision 时可选调视觉仲裁。
+    High 优先分歧经 record_anomaly 入 M4 队列；``vision_adapter`` 非空时对 high 分歧执行
+    Box-Guided VL 仲裁（``_arbitrate_high_divergences``），仅 VL 未裁决（manual）的分歧进人工队列。
 
     Returns:
         True  = 成功运行且无分歧（共识一致页），供调用方做共识错误抽样
@@ -175,23 +178,75 @@ def _run_success_cross_check(
         )
         high = [d for d in divs if d.priority == "high"]
         if high:
-            db.record_anomaly(
-                page_num,
-                GlyphVerdict(
-                    status="UNKNOWN", confidence=0.4,
-                    details=(
-                        f"cross_divergence;high={len(high)};"
-                        f"sample={high[0].a_seg}↔{high[0].b_seg}"
-                    ),
-                ),
-                detector_chain=["CrossAlign"],
+            arb_result = _arbitrate_high_divergences(
+                page_num, high,
+                page_input.img if page_input.img is not None else None,
+                vision_adapter, bucket, db, confusion_set,
             )
-            # TODO: allow_cloud_vision 时可调 arbitrate_divergence 对 high 分歧执行 VL 仲裁
-            # 复用现有逻辑（orchestrator.py:437-454），record_anomaly 后调用仲裁更新分歧状态
+            # 仅 VL 无法裁决（manual）或视觉不可用时的 high 分歧进人工复核队列；
+            # VL 已给出明确裁决（accepted_a/b、both_wrong）的不重复进队。
+            unresolved = arb_result["unresolved"]
+            if unresolved:
+                db.record_anomaly(
+                    page_num,
+                    GlyphVerdict(
+                        status="UNKNOWN", confidence=0.4,
+                        details=(
+                            f"cross_divergence;high={len(high)};"
+                            f"arbitrated={len(arb_result['resolved'])};"
+                            f"sample={unresolved[0].a_seg}↔{unresolved[0].b_seg}"
+                        ),
+                    ),
+                    detector_chain=["CrossAlign"],
+                )
         return False  # 有分歧 → 非共识页
     except Exception as exc:
         _logger.warning("[orchestrator] success cross-check failed page=%d: %s", page_num, exc)
         return False
+
+
+def _arbitrate_high_divergences(
+    page_num: int,
+    high: list,
+    page_img: Optional[np.ndarray],
+    vision_adapter: Optional[VisionRecheckAdapter],
+    bucket: Optional[MultiTokenRateLimiter],
+    db: BookDB,
+    confusion_set: dict,
+) -> dict:
+    """对 high 优先级跨引擎分歧执行视觉仲裁（Box-Guided VL，退化模式）。
+
+    遍历 ``high`` 分歧调 ``vision_adapter.arbitrate_divergence`` +
+    ``db.update_cross_divergence_status``，更新各分歧点的仲裁状态。返回
+    ``{"resolved": [...], "unresolved": [...]}``：
+    - resolved：VL 给出明确裁决（accepted_a / accepted_b / both_wrong），无需再进人工队列；
+    - unresolved：VL 无法裁决（manual）或视觉不可用，需进人工复核。
+
+    纯增强：视觉不可用 / 单点异常均不影响主流程，绝不阻断编排。
+    """
+    if vision_adapter is None or page_img is None:
+        # 无视觉能力：全部视为 unresolved，交由调用方进人工队列
+        return {"resolved": [], "unresolved": high}
+    resolved: list = []
+    unresolved: list = []
+    for d in high:
+        try:
+            arb = vision_adapter.arbitrate_divergence(
+                d, page_img, confusion_set=confusion_set, bucket=bucket,
+            )
+            db.update_cross_divergence_status(
+                page_num, d.div_type, d.a_seg, d.b_seg, arb.decision,
+            )
+            if arb.decision == "manual":
+                unresolved.append(d)
+            else:
+                resolved.append(d)
+        except Exception as exc:  # 视觉仲裁属增强，绝不阻断主流程
+            _logger.warning(
+                "[orchestrator] cross_arbitrate failed page=%d: %s", page_num, exc,
+            )
+            unresolved.append(d)
+    return {"resolved": resolved, "unresolved": unresolved}
 
 
 def _sample_consensus_error(
@@ -595,6 +650,8 @@ def orchestrate_book(
                         scheduler, registry, db,
                         confusion_set, budget, overrides, page_layout,
                         budget.max_time_per_page_ms,
+                        vision_adapter=_get_vision_adapter(),
+                        bucket=_get_vision_bucket(),
                         engine_a=t1_engine_name,
                     )
                     # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）
@@ -653,26 +710,13 @@ def orchestrate_book(
                                 detector_chain=["CrossAlign"],
                             )
                             # 4.3 分歧级视觉仲裁（Box-Guided VL，退化模式）：
-                            # 仅 allow_cloud_vision 且 page_img 非空时激活（等同 --enable-arb）。
-                            # 高优先级分歧经 VL 仲裁后更新状态；manual/both_wrong 已在上面入复核队列。
+                            # 失败路径 high 分歧经 VL 仲裁后更新状态（行为不变，去重为共享 helper）。
                             va = _get_vision_adapter()
                             if va is not None and page_input.img is not None:
-                                bucket = _get_vision_bucket()
-                                for d in high:
-                                    try:
-                                        arb = va.arbitrate_divergence(
-                                            d, page_input.img,
-                                            confusion_set=confusion_set, bucket=bucket,
-                                        )
-                                        db.update_cross_divergence_status(
-                                            page_num, d.div_type, d.a_seg, d.b_seg,
-                                            arb.decision,
-                                        )
-                                    except Exception as exc:  # 视觉仲裁属增强，绝不阻断主流程
-                                        _logger.warning(
-                                            "[orchestrator] cross_arbitrate failed page=%d: %s",
-                                            page_num, exc,
-                                        )
+                                _arbitrate_high_divergences(
+                                    page_num, high, page_input.img, va,
+                                    _get_vision_bucket(), db, confusion_set,
+                                )
                 except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
                     _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
             vctx = DetectorContext(

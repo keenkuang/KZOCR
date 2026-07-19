@@ -1,13 +1,13 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-19T20:00+08
-> 最后更新：2026-07-19 20:00 CST
+> 文档版本：v2026-07-19T21:00+08
+> 最后更新：2026-07-19 21:00 CST
 
 ---
 
 ## v2026-07-19 — v0.20 v0.7 调度器层完整落地 + 校对反馈闭环
 
-> **707 tests**（全量通过，2 例 benchmark 标记默认 CI 排除）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
+> **714 tests**（全量通过，2 例 benchmark 标记默认 CI 排除）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
 
 | 模块 | 说明 |
 |------|------|
@@ -21,6 +21,7 @@
 | 引擎适配器 | PaddleOCRAdapter 迁移 predict + 弃用告警回归测试 + AllEnginesFailedError 异常 |
 | 性能基准 | DPI 72/150、进程单例、引擎倍速结论归档 |
 | 视觉回看 | GLM-4V-Flash 生产接线 + 端到端验证 |
+| 高分歧页视觉仲裁 | 成功/失败路径 high 分歧送 GLM-4V-Flash Box-Guided 仲裁（§5.5）：抽 `_arbitrate_high_divergences` 共享 helper，VL 已裁决（accepted_a/b、both_wrong）不进 M4 队列，仅 manual/无视觉能力时进人工复核；失败路径内联循环去重；新增 6 例 mock VL 路由 + 状态更新 + 静默跳过测试 |
 | Celery Worker 部署文档 | README 新增 Celery Worker 节（docker compose redis+worker、broker 环境变量、镜像不含 OCR 引擎说明） |
 | 代码评审硬化 | orchestrator 字符框按真实页号对齐（失败页缺口不再错配）；celery 移除双重重试（突破 max_retries）；run.py VLM 重试崩溃兜底；cross_align boxes_a 长度守卫；删除死代码 |
 

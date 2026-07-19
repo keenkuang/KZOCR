@@ -24,7 +24,11 @@ from kzocr.scheduler import orchestrator as _orc
 from kzocr.scheduler.orchestrator import orchestrate_book
 from kzocr.scheduler.registry import EngineRegistry
 from kzocr.scheduler.scheduler import EngineOverrides
+from kzocr.scheduler import verifier as _verifier
 from kzocr.storage.db import BookDB
+from kzocr.scheduler.cross_align import DivergenceArbitration, run_cross_align
+
+import numpy as np
 
 
 # ── 桩类型 ──
@@ -88,9 +92,53 @@ class FakePageAdapter:
         return self.responses.pop(0)
 
 
+class StubVisionAdapter:
+    """可配置决策的视觉仲裁桩：按 pending 顺序返回 decision。
+
+    模拟 ``VisionRecheckAdapter.arbitrate_divergence`` 的返回语义
+    （decision ∈ accepted_a/accepted_b/both_wrong/manual/uncertain），
+    供验证成功/失败路径的分歧路由与状态更新。
+    """
+
+    api_key = "test-key"  # 让 orchestrator._get_vision_adapter 视为已配置
+    base_url = "https://stub"
+    model = "stub"
+
+    def __init__(self, decisions: list[str] | None = None):
+        self._decisions = list(decisions or [])
+        self.arbitrated: list = []
+
+    def arbitrate_divergence(self, divergence, page_img, confusion_set=None, bucket=None):
+        self.arbitrated.append(divergence)
+        decision = self._decisions.pop(0) if self._decisions else "manual"
+        return DivergenceArbitration(page_no=divergence.page_no, decision=decision)
+
+
+class StubVisionAdapterRaising(StubVisionAdapter):
+    """arbitrate_divergence 始终抛异常，验证视觉仲裁失败属增强不阻断。"""
+
+    def arbitrate_divergence(self, divergence, page_img, confusion_set=None, bucket=None):
+        raise RuntimeError("vl down")
+
+
+class StubDB:
+    """只记录 update_cross_divergence_status 调用的轻量 DB 桩（helper 单测用）。"""
+
+    def __init__(self):
+        self.status_updates: list[tuple] = []
+
+    def update_cross_divergence_status(self, page_no, div_type, a_seg, b_seg, status):
+        self.status_updates.append((page_no, div_type, a_seg, b_seg, status))
+
+
 # ── 辅助工厂 ──
 def _text_pages(*texts: str) -> list[PageResult]:
     return [PageResult(page_num=i, text=t) for i, t in enumerate(texts)]
+
+
+def _text_pages_conf(conf: float = 0.97, *texts: str) -> list[PageResult]:
+    """带高置信度的成功页构造（避开 conf≤gate 门控 continue，使成功路径进入 cross-check）。"""
+    return [PageResult(page_num=i, text=t, confidence=conf) for i, t in enumerate(texts)]
 
 
 def _page_result(text: str) -> AdapterPageResult:
@@ -361,4 +409,172 @@ def test_conf_gate_threshold_env(monkeypatch, tmp_path):
     assert db.get_page_progress(0)["import_status"] == "pending"
     anomalies = db.get_unresolved_anomalies()
     assert any(a["page_num"] == 0 and "conf_low" in a["details"] for a in anomalies)
+
+
+# ── 12. 高分歧页视觉仲裁（Box-Guided VL，§5.5 增强闭环）──
+def _high_divergences() -> list:
+    """构造含多个中文数字分歧的对，确保 cross_align 产出 ≥2 个 high 分歧点。"""
+    divs = run_cross_align(
+        0,
+        "黄芪三钱，当归二钱，白术一钱",
+        "黄芪二钱，当归三钱，白术三钱",
+        confusion_set={},
+    )
+    high = [d for d in divs if d.priority == "high"]
+    assert len(high) >= 2, f"预期 ≥2 个 high 分歧，实际 {len(high)}"
+    return high
+
+
+def _patch_glm_stub(monkeypatch, adapter) -> None:
+    """把 VisionRecheckAdapter.glm_default 替换为返回固定 stub 的静态方法。"""
+    monkeypatch.setattr(
+        _verifier.VisionRecheckAdapter, "glm_default",
+        staticmethod(lambda: adapter),
+    )
+
+
+def _render_gen_with_img(n: int):
+    """生成 n 个带 dummy 图像 PageInput 的模拟渲染（触发失败路径视觉仲裁）。"""
+    for i in range(n):
+        yield PageInput(page_num=i, img=np.zeros((8, 8, 3), dtype=np.uint8))
+
+
+# ── 12.1 helper：无视觉能力 → 全部 unresolved，不更新状态 ──
+def test_arbitrate_helper_no_vision():
+    """vision_adapter=None 或 page_img=None 时，helper 不调 VL、不更新状态，
+    全部 high 分歧以 unresolved 返回，交由调用方进人工队列。"""
+    high = _high_divergences()
+    db = StubDB()
+    # 无 vision_adapter
+    out = _orc._arbitrate_high_divergences(0, high, None, None, None, db, {})
+    assert out["resolved"] == []
+    assert out["unresolved"] == high
+    assert db.status_updates == []
+    # 有 vision_adapter 但无图像
+    db2 = StubDB()
+    out2 = _orc._arbitrate_high_divergences(
+        0, high, None, StubVisionAdapter(), None, db2, {},
+    )
+    assert out2["resolved"] == []
+    assert out2["unresolved"] == high
+    assert db2.status_updates == []
+
+
+# ── 12.2 helper：VL 路由（accepted_a → resolved，manual → unresolved）──
+def test_arbitrate_helper_vision_routing():
+    high = _high_divergences()
+    va = StubVisionAdapter(["accepted_a", "manual"])  # 剩余分歧 stub 默认 manual
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {})
+    assert len(out["resolved"]) == 1          # 第一个分歧被 VL 接受
+    assert len(out["unresolved"]) == len(high) - 1  # 其余进人工队列
+    assert len(db.status_updates) == len(high)       # 每处分歧都更新仲裁状态
+    assert db.status_updates[0][4] == "accepted_a"
+    assert all(s[4] == "manual" for s in db.status_updates[1:])
+
+
+# ── 12.3 helper：VL 全部 manual → 全部 unresolved，状态仍更新 ──
+def test_arbitrate_helper_vision_manual():
+    high = _high_divergences()
+    va = StubVisionAdapter(["manual", "manual"])
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {})
+    assert out["resolved"] == []
+    assert len(out["unresolved"]) == len(high)
+    assert len(db.status_updates) == len(high)
+
+
+# ── 12.4 helper：VL 抛异常 → 兜底 manual，不阻断、不更新状态 ──
+def test_arbitrate_helper_vision_exception():
+    high = _high_divergences()
+    va = StubVisionAdapterRaising()
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {})
+    assert out["resolved"] == []
+    assert out["unresolved"] == high
+    assert db.status_updates == []  # 异常分支未持久化状态
+
+
+# ── 12.5 成功路径：high 分歧 + 无 VL → 全部进人工队列（行为不变）──
+def test_success_cross_check_high_no_vl(monkeypatch, tmp_path):
+    """本机无 key：成功页 high 分歧仍全部进 M4 复核队列（allow_cloud_vision 仅用于
+    放开 Tier2 候选，_get_vision_adapter 无 key 返回 None → 静默跳过 VL 不崩）。"""
+    monkeypatch.setattr(
+        _orc, "render_pages",
+        lambda pdf, cfg, dpi=150: _render_gen_with_img(1),
+    )
+    reg = _reg(
+        tier1_pages=_text_pages_conf(0.97, "黄芪三钱，方用萆薢分清饮"),
+        tier2_texts=["黄芪二钱，方用萆薢分清饮"],
+    )
+    cfg = StubConfig(allow_cloud_vision=True, db_dir=str(tmp_path))
+    result = orchestrate_book(
+        "/fp", "bk_succ_novl", cfg, reg,
+        overrides=EngineOverrides(enable_cross_check=True),
+    )
+    assert result.pages  # 成功页文本仍产出
+    db = BookDB("bk_succ_novl", db_dir=str(tmp_path))
+    divs = db.get_cross_divergences(page_no=0)
+    assert any(d["priority"] == "high" for d in divs)
+    anomalies = db.get_unresolved_anomalies()
+    assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
+
+
+# ── 12.6 成功路径：high 分歧 + VL 全部 accepted → 不进人工队列 ──
+def test_success_cross_check_high_vl_resolved(monkeypatch, tmp_path):
+    """VL 已裁决全部 high 分歧时，成功页不再入 M4 复核队列（增强见效）。"""
+    adapter = StubVisionAdapter(["accepted_a", "accepted_a"])
+    _patch_glm_stub(monkeypatch, adapter)
+    monkeypatch.setattr(
+        _orc, "render_pages",
+        lambda pdf, cfg, dpi=150: _render_gen_with_img(1),
+    )
+    reg = _reg(
+        tier1_pages=_text_pages_conf(0.97, "黄芪三钱，方用萆薢分清饮"),
+        tier2_texts=["黄芪二钱，方用萆薢分清饮"],
+    )
+    cfg = StubConfig(allow_cloud_vision=True, db_dir=str(tmp_path))
+    result = orchestrate_book(
+        "/fp", "bk_succ_vl", cfg, reg,
+        overrides=EngineOverrides(enable_cross_check=True),
+    )
+    assert result.pages
+    db = BookDB("bk_succ_vl", db_dir=str(tmp_path))
+    divs = db.get_cross_divergences(page_no=0)
+    assert any(d["priority"] == "high" for d in divs)
+    # 全部 high 分歧状态被 VL 更新为 accepted_a
+    assert all(d["status"] == "accepted_a" for d in divs if d["priority"] == "high")
+    # resolved 不进人工队列
+    anomalies = db.get_unresolved_anomalies()
+    assert not any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
+
+
+# ── 12.7 失败路径：high 分歧 + 有图 + VL → 更新状态且仍进队列 ──
+def test_failure_path_high_vl_arbitrates(monkeypatch, tmp_path):
+    """Tier1 失败 → Tier3 兜底路径的 high 分歧经 VL 仲裁更新状态；
+    失败路径对所有 high 分歧仍进 M4 复核队列（行为不变），仅增强状态更新。"""
+    adapter = StubVisionAdapter(["both_wrong"])
+    _patch_glm_stub(monkeypatch, adapter)
+    monkeypatch.setattr(
+        _orc, "render_pages",
+        lambda pdf, cfg, dpi=150: _render_gen_with_img(1),
+    )
+    reg = _reg(
+        tier1_pages=_text_pages("附子 20g"),
+        tier3_texts=["附子 30g"],
+    )
+    cfg = StubConfig(allow_cloud_vision=True, db_dir=str(tmp_path))
+    result = orchestrate_book("/fp", "bk_fail_vl", cfg, reg)
+    assert 0 in result.failed_pages  # 毒性文本仍 HumanGate
+    db = BookDB("bk_fail_vl", db_dir=str(tmp_path))
+    divs = db.get_cross_divergences(page_no=0)
+    assert any(d["priority"] == "high" for d in divs)
+    # VL 裁决写入状态
+    assert any(d["status"] == "both_wrong" for d in divs if d["priority"] == "high")
+    # 失败路径对所有 high 分歧仍进人工队列
+    anomalies = db.get_unresolved_anomalies()
+    assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
 
