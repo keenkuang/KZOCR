@@ -21,6 +21,7 @@ import os
 import json
 import threading
 from typing import Optional
+from collections.abc import Iterator
 
 from kzocr.engine.types import (
     AdapterPageResult,
@@ -48,7 +49,7 @@ _CONF_GATE = float(os.environ.get("KZOCR_CONF_GATE", "0.90"))
 _logger = logging.getLogger(__name__)
 
 
-def render_pages(pdf_path: str, config=None, dpi: int = 150):
+def render_pages(pdf_path: str, config=None, dpi: int = 150) -> Iterator[PageInput]:
     """流式生成逐页 PageInput（N2）。真实渲染复用 engine/run.py:_pdf_page_to_numpy。
 
     预处理：版心裁剪（去页眉/页脚/侧边空白）+ 尺寸缩放（适配 VL 模型限制 2048px）。

@@ -3,6 +3,8 @@
 > 本文档基于已批准的 `ocr-engine-unification.v0.7.md` 规划方案及两轮 8 角色评审报告编写。
 > 为实施提供足够细度的指导：包含完整数据类定义、伪代码、API 签名、配置映射表和测试用例枚举。
 > 评审报告归档：`docs/reviews/2026-07-10-round1-v0.7/`, `docs/reviews/2026-07-10-round2-v0.7/`
+>
+> **实现状态（2026-07-19）**：本设计稿已全部实现并合入 `main`（当前 **v0.20.0**）。`kzocr/scheduler/{registry,scheduler,verifier,orchestrator,review_manifest}.py` 均已落地，`run_engine` 已委派给编排层，§5.5 Box-Guided VL 仲裁与 §5.6 review_manifest 闭环均已接通。文中若仍出现「待实现 / TODO」字样均已过期，以 `kzocr/scheduler/` 实际代码为准。
 
 ---
 

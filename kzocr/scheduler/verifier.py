@@ -638,7 +638,7 @@ _ARB_KEY_CONFUSION_HINTS = (
 )
 
 
-def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
+def _build_arbitration_prompt(divergence: "Divergence", confusion_set: Optional[dict], mode: str) -> str:
     """构造分歧级仲裁 prompt：只让 VL 核对候选字字形，强制 JSON 输出。
 
     mode='box_guided'：图片已是裁剪好的候选字小框，无需定位；
@@ -677,7 +677,7 @@ def _build_arbitration_prompt(divergence, confusion_set, mode: str) -> str:
     )
 
 
-def _parse_arbitration_response(text: str):
+def _parse_arbitration_response(text: str) -> Optional[dict]:
     """从 VL 原始输出中稳健提取仲裁 JSON；失败返回 None。
 
     容错：去 ```json 代码围栏、截取首尾大括号、非法 JSON 返回 None。
@@ -702,7 +702,7 @@ def _parse_arbitration_response(text: str):
     return obj if isinstance(obj, dict) else None
 
 
-def _gate_arbitration(parsed: dict, a_seg: str, b_seg: str):
+def _gate_arbitration(parsed: dict, a_seg: str, b_seg: str) -> tuple[str, str]:
     """按 VL 返回的 is_match/confidence/real_char 映射裁决。
 
     返回 (decision, real_char)。is_match=False 或 conf<0.65 → manual；
