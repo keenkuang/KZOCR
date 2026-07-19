@@ -151,16 +151,12 @@ class EngineStats:
             return AVG_LATENCY_DEFAULT_MS
         return self.total_latency_ms / self.total_calls
 
-    def decay(self, now: float | None = None) -> float:
-        """时效衰减因子。
-        decay(last_seen) = exp(-(now - last_seen) / HALF_LIFE)
-        其中 HALF_LIFE = 86400 * 7（7天，以秒计）
-        """
-        if now is None:
-            now = time.time()
-        elapsed = now - self.last_seen
-        half_life_seconds = HALF_LIFE_DAYS * 86400
-        return math.exp(-elapsed / half_life_seconds)
+    def decay(self, half_life_days: float = 7.0) -> float:
+        """时效衰减因子（§4.2）。last_seen 越久衰减越强；未探测过返回 1.0。"""
+        if self.last_seen == 0.0:
+            return 1.0
+        elapsed_days = (time.time() - self.last_seen) / 86400.0
+        return 0.5 ** (elapsed_days / half_life_days)
 ```
 
 **设计要点：**
@@ -169,9 +165,8 @@ class EngineStats:
 - 贝叶斯平均公式：`(pass_count + prior * C) / (total + C)`，C=7, prior=0.7（评审架构 B4）
   - C=7 意味着引擎需要 7 页以上历史数据才能显著影响评分
   - 无数据时退化到 `prior`（0.7），确保新引擎有被选中机会
-- `decay()` 使用指数衰减而非半衰期 `0.5^(t/T)`，因为指数衰减更平滑且计算更简单
-  - 7 天后衰减到 `exp(-1) ≈ 0.368`（而非半衰期模式的 0.5）
-  - 轮询采样的数据不参与衰减：轮询采样的 `last_seen` 不使用（仅用于常规调用）
+- `decay()` 使用标准半衰期衰减 `0.5 ** (elapsed_days / half_life_days)`，7 天后衰减到 0.5（实现见 §2 `EngineStats.decay`；原稿曾设想 `exp(-(now-last_seen)/HALF_LIFE)` 指数形式，实现时改为半衰期形式）
+  - 轮询采样**参与**衰减：轮询选中的引擎经 `record()` 正常更新 `last_seen`，评分随之提升（探索预期效果；原"不参与衰减"声明已在 §2.3 修订）
 
 ### 1.4 EngineRegistry
 
@@ -224,29 +219,36 @@ class EngineRegistry:
             if engine:
                 engine.status = "HEALTHY"
 
-    def record(self, engine: EngineRegistration, *, success: bool,
-               latency_ms: int = 0, glyph_status: str | None = None,
-               error: str | None = None) -> None:
-        """记录一次引擎调用结果。线程安全。"""
-        now = time.time()
-        with self._lock:
-            stats = engine.stats
-            stats.total_calls += 1
-            stats.total_latency_ms += latency_ms
-            stats.last_seen = now
-
-            if success:
-                stats.total_pages += 1
-
-            if glyph_status == "PASS":
-                stats.glyph_pass_count += 1
-            elif glyph_status == "FAIL":
-                stats.glyph_fail_count += 1
-            elif glyph_status in ("UNKNOWN", "UNCERTAIN"):
-                stats.glyph_unknown_count += 1
-
-            if error:
-                stats.last_error = error[:200]  # 截断过长错误
+    def record(self, name: str, success: bool,
+               glyph: Optional[GlyphStatus] = None, latency_ms: Optional[float] = None,
+               pages: int = 1, error: Optional[str] = None) -> None:
+        """记录一次引擎调用结果，更新统计（RARE/UNCERTAIN 不再被静默丢弃，
+        分别计入独立计数——领域评审指出中医古籍异体字/古方名占比高，漏计会系统性
+        低估通过率。注：E3 落地 `GlyphVerdict` 后，此处应接受其 `.status` 字段）。"""
+        reg = self._regs.get(name)
+        if reg is None:
+            raise SchedulerError(f"未注册的引擎: {name}")
+        s = reg.stats
+        s.total_calls += 1
+        s.total_pages += pages
+        if latency_ms is not None:
+            s.total_latency_ms += int(latency_ms)
+        if glyph is not None:
+            if glyph == "PASS":
+                s.glyph_pass_count += 1
+            elif glyph == "FAIL":
+                s.glyph_fail_count += 1
+            elif glyph == "UNKNOWN":
+                s.glyph_unknown_count += 1
+            elif glyph == "RARE":
+                s.glyph_rare_count += 1
+            elif glyph == "UNCERTAIN":
+                s.glyph_uncertain_count += 1
+        if not success:
+            s.last_error = error
+        s.last_seen = time.time()
+        if self.benchmark_dir is not None:
+            self._pending.append({...})  # NDJSON 增量事件
 
     # ── Benchmark 持久化（见第 8 节） ──
     def persist_benchmarks(self) -> None:
@@ -535,7 +537,7 @@ class EngineScheduler:
         now = time.time()
         pass_rate = engine.stats.glyph_pass_rate
         latency = engine.stats.avg_latency_per_page_ms
-        decay = engine.stats.decay(now)
+        decay = engine.stats.decay(HALF_LIFE_DAYS)
         base_score = pass_rate * (1000.0 / max(latency, 1.0)) * decay
         return domain_adjust(base_score, engine, page_info, page_layout)
 
@@ -564,19 +566,20 @@ class EngineScheduler:
 ### 4.2 权重公式
 
 ```python
-def _compute_bayesian_score(engine: EngineRegistration) -> float:
+def _compute_bayesian_score(engine: EngineRegistration,
+                            half_life_days: float = HALF_LIFE_DAYS) -> float:
     """完整权重公式。
 
-    score = bayesian_pass_rate * (1000 / max(avg_latency_ms, 1)) * decay(last_seen)
+    score = bayesian_pass_rate * (1000 / max(avg_latency_ms, 1)) * decay
 
     其中：
     - bayesian_pass_rate: (pass_count + prior * C) / (total + C)  [C=7, prior=0.7]
     - avg_latency_ms: 平均延迟，下限 1ms（防除零）
-    - decay(last_seen): exp(-(now - last_seen) / HALF_LIFE)  [HALF_LIFE=7天]
+    - decay(): 0.5 ** (elapsed_days / half_life_days)  [half_life_days=7天，7天后衰减到0.5]
     """
     pass_rate = engine.stats.glyph_pass_rate   # 已包含贝叶斯平均
     latency = max(engine.stats.avg_latency_per_page_ms, 1.0)
-    decay = engine.stats.decay()
+    decay = engine.stats.decay(half_life_days)
     return pass_rate * (1000.0 / latency) * decay
 ```
 

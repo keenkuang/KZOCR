@@ -240,7 +240,7 @@ score = (pass_rate_avg × n + C × prior) / (n + C) × (1 / latency_avg)
 **冷启动期的辅助策略：**
 - 首次运行按预设优先级（Tier 内定序：paddleocr > rapidocr > mineru > unirec）
 - 以 5% 概率执行**轮询调度**，即使引擎排名低也定期采样，避免冷启动陷阱
-- 轮询采样数据不参与衰减（见 E2）
+- 轮询采样**参与**衰减（见 E2；轮询选中的引擎经 `record()` 更新 `last_seen`，评分随之提升）
 
 ---
 
@@ -268,13 +268,13 @@ score = (pass_rate_avg × n + C × prior) / (n + C) × (1 / latency_avg)
 引入时间衰减，防止 30 天前的历史高分引擎被持续选中：
 
 ```python
-def decay(last_seen: float, half_life_days: float = 7.0) -> float:
-    """指数衰减。last_seen 越久，衰减越强。"""
-    elapsed_days = (time.time() - last_seen) / 86400
+def decay(self, half_life_days: float = 7.0) -> float:
+    """半衰期衰减。last_seen 越久，衰减越强；7 天后衰减到 0.5。"""
+    elapsed_days = (time.time() - self.last_seen) / 86400
     return 0.5 ** (elapsed_days / half_life_days)
 
-# 有效评分 = 贝叶斯评分 × decay(last_seen)
-effective_score = bayesian_score * decay(engine.stats.last_seen)
+# 有效评分 = 贝叶斯评分 × decay()
+effective_score = bayesian_score * decay()
 ```
 
 - 默认半衰期 7 天
