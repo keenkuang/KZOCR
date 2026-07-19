@@ -219,7 +219,7 @@ class RapidOCRAdapter:
             doc.close()
 
 
-def _parse_rapidocr_result(out) -> AdapterPageResult:
+def _parse_rapidocr_result(out: object) -> AdapterPageResult:
     """将 RapidOCR 原始输出解析为 AdapterPageResult。
 
     RapidOCR 返回 ``list[[box, text, score], ...]``：

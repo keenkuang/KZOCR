@@ -10,7 +10,10 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
+
+from kzocr.engine.types import AdapterPageResult, PageInput
+from kzocr.scheduler.registry import EngineRegistration
 
 _logger = logging.getLogger(__name__)
 
@@ -59,11 +62,11 @@ class AdaptiveController:
 
 
 def run_engines_concurrent(
-    engines: list[Any],
-    page_input: Any,
+    engines: list[EngineRegistration],
+    page_input: PageInput,
     timeout_s: float = 120.0,
     max_workers: int = 3,
-) -> tuple[Optional[Any], Optional[str]]:
+) -> tuple[Optional[AdapterPageResult], Optional[str]]:
     """并发执行多个引擎的 run_page，返回首个成功的结果。
 
     Args:
@@ -110,7 +113,11 @@ def run_engines_concurrent(
     return None, None
 
 
-def _run_one(engine, page_input, timeout_s: float):
+def _run_one(
+    engine: EngineRegistration,
+    page_input: PageInput,
+    timeout_s: float,
+) -> Optional[AdapterPageResult]:
     """执行单个引擎并返回结果或 None。"""
     try:
         result = engine.adapter.run_page(page_input)

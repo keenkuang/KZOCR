@@ -201,7 +201,13 @@ class _ProviderPool:
             b64 = base64.b64encode(f.read()).decode("ascii")
         return f"data:{mime};base64,{b64}"
 
-    def _do_call(self, messages, max_tokens, temperature, timeout) -> Optional[str]:
+    def _do_call(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        temperature: float,
+        timeout: float,
+    ) -> Optional[str]:
         model = self._models[self._idx]
         resp = self._client.chat.completions.create(
             model=model,
@@ -212,7 +218,13 @@ class _ProviderPool:
         )
         return (resp.choices[0].message.content or "").strip() or None
 
-    def chat(self, messages, max_tokens=2048, temperature=0.0, timeout=60) -> Optional[str]:
+    def chat(
+        self,
+        messages: list[dict],
+        max_tokens: int = 2048,
+        temperature: float = 0.0,
+        timeout: int = 60,
+    ) -> Optional[str]:
         if not self.enabled:
             return None
         for _ in range(len(self._models)):
@@ -228,8 +240,15 @@ class _ProviderPool:
             time.sleep(_RETRY_DELAY)
         return None
 
-    def chat_vision(self, prompt, image_path=None, image_data_url=None,
-                    max_tokens=2048, temperature=0, timeout=90) -> Optional[str]:
+    def chat_vision(
+        self,
+        prompt: str,
+        image_path: str | None = None,
+        image_data_url: str | None = None,
+        max_tokens: int = 2048,
+        temperature: float = 0,
+        timeout: int = 90,
+    ) -> Optional[str]:
         if not self.enabled:
             return None
         if image_path:
@@ -262,7 +281,14 @@ class _ProviderPool:
             time.sleep(_RETRY_DELAY)
         return None
 
-    def _vision_call(self, messages, model, max_tokens, temperature, timeout) -> Optional[str]:
+    def _vision_call(
+        self,
+        messages: list[dict],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        timeout: int,
+    ) -> Optional[str]:
         """对特定模型发起视觉请求（stream 模式，自动拼接输出）。"""
         resp = self._client.chat.completions.create(
             model=model,
@@ -317,7 +343,7 @@ class CloudLLMPool:
             return ""
         return self._text_providers[self._text_idx].current_model
 
-    def chat(self, messages, **kwargs) -> Optional[str]:
+    def chat(self, messages: list[dict], **kwargs: object) -> Optional[str]:
         if not self._text_providers:
             logger.error("[大池] 无可用文本 provider")
             return None
@@ -341,7 +367,13 @@ class CloudLLMPool:
             return ""
         return self._vision_providers[self._vision_idx].current_model
 
-    def chat_vision(self, prompt, image_path=None, image_data_url=None, **kwargs) -> Optional[str]:
+    def chat_vision(
+        self,
+        prompt: str,
+        image_path: str | None = None,
+        image_data_url: str | None = None,
+        **kwargs: object,
+    ) -> Optional[str]:
         if not self._vision_providers:
             logger.error("[大池] 无可用视觉 provider")
             return None

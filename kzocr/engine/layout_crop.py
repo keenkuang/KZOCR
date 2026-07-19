@@ -53,7 +53,7 @@ def _get_doclayout_model() -> object | None:
     return _DOC_LAYOUT_MODEL
 
 
-def _extract_doclayout_boxes(res) -> list[dict]:
+def _extract_doclayout_boxes(res: object) -> list[dict]:
     """兼容不同 paddlex 版本结果结构，抽出 boxes 列表。"""
     raw = res.json if hasattr(res, "json") else res
     if isinstance(raw, dict):
