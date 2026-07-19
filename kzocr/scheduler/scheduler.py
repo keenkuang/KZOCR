@@ -161,7 +161,9 @@ def _select_poll_candidate(
 class EngineScheduler:
     """引擎调度器：从注册中心动态选择候选（§4.1 / §8 步骤 2.1）。
 
-    `tier_limits` 控制每个 tier 的候选上限（§4.4，默认 Tier1=2 / Tier2=1 / Tier3=1）。
+    `tier_limits` 控制每个 tier 的 Top-N 主选集上限（§4.4，默认 Tier1=2 / Tier2=1 / Tier3=1）。
+    注意：5% 轮询采样（§4.1 第 9 步）为探索目的可在此上限之外额外追加一个候选，
+    属有意设计（探索强度 vs 成本，后续可能修订）。
     接入 `SchedulerConfig`（§7.3）留待 E5 集成阶段，此处以内置默认 + 构造覆盖实现。
     """
 

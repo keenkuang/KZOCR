@@ -278,7 +278,7 @@ effective_score = bayesian_score * decay(engine.stats.last_seen)
 ```
 
 - 默认半衰期 7 天
-- 轮询采样的数据不参与衰减（半衰期设为无穷或单独计数）
+- 轮询采样**参与**衰减：轮询选中的引擎经 `record()` 正常更新 `last_seen`，评分随之提升（探索预期效果；原"不参与衰减"声明已在 round3 修订）
 
 ### 4.3 竖排感知调度（解决「领域 P0 竖排盲区」）
 

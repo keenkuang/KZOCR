@@ -375,21 +375,22 @@ def _preset_sort_key(engine: EngineRegistration) -> int:
 ```python
 import random
 
-def _should_poll(registry: EngineRegistry) -> bool:
+def _should_poll() -> bool:
     """5% 概率触发轮询采样。"""
     return random.random() < 0.05
 
-def _select_poll_candidate(registry: EngineRegistry, tier: int,
-                            candidates: list[EngineRegistration]) -> EngineRegistration | None:
-    """从指定 tier 中随机选一个不在候选列表中的低分引擎。"""
-    tier_engines = [e for e in registry.list_by_tier(tier)
-                    if e not in candidates and e.status != "UNAVAILABLE"]
-    if not tier_engines:
+def _select_poll_candidate(candidates: list[EngineRegistration],
+                            top_n: list[EngineRegistration]) -> EngineRegistration | None:
+    """从同 tier、未入选 Top-N 且可用的候选中随机挑一个做探索性采样。"""
+    rest = [e for e in candidates if e not in top_n and e.status != "UNAVAILABLE"]
+    if not rest:
         return None
-    return random.choice(tier_engines)
+    return random.choice(rest)
 ```
 
-**轮询采样数据不参与衰减：** 轮询调用的 `last_seen` 不更新（或单独计数），避免影响真实调用的时效评分。
+**轮询采样参与衰减（更新 `last_seen`）：** 轮询选中的引擎经 `registry.record()` 正常更新 `last_seen`，其时效衰减因子随之变新鲜、评分被适度抬升——这恰是探索的预期效果：让久未入选的引擎重新获得被选中机会。原设计曾设想"轮询数据不参与衰减"，评审（round3，architect 报告 C1）确认改为**承认轮询参与衰减**，以强化探索、避免冷启动陷阱。
+
+**轮询可突破 `tier_limits` 上限（有意设计）：** 轮询候选在 Top-N 截断（§4.1 第 8 步）之后追加，故单页候选数可能短暂超过 `tier_limits`。该上限约束的是"利用"阶段的主选集，"突破"的是"探索"阶段的额外采样，属有意设计。此策略（探索强度 vs 成本，如每页是否允许多跑一个引擎）后续可能按运行数据修订。
 
 ---
 
@@ -525,8 +526,9 @@ class EngineScheduler:
     # ── 第 5 步：资源过滤（只读状态缓存，不做实时探测） ──
     candidates = [e for e in candidates if e.status != "UNAVAILABLE"]
 
-    # ── 第 6 步：预算检查（在排序前做粗略预算过滤） ──
-    # （精细预算检查在编排循环中逐引擎做）
+    # ── 第 6 步：预算检查（粗略；精细预算在编排循环逐引擎做） ──
+    if budget.exhausted:
+        return []
 
     # ── 第 7 步：加权排序 ──
     def _score(engine: EngineRegistration) -> float:
@@ -549,9 +551,9 @@ class EngineScheduler:
     max_engines = _get_max_engines_for_tier(tier)  # 从配置读取
     top_n = candidates[:max_engines]
 
-    # ── 第 9 步：5% 轮询采样 ──
-    if _should_poll(registry):
-        poll_candidate = _select_poll_candidate(registry, tier, candidates)
+    # ── 第 9 步：5% 轮询采样（可突破 tier_limits 上限，探索性追加） ──
+    if _should_poll():
+        poll_candidate = _select_poll_candidate(candidates, top_n)
         if poll_candidate:
             _logger.info("[scheduler] polling low-score engine: %s", poll_candidate.meta.name)
             top_n.append(poll_candidate)

@@ -293,6 +293,26 @@ class TestSelectCandidates:
             )
         assert len(result) == 1
 
+    def test_polling_sampling(self):
+        """轮询采样确定性验证（mock 掉 5% 随机），并验证其可突破 tier_limits 上限。"""
+        r = _full_registry()  # 2 个 tier-1 引擎：paddle / rapid
+        sched = EngineScheduler(tier_limits={1: 1})
+
+        # 轮询关闭：严格等于 tier_limits 上限
+        with mock.patch("kzocr.scheduler.scheduler._should_poll", return_value=False):
+            off = sched.select_candidates(
+                r, tier=1, page_info=PageInfo(page_num=0), budget=self._budget(),
+            )
+        assert len(off) == 1
+
+        # 轮询开启且存在未入选候选：在 Top-N 之上额外追加一个（突破上限）
+        with mock.patch("kzocr.scheduler.scheduler._should_poll", return_value=True):
+            on = sched.select_candidates(
+                r, tier=1, page_info=PageInfo(page_num=0), budget=self._budget(),
+            )
+        assert len(on) == 2  # 突破 tier_limits={1:1}
+        assert {e.meta.name for e in on} == {"paddle", "rapid"}
+
     def test_all_steps_integration(self):
         """Tier2 全被 rate_limited → 空"""
         r = _full_registry()
