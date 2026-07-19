@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from celery import Celery, Task
+from celery import Celery, Task, __version__ as CELERY_VERSION
 from celery.exceptions import SoftTimeLimitExceeded
 
 from kzocr.tcm_ocr.celery_tasks import config as celery_config
@@ -69,6 +69,15 @@ def _persist_to_mainline_bookdb(
 
 app = Celery("tcm_ocr")
 app.config_from_object(celery_config)
+
+# 启动日志：记录 Celery 版本与 broker，便于生产环境对账
+# （worker 启动时加载本模块即打印，无需登机器即可从日志确认 celery 版本）
+logger.info(
+    "Celery worker 应用已加载 | celery=%s app=%s broker=%s",
+    CELERY_VERSION,
+    app.main,
+    celery_config.broker_url,
+)
 
 # =============================================================================
 # 任务基类
