@@ -6,6 +6,7 @@ Celery 配置模块。
 """
 
 import logging
+import os
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -14,11 +15,12 @@ logger = logging.getLogger(__name__)
 # Broker & Backend
 # =============================================================================
 
-broker_url: str = "redis://localhost:6379/0"
-"""Celery broker URL，使用 Redis 数据库 0。"""
+# 默认指向本机 Redis；部署时通过环境变量覆盖（如 docker-compose 中指向 redis 服务）。
+broker_url: str = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+"""Celery broker URL，使用 Redis 数据库 0。可用 CELERY_BROKER_URL 覆盖。"""
 
-result_backend: str = "redis://localhost:6379/1"
-"""Celery result backend URL，使用 Redis 数据库 1（与 broker 隔离）。"""
+result_backend: str = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+"""Celery result backend URL，使用 Redis 数据库 1（与 broker 隔离）。可用 CELERY_RESULT_BACKEND 覆盖。"""
 
 # =============================================================================
 # 序列化配置

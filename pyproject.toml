@@ -7,6 +7,9 @@ dependencies = [
     # 编排层运行依赖（mock 链路也需这两项）：
     "PyMuPDF>=1.23",          # fitz：PDF 渲染（_pdf_page_to_numpy）
     "numpy>=1.24",             # 版心裁剪/数组处理
+    # 后台任务队列（Celery worker，见 docker-compose worker 服务）：
+    "celery>=5.3,<6",          # 任务队列；dev/prod 锁定主版本，避免 MaxRetriesError 类漂移
+    "redis>=5.0",              # Celery broker/result backend 客户端（redis://）
     # 真实引擎依赖（MinerU/PaddleOCR/torch/LLM）在运行环境另行安装。
 ]
 
