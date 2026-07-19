@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from celery import Celery, Task, __version__ as CELERY_VERSION
+from celery.signals import worker_process_init
 from celery.exceptions import SoftTimeLimitExceeded
 
 from kzocr.tcm_ocr.celery_tasks import config as celery_config
@@ -70,14 +71,19 @@ def _persist_to_mainline_bookdb(
 app = Celery("tcm_ocr")
 app.config_from_object(celery_config)
 
-# 启动日志：记录 Celery 版本与 broker，便于生产环境对账
-# （worker 启动时加载本模块即打印，无需登机器即可从日志确认 celery 版本）
-logger.info(
-    "Celery worker 应用已加载 | celery=%s app=%s broker=%s",
-    CELERY_VERSION,
-    app.main,
-    celery_config.broker_url,
-)
+# 启动日志：worker 进程初始化完成（日志系统就绪）后打印 celery 版本与 broker，
+# 便于生产环境对账——无需登机器即可从日志 grep 确认 celery 版本。
+# 注：不能放在模块 import 时（早于 celery logging 初始化会被丢弃），故用信号。
+
+
+@worker_process_init.connect
+def _log_celery_version(sender=None, **kwargs) -> None:
+    logger.info(
+        "Celery worker 启动 | celery=%s app=%s broker=%s",
+        CELERY_VERSION,
+        app.main,
+        celery_config.broker_url,
+    )
 
 # =============================================================================
 # 任务基类

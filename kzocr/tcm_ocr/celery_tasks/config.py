@@ -134,7 +134,7 @@ task_annotations: Dict[str, Dict[str, int]] = {
 # =============================================================================
 
 imports: List[str] = [
-    "tcm_ocr.celery_tasks.tasks",
+    "kzocr.tcm_ocr.celery_tasks.tasks",
 ]
 """启动时导入的任务模块列表。"""
 
