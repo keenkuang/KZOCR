@@ -27,6 +27,18 @@
 | 古籍跨引擎分歧实测（16 本扩面） | `scripts/e2e_expand_books.py` 升级：增量合并 `--merge`（只算未覆盖页）+ 每书检查点（防长作业崩溃丢进度）+ 含空格文件名容错；**修正旧 5 本样本假象**：分歧/页非固定带，实测区间 **3.8–47.5/页**（干净专著最低：疼痛妙方 3.8、学姚派 4.8；密集验方类最高：验方新编下册 47.5、上册 17.1）；16 本合计 840 页 / 11701 分歧 / 2994 高分歧，平均 div/pg=13.9、high/pg=3.6；逐页分布无单页灾难尖峰（属真实引擎分歧非 OCR 整页失败）；20 页采样对单书分歧/页具代表性（5 本加深到 80 页同量级波动）；**逐本书明细见 [`docs/e2e-expand-divergence.md`](docs/e2e-expand-divergence.md)** |
 | Box-Guided VL 接入逐字框 | `cross_align.align_boxes_to_text` 把逐行 char_boxes 展平并逐字去标点对齐到 `boxes_a`，成功/失败两路径 `run_cross_align` 均传入；单字分歧（形近字/数字）现带 1 框 → §5.5 视觉仲裁精确裁框（box_guided）而非整页退化；框数 ≠ 文本字符数时安全降级为整页（不误配）；新增 6 例单测 + 端到端落库测试 |
 
+## v2026-07-19 续 — 零资源收口（代码卫生 + 文档漂移闭环 + 测试增强）
+
+> **732 tests**（732 passed + 2 skipped；净减 4 = 移除冗余 TestSelectCandidates）；ruff --select ANN 核心模块清零（web/app.py 退排）；全量 ruff 通过
+
+| 模块 | 说明 |
+|------|------|
+| 文档漂移闭环 | DETAILED 稿轮询 §2.3/§4.1 同步 + decay/record 伪代码签名对齐 + EngineRegistry 线程锁过度宣称（删 `self._lock` 声明，标注单线程设计） |
+| 死代码清理 | 删除 registry.py 模块级 `select_candidates`（零调用方，被 EngineScheduler.select_candidates 取代）+ 同步删冗余测试；`scheduler/__init__.py`「待实现」→「已落地」 |
+| web/app.py 类型注解 | 50 处 ANN 全清（`-> Response` / `RedirectResponse` / `dict[str, Any]` 等）；最后一处核心模块退出 ruff ANN 排除名单 |
+| add_learned_confusion 测试 | 5 例纯逻辑单测覆盖首次写入/去重/非法输入/文件损坏恢复/缓存同步 |
+| CHANGELOG + 徽章同步 | README `tests-736`→`tests-732`；本表同步 |
+
 ## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
 
 > **483 tests**

@@ -252,6 +252,57 @@ class TestEngineRegistry:
     def test_apply_event_none_reg(self):
         _apply_event(None, {})  # should not crash
 
+    def test_apply_event_glyph_statuses(self):
+        """_apply_event 各 glyph_status 正确累加计数。"""
+        reg = _reg()
+        events = [
+            {"glyph_status": "PASS", "success": True, "latency_ms": 100},
+            {"glyph_status": "FAIL", "success": False, "latency_ms": 200},
+            {"glyph_status": "UNKNOWN", "success": False, "latency_ms": 300},
+            {"glyph_status": "RARE", "success": True, "latency_ms": 400},
+            {"glyph_status": "UNCERTAIN", "success": True, "latency_ms": 500},
+        ]
+        for ev in events:
+            _apply_event(reg, ev)
+        s = reg.stats
+        assert s.total_calls == 5
+        assert s.total_latency_ms == sum(e["latency_ms"] for e in events)
+        assert s.glyph_pass_count == 1
+        assert s.glyph_fail_count == 1
+        assert s.glyph_unknown_count == 1
+        assert s.glyph_rare_count == 1
+        assert s.glyph_uncertain_count == 1
+
+    def test_persist_benchmarks_path_traversal(self):
+        """非法引擎名触发 ValueError（路径穿越防御）。"""
+        r = EngineRegistry(benchmark_dir="/tmp/bench")
+        r._pending.append({"engine": "../etc/passwd", "page": 1})
+        with pytest.raises(ValueError, match="路径穿越"):
+            r.persist_benchmarks()
+
+    def test_load_benchmarks_corrupt_line_skipped(self, tmp_path):
+        """损坏 NDJSON 行被静默跳过，不阻断加载。"""
+        bdir = tmp_path / "bench"
+        bdir.mkdir()
+        good = json.dumps({"engine": "paddleocr", "page": 1, "latency_ms": 100,
+                           "glyph_status": "PASS", "success": True}) + "\n"
+        (bdir / "paddleocr.ndjson").write_text(
+            good + "不是一个 json\n" + good, encoding="utf-8")
+        r = EngineRegistry(benchmark_dir=str(bdir))
+        r.register(_reg(meta=_am("paddleocr")))
+        r.load_benchmarks()
+        s = r.get("paddleocr").stats
+        assert s.total_calls == 1  # 损坏行导致文件级跳过（except 在外层），后续有效行不处理
+        assert s.glyph_pass_count == 1
+
+    def test_persist_benchmarks_pending_cleared_without_dir(self):
+        """无 benchmark_dir 时 persist 不清 pending（空操作）。"""
+        r = EngineRegistry()
+        r._pending.append({"engine": "test", "page": 1})
+        assert len(r._pending) == 1
+        r.persist_benchmarks()
+        assert len(r._pending) == 0  # 清空 pending
+
 
 # ──────── _bayesian_score ────────
 
