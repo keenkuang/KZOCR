@@ -145,15 +145,17 @@ PDF → run_engine()
 
 | 命令 | 说明 |
 |------|------|
-| `kzocr pipeline <pdf>` | 处理单本书 |
+| `kzocr pipeline <pdf>` | 处理单本书（`--cross-check` 启用成功页跨引擎采样比对） |
 | `kzocr batch <pdf_dir>` | 批量处理目录内所有 PDF |
 | `kzocr export <code>` | 导出 Markdown（默认）或 JSON（`--format json`） |
-| `kzocr smoke` | 端到端冒烟测试 |
+| `kzocr smoke` | 端到端冒烟测试（`--skip-push` 不推送 kHUB） |
 | `kzocr web` | 启动 Web 管理面板 |
-| `kzocr review list <code>` | 查看校对异常 |
-| `kzocr review resolve <id>` | 标记异常决议 |
+| `kzocr review manifest <code>` | 生成全书审核清单（P0/P1/P2 优先级） |
+| `kzocr review apply <code>` | 回写审核修正到 BookDB |
 | `kzocr quality check <code>` | 运行方剂质检并写入 DB |
 | `kzocr quality list <code>` | 列出质检结果 |
+| `kzocr benchmark [status\|history\|run\|reset]` | 引擎性能基准查询与管理 |
+| `kzocr completion <shell>` | 输出 shell 自动补全脚本（bash/zsh/fish） |
 | `kzocr push <file>` | 推送文档到 kHUB |
 
 ---

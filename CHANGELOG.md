@@ -22,6 +22,7 @@
 | 性能基准 | DPI 72/150、进程单例、引擎倍速结论归档 |
 | 视觉回看 | GLM-4V-Flash 生产接线 + 端到端验证 |
 | Celery Worker 部署文档 | README 新增 Celery Worker 节（docker compose redis+worker、broker 环境变量、镜像不含 OCR 引擎说明） |
+| 代码评审硬化 | orchestrator 字符框按真实页号对齐（失败页缺口不再错配）；celery 移除双重重试（突破 max_retries）；run.py VLM 重试崩溃兜底；cross_align boxes_a 长度守卫；删除死代码 |
 
 ## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
 
