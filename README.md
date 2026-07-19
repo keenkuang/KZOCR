@@ -78,6 +78,43 @@ kzocr web
 docker compose up -d
 ```
 
+### Celery Worker 部署
+
+异步任务（`process_book_task` 等）由独立的 Celery worker 进程消费，broker/backend 走 Redis。镜像**不含 OCR 引擎**（仅 PyMuPDF / numpy / celery / redis），引擎在运行时另行安装。
+
+```bash
+# 启动 redis + worker（worker 依赖 redis，自动排序）
+docker compose up -d redis worker
+```
+
+`docker-compose.yml` 中的 `worker` 服务：
+
+```yaml
+worker:
+  build: .
+  command: ["celery", "-A", "kzocr.tcm_ocr.celery_tasks.tasks", "worker",
+            "-Q", "books,pages,maintenance,archival,knowledge",
+            "-c", "4", "--loglevel=info"]
+  environment:
+    - KZOCR_DB_DIR=/app/db
+    - CELERY_BROKER_URL=redis://redis:6379/0
+    - CELERY_RESULT_BACKEND=redis://redis:6379/1
+  depends_on: [redis]
+  restart: unless-stopped
+```
+
+关键环境变量：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | 任务队列 broker |
+| `CELERY_RESULT_BACKEND` | `redis://localhost:6379/1` | 任务结果后端 |
+| `KZOCR_PERSIST_DB` | `0` | 置 `1` 时任务完成后落库主线 BookDB（book/page/line + 字符级 bbox） |
+
+worker 启动时日志会打印 `Celery worker 启动 | celery=<版本> app=tcm_ocr broker=<broker>`，用于生产环境无需 SSH 即可核对实际 celery 版本。
+
+> 注意：Docker 镜像不包含 OCR 引擎。若通过 worker 跑真实 OCR，需在容器内安装对应引擎（PaddleOCR / RapidOCR / 本地 LLM），否则任务会在文档树重建阶段失败。
+
 ---
 
 ## 架构
