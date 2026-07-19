@@ -113,12 +113,18 @@ def book_result_from_tcm_ocr(
         page_text = "\n".join(
             (lr.final or lr.consensus or "") for lr in line_results
         )
+        # 逐页置信度取行级置信度均值（无行时回退 0.9），避免写死导致门控失真
+        page_conf = (
+            round(sum(ln.confidence for ln in line_results) / len(line_results), 4)
+            if line_results
+            else 0.9
+        )
         pages.append(
             PageResult(
                 page_num=page_num,
                 paragraphs=[para],
                 text=page_text,
-                confidence=0.9,
+                confidence=page_conf,
                 char_boxes=page_char_boxes or None,
             )
         )

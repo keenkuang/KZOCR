@@ -149,3 +149,25 @@ def test_line_without_char_bboxes_key():
     br = book_result_from_tcm_ocr(page_results, book_code="NOKEY")
     # page_char_boxes 已构造 → 对应行是空 list
     assert br.pages[0].char_boxes == [[]]
+
+
+def test_page_confidence_is_mean_of_line_confidences():
+    """逐页置信度应取行级置信度均值，而非写死 0.9。"""
+    page_results = [
+        {
+            "page_number": 1,
+            "lines": [
+                {"bbox": [0, 100, 10, 120], "fused_text": "甲", "confidence": 0.8},
+                {"bbox": [0, 130, 10, 150], "fused_text": "乙", "confidence": 1.0},
+            ],
+        },
+    ]
+    br = book_result_from_tcm_ocr(page_results, book_code="CONF")
+    assert br.pages[0].confidence == 0.9  # (0.8 + 1.0) / 2
+
+    # 单行页置信度等于该行置信度
+    single = [
+        {"page_number": 2, "lines": [{"bbox": [0, 100, 10, 120], "fused_text": "丙", "confidence": 0.42}]},
+    ]
+    br2 = book_result_from_tcm_ocr(single, book_code="CONF2")
+    assert br2.pages[0].confidence == 0.42

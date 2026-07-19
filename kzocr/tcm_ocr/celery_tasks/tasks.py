@@ -99,10 +99,11 @@ class TCMOCRBaseTask(Task):
     - 状态追踪
     """
 
-    autoretry_for = (Exception,)
-    retry_backoff = True
-    retry_backoff_max = 600  # 最大退避 10 分钟
-    retry_jitter = True
+    # 注意：不设置 autoretry_for。各任务体内已对可重试异常手动调用
+    # self.retry() 统一控制重试（含失败状态写入、max_retries 上限）。
+    # 若再设 autoretry_for=(Exception,)，重试耗尽抛出的 MaxRetriesExceededError
+    # 仍属 Exception，会被其再次捕获续重试，突破 max_retries；且 FileNotFoundError
+    # 这类确定性失败也会被无谓重试。
     max_retries = 2
     default_retry_delay = 60
 
@@ -328,6 +329,11 @@ def process_book_task(
     except SoftTimeLimitExceeded:
         logger.error("[%s] 任务超时（软限制）", book_id)
         _update_book_status(book_id, "timeout", book_library_dir)
+        # 超时视为可重试（移除 autoretry_for 后需手动重试以保持原有行为）
+        if self.request.retries < self.max_retries:
+            logger.info("[%s] 超时将在 %d 秒后重试", book_id, self.default_retry_delay)
+            raise self.retry(countdown=self.default_retry_delay)
+        logger.error("[%s] 超时达到最大重试次数，放弃", book_id)
         raise
 
     except Exception as exc:

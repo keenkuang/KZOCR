@@ -45,5 +45,18 @@ def test_retry_branch_uses_self_retry() -> None:
     assert "raise self.retry(exc=exc)" in text, "重试耗尽应改调 self.retry()"
 
 
+def test_base_task_not_autoretry_all_exceptions() -> None:
+    """基类不得设 autoretry_for=(Exception,)。
+
+    否则重试耗尽抛出的 MaxRetriesExceededError 仍属 Exception，会被自动重试
+    再次捕获，突破 max_retries；且 FileNotFoundError 等确定性失败也会被无谓重试。
+    各任务体内已用 self.retry() 手动控制重试，故 autoretry_for 必须为空。
+    """
+    import kzocr.tcm_ocr.celery_tasks.tasks as tasks
+
+    autoretry_for = getattr(tasks.TCMOCRBaseTask, "autoretry_for", ())
+    assert Exception not in autoretry_for, "基类不得对所有 Exception 自动重试"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

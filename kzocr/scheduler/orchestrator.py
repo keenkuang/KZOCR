@@ -267,10 +267,15 @@ def _record_engine_usage(
 
 def _build_pages_result(
     pages_text: list[str],
-    page_count: int,
+    pages_order: list[int],
 ) -> list[PageResult]:
-    """将 pages_text 转换为 BookResult 所需的 list[PageResult]。"""
-    return [PageResult(page_num=i, text=t) for i, t in enumerate(pages_text)]
+    """将 pages_text 转换为 BookResult 所需的 list[PageResult]。
+
+    ``pages_order`` 给出每页的真实页号（与 PDF 页序一致，含失败页缺口），
+    直接用真实 page_num 而非位置索引，确保后续 ``_merge_tier1_char_boxes``
+    按 page_num 合并 Tier1 字符框时不错配。
+    """
+    return [PageResult(page_num=n, text=t) for t, n in zip(pages_text, pages_order)]
 
 
 def _merge_tier1_char_boxes(
@@ -399,6 +404,10 @@ def orchestrate_book(
     start_time = time.monotonic()
 
     pages_text: list[str] = []
+    # 与 pages_text 一一对应的真实页号（0-based，含失败页缺口），
+    # 用于重建 PageResult 时保留真实 page_num，避免按位置索引导致
+    # Tier1 字符框合并错位（见 _build_pages_result / _merge_tier1_char_boxes）。
+    pages_order: list[int] = []
     failed_pages: dict[int, str] = {}
     uncertain_pages: dict[int, GlyphVerdict] = {}
     engine_usage_counter: dict[str, int] = {}
@@ -540,6 +549,7 @@ def orchestrate_book(
             if verdict.status in ("PASS", "RARE"):
                 final_text = cur_text
                 pages_text.append(final_text)
+                pages_order.append(page_num)
                 _record_engine_usage(
                     registry, tier1_candidates[0], verdict, t1_elapsed_per_page, engine_usage_counter
                 )
@@ -688,6 +698,7 @@ def orchestrate_book(
             if verdict.status in ("PASS", "RARE"):
                 final_text = result.text
                 pages_text.append(final_text)
+                pages_order.append(page_num)
 
         # ── HumanGate ──
         if verdict.status in ("FAIL", "UNKNOWN"):
@@ -697,6 +708,7 @@ def orchestrate_book(
             uncertain_pages[page_num] = verdict
             if final_text:
                 pages_text.append(final_text)
+                pages_order.append(page_num)
 
         trace.extend(page_trace)
 
@@ -765,7 +777,7 @@ def orchestrate_book(
     # F2: 关闭 DB
     db.close()
 
-    final_pages = _build_pages_result(pages_text, len(pages_text))
+    final_pages = _build_pages_result(pages_text, pages_order)
     # 把 Tier1 适配器产出的字符级 bbox 带回最终页（adapter.run_book 已产出 char_boxes，
     # 但上面用 pages_text 重建页时丢弃了；按 page_num 合并回来）
     _merge_tier1_char_boxes(final_pages, tier1_result)
