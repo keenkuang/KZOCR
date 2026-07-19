@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -72,7 +73,7 @@ def _list_books() -> list[dict]:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def index(request: Request) -> Response:
     from kzocr.engine.registration import list_registrations
     books = _list_books()
     regs = list_registrations()
@@ -91,7 +92,7 @@ async def index(request: Request):
 
 
 @app.get("/engines", response_class=HTMLResponse)
-async def engines_page(request: Request):
+async def engines_page(request: Request) -> Response:
     """引擎管理页面（列表 + 新增模态框）。"""
     from kzocr.engine.engine_config import list_engine_configs
     configs = list_engine_configs()
@@ -99,7 +100,7 @@ async def engines_page(request: Request):
 
 
 @app.post("/engines/new")
-async def engine_new(request: Request):
+async def engine_new(request: Request) -> RedirectResponse:
     """新增引擎。"""
     from kzocr.engine.engine_config import save_engine_config
     form = await request.form()
@@ -119,7 +120,7 @@ async def engine_new(request: Request):
 
 
 @app.get("/engines/status/all")
-async def all_engine_status():
+async def all_engine_status() -> Response:
     """批量检测所有引擎状态。"""
     from kzocr.engine.engine_config import list_engine_configs
     import asyncio
@@ -128,14 +129,14 @@ async def all_engine_status():
     import os
     from fastapi.responses import JSONResponse
     configs = list_engine_configs()
-    async def _check_one(cfg):
+    async def _check_one(cfg: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         name = cfg["name"]
         base_url = cfg.get("base_url", "")
         api_key_env = cfg.get("api_key_env", "")
         api_key = os.environ.get(api_key_env, "") if api_key_env else ""
         if not base_url or not base_url.startswith(("http://", "https://")):
             return name, {"status": "offline", "error": "无效 base_url"}
-        def _sync():
+        def _sync() -> dict[str, Any]:
             for url in [base_url.rstrip("/") + "/v1/models", base_url.rstrip("/")]:
                 try:
                     req = urllib.request.Request(url, method="GET")
@@ -159,7 +160,7 @@ async def all_engine_status():
 
 
 @app.get("/engines/{name}/edit", response_class=HTMLResponse)
-async def engine_edit(request: Request, name: str):
+async def engine_edit(request: Request, name: str) -> Response:
     """引擎编辑页面。"""
     from kzocr.engine.engine_config import load_engine_config
     cfg = load_engine_config(name)
@@ -169,7 +170,7 @@ async def engine_edit(request: Request, name: str):
 
 
 @app.post("/engines/{name}/save")
-async def engine_save(name: str, request: Request):
+async def engine_save(name: str, request: Request) -> RedirectResponse:
     """保存引擎配置。"""
     from kzocr.engine.engine_config import save_engine_config, load_engine_config
     form = await request.form()
@@ -203,7 +204,7 @@ async def engine_save(name: str, request: Request):
 
 
 @app.post("/engines/{name}/delete")
-async def engine_delete(name: str):
+async def engine_delete(name: str) -> RedirectResponse:
     """删除引擎。"""
     from kzocr.engine.engine_config import delete_engine_config
     delete_engine_config(name)
@@ -211,7 +212,7 @@ async def engine_delete(name: str):
 
 
 @app.post("/engines/{name}/toggle")
-async def engine_toggle(name: str):
+async def engine_toggle(name: str) -> JSONResponse:
     """切换引擎启用/禁用。"""
     from kzocr.engine.engine_config import load_engine_config, save_engine_config
     from fastapi.responses import JSONResponse
@@ -224,7 +225,7 @@ async def engine_toggle(name: str):
 
 
 @app.get("/engines/{name}/status")
-async def engine_status(name: str):
+async def engine_status(name: str) -> JSONResponse:
     """检测单个引擎连通性。"""
     from kzocr.engine.engine_config import load_engine_config
     import asyncio
@@ -239,8 +240,8 @@ async def engine_status(name: str):
     api_key_env = cfg.get("api_key_env", "")
     api_key = os.environ.get(api_key_env, "") if api_key_env else ""
 
-    async def _check():
-        def _sync():
+    async def _check() -> dict[str, Any]:
+        def _sync() -> dict[str, Any]:
             if not base_url or not base_url.startswith(("http://", "https://")):
                 return {"status": "offline", "error": f"无效的 base_url: {base_url}"}
             probe_urls = [
@@ -280,7 +281,7 @@ async def engine_status(name: str):
 
 
 @app.get("/monitor", response_class=HTMLResponse)
-async def monitor_page(request: Request):
+async def monitor_page(request: Request) -> Response:
     """实时监控：引擎状态卡 + 全局汇总。"""
     from kzocr.engine.engine_config import list_engine_configs
     import os
@@ -357,7 +358,7 @@ async def monitor_page(request: Request):
 
 
 @app.get("/benchmark", response_class=HTMLResponse)
-async def benchmark_page(request: Request):
+async def benchmark_page(request: Request) -> Response:
     """基准测试看板：引擎汇总卡片 + 明细表格。"""
     import os
     dbd = _db_dir()
@@ -412,7 +413,7 @@ async def benchmark_page(request: Request):
 
 
 @app.get("/monitor/api")
-async def monitor_api():
+async def monitor_api() -> dict[str, Any]:
     """监控数据 JSON API"""
     from kzocr.engine.engine_config import list_engine_configs
     import os
@@ -455,7 +456,7 @@ async def monitor_api():
 
 
 @app.get("/prompts", response_class=HTMLResponse)
-async def prompts_page(request: Request):
+async def prompts_page(request: Request) -> Response:
     """Prompt 管理页面。首次访问时自动创建默认提示词。"""
     from kzocr.engine.prompt_manager import list_prompts, init_defaults
     init_defaults()
@@ -464,7 +465,7 @@ async def prompts_page(request: Request):
 
 
 @app.get("/prompts/{name}", response_class=HTMLResponse)
-async def prompt_edit(request: Request, name: str):
+async def prompt_edit(request: Request, name: str) -> Response:
     """编辑 prompt。"""
     from kzocr.engine.prompt_manager import load_prompt
     text = load_prompt(name) or ""
@@ -472,7 +473,7 @@ async def prompt_edit(request: Request, name: str):
 
 
 @app.post("/prompts/{name}")
-async def prompt_save(request: Request, name: str):
+async def prompt_save(request: Request, name: str) -> RedirectResponse:
     """保存 prompt。"""
     from kzocr.engine.prompt_manager import save_prompt
     form = await request.form()
@@ -481,7 +482,7 @@ async def prompt_save(request: Request, name: str):
 
 
 @app.get("/prompts/{name}/delete")
-async def prompt_delete(name: str):
+async def prompt_delete(name: str) -> RedirectResponse:
     """删除 prompt。"""
     from kzocr.engine.prompt_manager import delete_prompt
     delete_prompt(name)
@@ -489,7 +490,7 @@ async def prompt_delete(name: str):
 
 
 @app.post("/register/{book_code}")
-async def register_update(request: Request, book_code: str):
+async def register_update(request: Request, book_code: str) -> RedirectResponse:
     """更新已有登记。"""
     from kzocr.engine.registration import save_registration
     import json
@@ -510,7 +511,7 @@ async def register_update(request: Request, book_code: str):
 
 
 @app.get("/register/{book_code}/delete")
-async def register_delete(book_code: str):
+async def register_delete(book_code: str) -> RedirectResponse:
     """删除登记。"""
     from kzocr.engine.registration import _reg_path
     import os
@@ -520,7 +521,7 @@ async def register_delete(book_code: str):
     return RedirectResponse(url="/registrations", status_code=303)
 
 @app.get("/book/{book_code}", response_class=HTMLResponse)
-async def book_detail(request: Request, book_code: str):
+async def book_detail(request: Request, book_code: str) -> Response:
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
     try:
@@ -544,7 +545,7 @@ async def book_detail(request: Request, book_code: str):
 
 
 @app.get("/book/{book_code}/anomalies", response_class=HTMLResponse)
-async def book_anomalies(request: Request, book_code: str, status: str = "pending"):
+async def book_anomalies(request: Request, book_code: str, status: str = "pending") -> Response:
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
     try:
@@ -561,7 +562,7 @@ async def book_anomalies(request: Request, book_code: str, status: str = "pendin
 
 
 @app.post("/book/{book_code}/anomalies/{anomaly_id}/resolve")
-async def resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fixed", note: str = ""):
+async def resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fixed", note: str = "") -> RedirectResponse:
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
     try:
@@ -572,7 +573,7 @@ async def resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fi
 
 
 @app.get("/book/{book_code}/recipes", response_class=HTMLResponse)
-async def book_recipes(request: Request, book_code: str):
+async def book_recipes(request: Request, book_code: str) -> Response:
     from kzocr.analysis.recipe_parser import parse_recipes
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -595,7 +596,7 @@ async def book_recipes(request: Request, book_code: str):
 @app.get("/book/{book_code}/divergences", response_class=HTMLResponse)
 async def book_divergences(
     request: Request, book_code: str, priority: str = "", page: int = None
-):
+) -> Response:
     """跨引擎分歧校对台（借鉴 ocr_pipeline_v2 交叉校验可视化）。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -613,7 +614,7 @@ async def book_divergences(
 
 
 @app.get("/pipeline", response_class=HTMLResponse)
-async def pipeline_form(request: Request, book_code: str = ""):
+async def pipeline_form(request: Request, book_code: str = "") -> Response:
     """OCR 处理表单。"""
     from kzocr.engine.registration import list_registrations
     regs = list_registrations()
@@ -621,7 +622,7 @@ async def pipeline_form(request: Request, book_code: str = ""):
 
 
 @app.post("/pipeline")
-async def pipeline_run(request: Request):
+async def pipeline_run(request: Request) -> Response:
     """执行 OCR 处理。"""
     import os
     import logging
@@ -658,7 +659,7 @@ async def pipeline_run(request: Request):
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, Any]:
     """系统健康检查。"""
     dbd = _db_dir()
     db_ok = os.path.isdir(dbd)
@@ -682,7 +683,7 @@ async def health():
 
 
 @app.get("/registrations", response_class=HTMLResponse)
-async def registrations_list(request: Request):
+async def registrations_list(request: Request) -> Response:
     """已登记书籍列表。"""
     from kzocr.engine.registration import list_registrations
     regs = list_registrations()
@@ -690,7 +691,7 @@ async def registrations_list(request: Request):
 
 
 @app.get("/register/{book_code}", response_class=HTMLResponse)
-async def register_edit(request: Request, book_code: str):
+async def register_edit(request: Request, book_code: str) -> Response:
     """编辑已有登记。"""
     from kzocr.engine.registration import load_registration
     reg = load_registration(book_code) or {}
@@ -698,7 +699,7 @@ async def register_edit(request: Request, book_code: str):
 
 
 @app.get("/book/{book_code}/quality", response_class=HTMLResponse)
-async def book_quality(request: Request, book_code: str):
+async def book_quality(request: Request, book_code: str) -> Response:
     """质检结果页面。"""
     from kzocr.storage.db import BookDB
     dbd = _db_dir()
@@ -723,7 +724,7 @@ api = APIRouter(prefix="/api")
 
 
 @api.get("/engines")
-async def api_engines():
+async def api_engines() -> list[dict[str, Any]]:
     """返回所有引擎状态（基于 benchmark_results 和历史数据）。"""
     dbd = _db_dir()
     engines = {}
@@ -750,7 +751,7 @@ async def api_engines():
 
 
 @api.get("/engines/{name}/test")
-async def api_engine_test(name: str):
+async def api_engine_test(name: str) -> dict[str, Any]:
     """测试引擎连通性。云端引擎检查 egress；本地引擎检查端口/进程。"""
     from kzocr.engine.engine_config import load_engine_config
     from kzocr.security.egress import validate_url
@@ -791,13 +792,13 @@ async def api_engine_test(name: str):
 
 
 @api.get("/books")
-async def api_books():
+async def api_books() -> list[dict[str, Any]]:
     """返回书籍列表（JSON）。"""
     return _list_books()
 
 
 @api.get("/books/{book_code}")
-async def api_book_detail(book_code: str):
+async def api_book_detail(book_code: str) -> dict[str, Any]:
     """返回单书详情（JSON）。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -820,7 +821,7 @@ async def api_book_detail(book_code: str):
 
 
 @api.get("/books/{book_code}/pages")
-async def api_book_pages(book_code: str):
+async def api_book_pages(book_code: str) -> list[dict[str, Any]]:
     """返回逐页进度（JSON）。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -831,7 +832,7 @@ async def api_book_pages(book_code: str):
 
 
 @api.get("/books/{book_code}/anomalies")
-async def api_anomalies(book_code: str, status: str = Query("pending", description="过滤状态")):
+async def api_anomalies(book_code: str, status: str = Query("pending", description="过滤状态")) -> list[dict[str, Any]]:
     """返回异常记录列表（JSON）。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -842,7 +843,7 @@ async def api_anomalies(book_code: str, status: str = Query("pending", descripti
 
 
 @api.post("/books/{book_code}/anomalies/{anomaly_id}/resolve")
-async def api_resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fixed", note: str = ""):
+async def api_resolve_anomaly(book_code: str, anomaly_id: int, resolution: str = "fixed", note: str = "") -> dict[str, Any]:
     """标记异常决议。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -854,7 +855,7 @@ async def api_resolve_anomaly(book_code: str, anomaly_id: int, resolution: str =
 
 
 @api.get("/books/{book_code}/recipes")
-async def api_recipes(book_code: str):
+async def api_recipes(book_code: str) -> list[dict[str, Any]]:
     """返回方剂列表（JSON）。"""
     from kzocr.analysis.recipe_parser import parse_recipes
     dbd = _db_dir()
@@ -884,7 +885,7 @@ async def api_divergences(
     book_code: str,
     page: int = Query(None, description="按页号过滤"),
     priority: str = Query(None, description="按优先级过滤（high/normal）"),
-):
+) -> list[dict[str, Any]]:
     """返回跨引擎分歧列表（JSON）。可选按页号/优先级过滤。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -895,7 +896,7 @@ async def api_divergences(
 
 
 @api.post("/confusion")
-async def api_add_confusion(request: Request):
+async def api_add_confusion(request: Request) -> dict[str, Any]:
     """新增/更新一条形近字混淆对（自学习：让静态黑名单持续进化）。
 
     请求体 JSON：{"wrong": "...", "correct": "...", "source": "..."}。
@@ -918,7 +919,7 @@ async def api_add_confusion(request: Request):
 
 
 @app.get("/book/{book_code}/dashboard", response_class=HTMLResponse)
-async def book_dashboard(request: Request, book_code: str):
+async def book_dashboard(request: Request, book_code: str) -> Response:
     """引擎性能看板。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -940,7 +941,7 @@ async def book_dashboard(request: Request, book_code: str):
 
 
 @app.get("/book/{book_code}/recipe/{recipe_no}", response_class=HTMLResponse)
-async def book_recipe_detail(request: Request, book_code: str, recipe_no: str):
+async def book_recipe_detail(request: Request, book_code: str, recipe_no: str) -> Response:
     """方剂详情页。"""
     from kzocr.analysis.recipe_parser import parse_recipes
     from kzocr.analysis.quality import QualityChecker
@@ -967,7 +968,7 @@ async def book_recipe_detail(request: Request, book_code: str, recipe_no: str):
 
 
 @app.get("/search", response_class=HTMLResponse)
-async def search(request: Request, q: str = ""):
+async def search(request: Request, q: str = "") -> Response:
     """全字段搜索。"""
     results: list[dict] = []
     if q:
@@ -997,7 +998,7 @@ async def search(request: Request, q: str = ""):
 
 
 @app.get("/workspace/{book_code}", response_class=HTMLResponse)
-async def workspace(request: Request, book_code: str, resolved: str = "no"):
+async def workspace(request: Request, book_code: str, resolved: str = "no") -> Response:
     """外包校对工作台。"""
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
@@ -1018,13 +1019,13 @@ app.include_router(api)
 
 
 @app.get("/register", response_class=HTMLResponse)
-async def register_form(request: Request):
+async def register_form(request: Request) -> Response:
     """书籍登记表单。"""
     return templates.TemplateResponse(request, "register.html", {})
 
 
 @app.post("/register")
-async def register_submit(request: Request):
+async def register_submit(request: Request) -> RedirectResponse:
     """提交书籍登记。"""
     from kzocr.engine.registration import save_registration
     import json
