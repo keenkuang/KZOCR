@@ -24,7 +24,7 @@
 | 高分歧页视觉仲裁 | 成功/失败路径 high 分歧送 GLM-4V-Flash Box-Guided 仲裁（§5.5）：抽 `_arbitrate_high_divergences` 共享 helper，VL 已裁决（accepted_a/b、both_wrong）不进 M4 队列，仅 manual/无视觉能力时进人工复核；失败路径内联循环去重；新增 6 例 mock VL 路由 + 状态更新 + 静默跳过测试 |
 | Celery Worker 部署文档 | README 新增 Celery Worker 节（docker compose redis+worker、broker 环境变量、镜像不含 OCR 引擎说明） |
 | 代码评审硬化 | orchestrator 字符框按真实页号对齐（失败页缺口不再错配）；celery 移除双重重试（突破 max_retries）；run.py VLM 重试崩溃兜底；cross_align boxes_a 长度守卫；删除死代码 |
-| 古籍跨引擎分歧实测（16 本扩面） | `scripts/e2e_expand_books.py` 升级：增量合并 `--merge`（只算未覆盖页）+ 每书检查点（防长作业崩溃丢进度）+ 含空格文件名容错；**修正旧 5 本样本假象**：分歧/页非固定带，实测区间 **3.8–47.5/页**（干净专著最低：疼痛妙方 3.8、学姚派 4.8；密集验方类最高：验方新编下册 47.5、上册 17.1）；16 本合计 840 页 / 11701 分歧 / 2994 高分歧，平均 div/pg=13.9、high/pg=3.6；逐页分布无单页灾难尖峰（属真实引擎分歧非 OCR 整页失败）；20 页采样对单书分歧/页具代表性（5 本加深到 80 页同量级波动） |
+| 古籍跨引擎分歧实测（16 本扩面） | `scripts/e2e_expand_books.py` 升级：增量合并 `--merge`（只算未覆盖页）+ 每书检查点（防长作业崩溃丢进度）+ 含空格文件名容错；**修正旧 5 本样本假象**：分歧/页非固定带，实测区间 **3.8–47.5/页**（干净专著最低：疼痛妙方 3.8、学姚派 4.8；密集验方类最高：验方新编下册 47.5、上册 17.1）；16 本合计 840 页 / 11701 分歧 / 2994 高分歧，平均 div/pg=13.9、high/pg=3.6；逐页分布无单页灾难尖峰（属真实引擎分歧非 OCR 整页失败）；20 页采样对单书分歧/页具代表性（5 本加深到 80 页同量级波动）；**逐本书明细见 [`docs/e2e-expand-divergence.md`](docs/e2e-expand-divergence.md)** |
 
 ## v2026-07-10 — v0.19 Web 增强 + 安全加固 + CLI 自动补全
 
