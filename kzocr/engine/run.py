@@ -141,7 +141,7 @@ def run_engine(pdf_path: str, book_code: str | None = None, config=None) -> Book
     return book
 
 
-def _build_engine_config() -> dict:
+def _build_engine_config() -> dict[str, object]:
     """从环境变量构造 kimi BookPipeline 所需的 config 字典。
 
     需要的最小集：
@@ -261,7 +261,7 @@ def _read_deliverable(result, lib_dir: str, book_id: str) -> str:
     return ""
 
 
-def _markdown_to_pages(markdown: str, book_code: str) -> list:
+def _markdown_to_pages(markdown: str, book_code: str) -> list[PageResult]:
     """把 final_markdown 拆成 PageResult[]（保底，使校对台非空）。
 
     优先按 '## 第 N 页' 分段；无标记则整本作为单页多行。

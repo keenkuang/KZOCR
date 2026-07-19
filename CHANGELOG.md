@@ -7,7 +7,7 @@
 
 ## v2026-07-19 — v0.20 v0.7 调度器层完整落地 + 校对反馈闭环
 
-> **730 tests**（726 passed + 2 skipped；2 例 benchmark 标记默认 CI 排除）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
+> **740 tests**（736 passed + 2 skipped；2 例 benchmark 标记默认 CI 排除）；真实引擎（PaddleOCR / RapidOCR / GLM-4V-Flash）已接入并做性能基准
 
 | 模块 | 说明 |
 |------|------|
