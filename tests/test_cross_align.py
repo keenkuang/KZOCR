@@ -268,3 +268,71 @@ def test_load_confusion_keys_split_empty_no_file(tmp_path: Path):
     missing = tmp_path / "nonexistent.json"
     result = load_confusion_keys_split(path=missing, reload=True)
     assert result == {"wrong": {}, "correct": {}}
+
+
+# ──────── add_learned_confusion ────────
+
+def test_add_learned_confusion_first_entry(tmp_path: Path, monkeypatch):
+    """首次添加，文件不存在→创建并写入。"""
+    import json
+    from kzocr.scheduler.cross_align import add_learned_confusion
+    p = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", p)
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", None)
+    result = add_learned_confusion("芩", "苓", source="web")
+    assert result is True
+    assert p.is_file()
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert len(data) == 1
+    assert data[0]["wrong"] == "芩"
+    assert data[0]["correct"] == "苓"
+    assert data[0]["category"] == "learned"
+    assert "created_at" in data[0]
+
+
+def test_add_learned_confusion_dedup(tmp_path: Path, monkeypatch):
+    """相同键值对第二次添加返回 False，不重复追加。"""
+    import json
+    from kzocr.scheduler.cross_align import add_learned_confusion
+    p = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", p)
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", None)
+    assert add_learned_confusion("芩", "苓") is True
+    assert add_learned_confusion("芩", "苓") is False  # 已存在
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert len(data) == 1  # 未重复
+
+
+def test_add_learned_confusion_invalid(tmp_path: Path, monkeypatch):
+    """空值或相等值返回 False，不写文件。"""
+    from kzocr.scheduler.cross_align import add_learned_confusion
+    p = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", p)
+    assert add_learned_confusion("", "苓") is False
+    assert add_learned_confusion("芩", "") is False
+    assert add_learned_confusion("一样", "一样") is False
+    assert not p.is_file()  # 未创建文件
+
+
+def test_add_learned_confusion_corrupt_file(tmp_path: Path, monkeypatch):
+    """已存在的 JSON 损坏文件可被覆盖。"""
+    import json
+    from kzocr.scheduler.cross_align import add_learned_confusion
+    p = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", p)
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", None)
+    p.write_text("不是一个 json", encoding="utf-8")
+    result = add_learned_confusion("芩", "苓")
+    assert result is True
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert len(data) == 1
+
+
+def test_add_learned_confusion_cache_update(tmp_path: Path, monkeypatch):
+    """_CONFUSION_CACHE 非 None 时同步更新。"""
+    from kzocr.scheduler.cross_align import add_learned_confusion
+    cache: dict[str, str] = {}
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", tmp_path / "learned_confusion.json")
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", cache)
+    add_learned_confusion("芩", "苓")
+    assert cache.get("芩") == "苓"
