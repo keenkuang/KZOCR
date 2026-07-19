@@ -171,24 +171,29 @@ class EngineStats:
 ### 1.4 EngineRegistry
 
 ```python
-import threading
 from collections import OrderedDict
 
 
 class EngineRegistry:
-    """引擎注册中心。管理所有引擎的注册、探测、统计记录和 benchmark 持久化。"""
+    """引擎注册中心。管理所有引擎的注册、探测、统计记录和 benchmark 持久化。
+
+    单线程设计：当前所有变更注册表状态的方法（register / mark_unavailable /
+    mark_healthy / record）均只在 orchestrator 主线程顺序调用——页码顺序处理，
+    并发 ThreadPoolExecutor 仅执行 engine.adapter.run_page，从不触碰本注册表；
+    跨书并发走独立 Celery 进程，各自持有独立内存注册表，无共享内存竞争。
+    因此当前实现不加线程锁。若将来启用并行页码处理（设计稿曾预留的 opt-in），
+    则需在以上方法上引入锁以保证线程安全。
+    """
 
     def __init__(self):
         self._engines: dict[str, EngineRegistration] = OrderedDict()
-        self._lock = threading.Lock()               # 线程安全（为并行 opt-in 预留）
 
     def register(self, engine: EngineRegistration) -> None:
         """注册一个引擎。同名引擎后注册覆盖先注册（日志警告）。"""
-        with self._lock:
-            if engine.meta.name in self._engines:
-                _logger.warning("[registry] engine=%s already registered, overwriting",
-                                engine.meta.name)
-            self._engines[engine.meta.name] = engine
+        if engine.meta.name in self._engines:
+            _logger.warning("[registry] engine=%s already registered, overwriting",
+                            engine.meta.name)
+        self._engines[engine.meta.name] = engine
 
     def get(self, name: str) -> EngineRegistration | None:
         """按名称获取注册项。"""
@@ -205,19 +210,17 @@ class EngineRegistry:
 
     def mark_unavailable(self, name: str, reason: str = "") -> None:
         """将某引擎标记为 UNAVAILABLE。调度器看到此状态后会跳过该引擎。"""
-        with self._lock:
-            engine = self._engines.get(name)
-            if engine:
-                engine.status = "UNAVAILABLE"
-                engine.stats.last_error = reason
-                _logger.warning("[registry] engine=%s marked UNAVAILABLE: %s", name, reason)
+        engine = self._engines.get(name)
+        if engine:
+            engine.status = "UNAVAILABLE"
+            engine.stats.last_error = reason
+            _logger.warning("[registry] engine=%s marked UNAVAILABLE: %s", name, reason)
 
     def mark_healthy(self, name: str) -> None:
         """恢复引擎为 HEALTHY（如 probe 周期检测到恢复）。"""
-        with self._lock:
-            engine = self._engines.get(name)
-            if engine:
-                engine.status = "HEALTHY"
+        engine = self._engines.get(name)
+        if engine:
+            engine.status = "HEALTHY"
 
     def record(self, name: str, success: bool,
                glyph: Optional[GlyphStatus] = None, latency_ms: Optional[float] = None,
