@@ -4,7 +4,11 @@ from __future__ import annotations
 from kzocr.engine.types import (
     AdapterMeta,
     AdapterPageResult,
+    BookResult,
+    EngineCallRecord,
+    GlyphVerdict,
     LineResult,
+    PageResult,
     ProbeResult,
 )
 
@@ -137,3 +141,49 @@ class TestAdapterPageResult:
         assert apr.crop_img_path == "/tmp/crop.png"
         assert apr.meta is not None
         assert apr.meta.name == "paddleocr"
+
+
+class TestPageResult:
+    def test_char_boxes_none_sentinel(self):
+        """char_boxes=None 表示引擎不支持字符框（如 RapidOCR）。"""
+        p = PageResult(page_num=1)
+        assert p.char_boxes is None
+
+    def test_char_boxes_list_supported(self):
+        """支持字符框的引擎给出 list[list[list[int]]]（每行 → 逐字 [x1,y1,x2,y2]）。"""
+        p = PageResult(page_num=1, char_boxes=[[[1, 2, 3, 4]], []])
+        assert p.char_boxes == [[[1, 2, 3, 4]], []]
+
+    def test_mutable_defaults_independent(self):
+        """paragraphs 等 list 默认工厂必须每实例独立（防可变默认陷阱）。"""
+        a = PageResult(page_num=1)
+        b = PageResult(page_num=2)
+        assert a.paragraphs is not b.paragraphs
+        assert a.paragraphs == []
+
+
+class TestBookResult:
+    def test_mutable_list_defaults_independent(self):
+        """聚合体的 list 默认工厂必须每实例独立——否则一书的 pages 会泄漏到另一书。"""
+        b1 = BookResult(book_code="A", title="书A")
+        b2 = BookResult(book_code="B", title="书B")
+        b1.pages.append(PageResult(page_num=1))
+        b1.engine_trace.append(EngineCallRecord(page=1, tier=1, engine="x", latency_ms=1.0))
+        assert b2.pages == []
+        assert b2.engine_trace == []
+
+    def test_mutable_dict_defaults_independent(self):
+        """failed_pages / uncertain_pages 等 dict 默认工厂必须每实例独立。"""
+        b1 = BookResult(book_code="A", title="书A")
+        b2 = BookResult(book_code="B", title="书B")
+        b1.failed_pages[5] = "ocr failed"
+        b1.uncertain_pages[7] = GlyphVerdict(status="UNCERTAIN", confidence=0.5)
+        assert b2.failed_pages == {}
+        assert b2.uncertain_pages == {}
+
+    def test_char_boxes_only_on_page_not_line(self):
+        """字符框仅挂在 PageResult，LineResult 无此字段（orchestrator 合并的契约前提）。"""
+        page = PageResult(page_num=1, char_boxes=[[[1, 2, 3, 4]]])
+        line = LineResult(final="黄芪")
+        assert page.char_boxes == [[[1, 2, 3, 4]]]
+        assert not hasattr(line, "char_boxes")
