@@ -51,6 +51,41 @@ def strip_punct(s: str) -> str:
     return "".join(ch for ch in s if ch not in _PUNCT and ch not in _WS)
 
 
+def align_boxes_to_text(
+    text_a: str,
+    char_boxes: Optional[list[list[list[int]]]],
+) -> Optional[list[list[int]]]:
+    """把逐行 char_boxes 展平并对齐到去标点后的 text_a，供 ``run_cross_align`` 的 boxes_a。
+
+    KZOCR 的 ``char_boxes`` 为 ``list[line][char][x1,y1,x2,y2]``，而 ``align_engines``
+    的 ``boxes_a`` 要求与去标点后的文本逐字 1:1（``len(boxes_a) == len(strip_punct(text_a))``）。
+
+    对齐策略：
+    - 展平为单字符框列表；
+    - 仅当展平框数 == ``text_a`` 字符数（即 1 框/字）时，逐字去标点/空白并携框，
+      返回对齐后的逐字框列表；
+    - 否则（某行缺框、框数不符等）返回 ``None``，调用方据此走整页退化（degraded），
+      避免静默错配。
+
+    Returns:
+        对齐后的逐字框列表，或 ``None``（无框 / 长度不符 / 去标点后长度仍不符）。
+    """
+    if not char_boxes:
+        return None
+    flat = [box for line in char_boxes for box in line]
+    if len(flat) != len(text_a):
+        return None
+    out: list[list[int]] = []
+    for ch in text_a:
+        if ch in _PUNCT or ch in _WS:
+            continue
+        out.append(flat[len(out)])
+    # 二次校验：与 align_engines 内部 strip_punct 后的长度一致
+    if len(out) != len(strip_punct(text_a)):
+        return None
+    return out
+
+
 def _load_confusion_file(path: Path, *, raw: bool = False):
     """从单个 JSON 文件加载形近字黑名单。
 

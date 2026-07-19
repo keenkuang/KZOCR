@@ -523,6 +523,37 @@ def test_success_cross_check_high_no_vl(monkeypatch, tmp_path):
     assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
 
 
+# ── 12.5b 成功路径：char_boxes 经 run_cross_align 流入 cross_divergence.boxes（Box-Guided 就绪）──
+def test_success_cross_check_boxes_a_flows_to_db(monkeypatch, tmp_path):
+    """成功页带 char_boxes 时，跨引擎单字分歧应携带非空 boxes 落库，
+    供 §5.5 视觉仲裁精确裁框（box_guided），而非整页退化。"""
+    monkeypatch.setattr(
+        _orc, "render_pages",
+        lambda pdf, cfg, dpi=150: _render_gen_with_img(1),
+    )
+    text_a = "黄芪三钱，方用萆薢分清饮"
+    char_boxes = [[[i, 0, i + 1, 1] for i in range(len(text_a))]]
+    pages = [PageResult(page_num=0, text=text_a, confidence=0.97, char_boxes=char_boxes)]
+    reg = _reg(tier1_pages=pages, tier2_texts=["黄芪二钱，方用萆薢分清饮"])
+    cfg = StubConfig(allow_cloud_vision=True, db_dir=str(tmp_path))
+    orchestrate_book(
+        "/fp", "bk_boxes_flow", cfg, reg,
+        overrides=EngineOverrides(enable_cross_check=True),
+    )
+    db = BookDB("bk_boxes_flow", db_dir=str(tmp_path))
+    divs = db.get_cross_divergences(page_no=0)
+    assert divs, "应产生跨引擎分歧"
+    # 至少一条分歧携带非空 boxes（box_guided 裁框可用）
+    boxed = [d for d in divs if d.get("boxes") not in ("[]", "", None)]
+    assert boxed, "char_boxes 应流入 cross_divergence.boxes"
+    # 单字「三↔二」分歧应恰好带 1 个框（box_guided 条件）
+    single = [
+        d for d in boxed
+        if d["boxes"].startswith("[[") and d["boxes"].count("]") == 2
+    ]
+    assert single, "单字分歧应携带恰好 1 个框"
+
+
 # ── 12.6 成功路径：high 分歧 + VL 全部 accepted → 不进人工队列 ──
 def test_success_cross_check_high_vl_resolved(monkeypatch, tmp_path):
     """VL 已裁决全部 high 分歧时，成功页不再入 M4 复核队列（增强见效）。"""

@@ -34,7 +34,7 @@ from kzocr.engine.types import (
 from kzocr.scheduler.registry import EngineRegistry, EngineRegistration
 from kzocr.scheduler.scheduler import Budget, EngineScheduler, EngineOverrides
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionRecheckAdapter
-from kzocr.scheduler.cross_align import run_cross_align, load_confusion_set
+from kzocr.scheduler.cross_align import run_cross_align, load_confusion_set, align_boxes_to_text
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
 from kzocr.engines.ratelimit import MultiTokenRateLimiter
@@ -139,6 +139,7 @@ def _run_success_cross_check(
     vision_adapter: Optional[VisionRecheckAdapter] = None,
     bucket: Optional[MultiTokenRateLimiter] = None,
     engine_a: str = "tier1",
+    char_boxes: Optional[list[list[list[int]]]] = None,
 ) -> bool:
     """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
 
@@ -167,6 +168,7 @@ def _run_success_cross_check(
         divs = run_cross_align(
             page_num, cur_text, cross_text,
             confusion_set=confusion_set,
+            boxes_a=align_boxes_to_text(cur_text, char_boxes),
             engine_a=engine_a, engine_b=tier2[0].meta.name,
         )
         if not divs:
@@ -566,9 +568,13 @@ def orchestrate_book(
         # 邻页文本（供 Leakage/CharCountSpike 检测器，N1）
         neighbor_texts: list[str] = []
         next_text = ""
+        cur_char_boxes = None
         if tier1_result and page_num < len(tier1_result.pages):
             cur_p = tier1_result.pages[page_num]
             cur_text = cur_p.text or _join_paragraphs(cur_p)
+            # 逐字框（供 Box-Guided VL 仲裁）；与 cur_text 平行（1 框/字），
+            # 由 align_boxes_to_text 在调用点校验对齐。
+            cur_char_boxes = cur_p.char_boxes
             if page_num + 1 < len(tier1_result.pages):
                 nxt = tier1_result.pages[page_num + 1]
                 next_text = nxt.text or _join_paragraphs(nxt)
@@ -653,6 +659,7 @@ def orchestrate_book(
                         vision_adapter=_get_vision_adapter(),
                         bucket=_get_vision_bucket(),
                         engine_a=t1_engine_name,
+                        char_boxes=cur_char_boxes,
                     )
                     # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）
                     if is_consensus and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
@@ -687,6 +694,7 @@ def orchestrate_book(
                     divs = run_cross_align(
                         page_num, cur_text, result.text,
                         confusion_set=confusion_set,
+                        boxes_a=align_boxes_to_text(cur_text, cur_char_boxes),
                         engine_a=t1_engine_name, engine_b=engine_name,
                     )
                     if divs:

@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from kzocr.scheduler.cross_align import (
+    align_boxes_to_text,
     align_engines,
     load_confusion_keys_split,
     run_cross_align,
@@ -42,6 +43,70 @@ def test_align_boxes_a_length_mismatch_no_crash():
         divs = align_engines(a, b, confusion_set=CONFUSION, boxes_a=bad)
         assert divs
         assert all(d.boxes == [] for d in divs)
+
+
+def test_align_boxes_to_text_strips_punct_and_aligns():
+    """逐行 char_boxes 展平后，与去标点文本逐字对齐（含首尾/中间标点）。"""
+    text_a = "黄芪三钱，方用萆薢分清饮。"
+    # 12 字符 → 12 框（逐字 1:1），标点也占一框
+    boxes = [[[i, 0, i + 1, 1] for i in range(len(text_a))]]
+    out = align_boxes_to_text(text_a, boxes)
+    assert out is not None
+    # 去标点后剩 11 字 → 11 框
+    assert len(out) == len(strip_punct(text_a))
+    assert len(out) == 11
+    # 第 3 字「三」(index 2) 对应框应保留且位置正确
+    assert out[2] == [2, 0, 3, 1]
+
+
+def test_align_boxes_to_text_multiline():
+    """多行 char_boxes 展平后整体对齐（适配器无行分隔符拼接）。"""
+    line1 = "黄芪三钱"      # 4 字
+    line2 = "当归二钱"      # 4 字
+    text_a = line1 + line2  # 无分隔符拼接，8 字
+    boxes = [
+        [[i, 0, i + 1, 1] for i in range(4)],
+        [[i, 1, i + 1, 2] for i in range(4)],
+    ]
+    out = align_boxes_to_text(text_a, boxes)
+    assert out is not None
+    assert len(out) == 8
+    # 第二行首字「当」(index 4) 来自第二个框行
+    assert out[4] == [0, 1, 1, 2]
+
+
+def test_align_boxes_to_text_length_mismatch_returns_none():
+    """框数 ≠ 文本字符数（如某行缺框）→ 返回 None（降级整页，不误配）。"""
+    text_a = "黄芪三钱"
+    # 少一框
+    boxes = [[[0, 0, 1, 1], [1, 0, 2, 1], [2, 0, 3, 1]]]
+    assert align_boxes_to_text(text_a, boxes) is None
+    # 多一框
+    boxes2 = [[[i, 0, i + 1, 1] for i in range(5)]]
+    assert align_boxes_to_text(text_a, boxes2) is None
+
+
+def test_align_boxes_to_text_no_boxes_returns_none():
+    """无 char_boxes / 空 → 返回 None。"""
+    assert align_boxes_to_text("黄芪三钱", None) is None
+    assert align_boxes_to_text("黄芪三钱", []) is None
+    assert align_boxes_to_text("黄芪三钱", [[]]) is None
+
+
+def test_cross_align_uses_boxes_a_from_char_boxes():
+    """端到端：char_boxes → align_boxes_to_text → run_cross_align 后单字分歧带 1 框。"""
+    text_a = "黄芪三钱，方用萆薢分清饮"
+    text_b = "黄芪二钱，方用萆薢分清饮"  # 仅「三↔二」分歧
+    boxes = [[[i, 0, i + 1, 1] for i in range(len(text_a))]]
+    boxes_a = align_boxes_to_text(text_a, boxes)
+    assert boxes_a is not None
+    divs = run_cross_align(0, text_a, text_b, confusion_set=CONFUSION, boxes_a=boxes_a)
+    # 唯一分歧：单字「三」→ 1 框（box_guided 可用）
+    assert len(divs) == 1
+    assert divs[0].a_seg == "三"
+    assert divs[0].b_seg == "二"
+    assert divs[0].boxes == [[2, 0, 3, 1]]
+
 
 
 
