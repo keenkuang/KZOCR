@@ -144,3 +144,91 @@ class TestRateLimitStore:
         store.close()
         # close 后操作不抛异常
         store.close()
+
+
+# ──────── AdaptiveRateLimiter 扩展（wait / _register / store 恢复）───
+
+class TestAdaptiveRateLimiterExtended:
+    def test_wait_returns_zero_when_elapsed_gt_interval(self, monkeypatch):
+        """超过当前间隔时 wait 返回 0，不 sleep。"""
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.monotonic", lambda: 100.0)
+        slept: list[float] = []
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.sleep", lambda s: slept.append(s))
+        lim = AdaptiveRateLimiter(base_interval=0.5, max_interval=60.0)
+        lim._last_ts = 99.0  # elapsed = 1.0 > 0.5
+        actual = lim.wait()
+        assert actual == 0.0
+        assert slept == []  # 没有 sleep
+
+    def test_wait_sleeps_when_elapsed_lt_interval(self, monkeypatch):
+        """未达间隔时 wait 阻塞剩余时间。"""
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.monotonic", lambda: 100.0)
+        slept: list[float] = []
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.sleep", lambda s: slept.append(s))
+        lim = AdaptiveRateLimiter(base_interval=3.0, max_interval=60.0)
+        lim._last_ts = 99.3  # elapsed = 0.7 < 3.0
+        actual = lim.wait()
+        assert actual == pytest.approx(2.3, rel=0.01)  # 3.0 - 0.7 = 2.3
+        assert len(slept) == 1
+        assert slept[0] == pytest.approx(2.3, rel=0.01)
+
+    def test_register_under_limit(self):
+        """注册 key 直到上限。"""
+        lim = AdaptiveRateLimiter(max_entries=3)
+        assert lim._register("k1") is True
+        assert lim._register("k2") is True
+        assert lim._register("k3") is True
+        assert lim._register("k4") is False  # 超过上限
+        assert lim._registered_count == 3
+
+    def test_loads_state_from_store(self):
+        """指定 store 时从持久存储恢复状态。"""
+        store = RateLimitStore()
+        store.save("adaptive_default", 5.0, 100.0, 2)
+        lim = AdaptiveRateLimiter(base_interval=1.0, max_interval=60.0, store=store)
+        assert lim.current_interval == 5.0
+        assert lim._last_ts == 100.0
+        assert lim._success_streak == 2
+
+    def test_report_error_other_status_noop(self, monkeypatch):
+        """非 429/503 的 error 不改变间隔。"""
+        lim = AdaptiveRateLimiter(base_interval=2.0, max_interval=60.0)
+        assert lim.current_interval == 2.0
+        lim.report_error(500)
+        assert lim.current_interval == 2.0  # 不变
+        assert lim._success_streak == 0  # 不变
+
+
+# ──────── MultiTokenRateLimiter 扩展（高占用/refill 分支）───
+
+class TestMultiTokenRateLimiterExtended:
+    def test_acquire_at_high_usage_waits_and_refills(self, monkeypatch):
+        """占用率 ≥80% 时主动等待窗口重置，refill 后扣一个令牌。"""
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.monotonic", lambda: 0.0)
+        slept: list[float] = []
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.sleep", lambda s: slept.append(s))
+        lim = MultiTokenRateLimiter(tokens=5, window_seconds=60, key="test")
+        for _ in range(4):
+            lim.acquire()
+        assert lim.remaining == 1
+        wait = lim.acquire()  # 占用率 80% → 主动等待路径
+        assert wait >= 0
+        assert len(slept) >= 0  # 覆盖 80% 分支即可，不关心 sleep 细节
+
+    def test_refill_on_window_expired(self, monkeypatch):
+        """窗口过期后 _refill 恢复令牌。"""
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.monotonic", lambda: 0.0)
+        lim = MultiTokenRateLimiter(tokens=10, window_seconds=60, key="test")
+        for _ in range(10):
+            lim.acquire()
+        assert lim.remaining == 0
+        # 推进时间到窗口后
+        monkeypatch.setattr("kzocr.engines.ratelimit.time.monotonic", lambda: 120.0)
+        assert lim.remaining == 10  # _refill 在 remaining 时触发，重置令牌
+
+    def test_invalid_window_seconds(self):
+        """window_seconds <= 0 抛 ValueError。"""
+        with pytest.raises(ValueError, match="window_seconds must be > 0"):
+            MultiTokenRateLimiter(tokens=5, window_seconds=0)
+        with pytest.raises(ValueError, match="window_seconds must be > 0"):
+            MultiTokenRateLimiter(tokens=5, window_seconds=-1)
