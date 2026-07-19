@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from unittest import mock
 
 import pytest
 
@@ -285,9 +286,11 @@ class TestSelectCandidates:
 
     def test_top_n_limited(self):
         r = _full_registry()
-        result = EngineScheduler(tier_limits={1: 1}).select_candidates(
-            r, tier=1, page_info=PageInfo(page_num=0), budget=self._budget(),
-        )
+        # 隔离 5% 轮询采样（_should_poll 随机），仅验证 tier_limits 对 top-N 的硬上限
+        with mock.patch("kzocr.scheduler.scheduler._should_poll", return_value=False):
+            result = EngineScheduler(tier_limits={1: 1}).select_candidates(
+                r, tier=1, page_info=PageInfo(page_num=0), budget=self._budget(),
+            )
         assert len(result) == 1
 
     def test_all_steps_integration(self):
