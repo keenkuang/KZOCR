@@ -70,6 +70,38 @@ class TestSchedulerConfigDefaults:
         assert b.allow_cloud_vision is True
 
 
+class TestSafeHelpers:
+    def test_safe_bool_edge_cases(self):
+        from kzocr.config import _safe_bool
+
+        # "yes" 在真值集合内
+        assert _safe_bool("yes", False) is True
+        # "0" / "false" 为假
+        assert _safe_bool("0", True) is False
+        assert _safe_bool("false", True) is False
+        # 空串回退默认值
+        assert _safe_bool("", True) is True
+        assert _safe_bool("", False) is False
+
+    def test_safe_int_negative_and_zero(self):
+        from kzocr.config import _safe_int
+
+        assert _safe_int("-3", 5, "x") == -3
+        assert _safe_int("0", 5, "x") == 0
+        # 非数字回退默认
+        assert _safe_int("abc", 7, "x") == 7
+
+    def test_consensus_sample_rate_float_parse(self):
+        os.environ["KZOCR_CONSENSUS_SAMPLE_RATE"] = "0.25"
+        sc = SchedulerConfig.from_env()
+        assert sc.consensus_sample_rate == 0.25
+
+    def test_half_life_days_parse(self):
+        os.environ["KZOCR_DECAY_HALF_LIFE_DAYS"] = "14"
+        sc = SchedulerConfig.from_env()
+        assert sc.half_life_days == 14.0
+
+
 class TestConfigIntegration:
     def test_load_config_includes_scheduler(self):
         cfg = load_config()

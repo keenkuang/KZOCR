@@ -106,3 +106,46 @@ def test_line_result_has_no_char_boxes_field():
 def test_empty_page_results():
     br = book_result_from_tcm_ocr([], book_code="EMPTY")
     assert br.pages == []
+
+
+def test_char_boxes_skips_malformed_dets():
+    """逐字框折算对畸形 det 应跳过而非崩溃（缺 bbox 键 / bbox 不足 4 值）。"""
+    page_results = [
+        {
+            "page_number": 1,
+            "lines": [
+                {
+                    "bbox": [10, 100, 200, 120],
+                    "fused_text": "含畸形框的行",
+                    "confidence": 0.9,
+                    "char_bboxes": [
+                        {"char": "正", "bbox": [12.6, 100, 30.4, 120]},  # 合法 → [13,100,30,120]
+                        {"char": "缺bbox"},                            # 缺 bbox → 跳过
+                        {"char": "短bbox", "bbox": [1, 2]},            # 不足 4 值 → 跳过
+                        {"char": "负", "bbox": [5.2, 100.7, 9, 120]},  # 合法 → [5,101,9,120]
+                    ],
+                },
+            ],
+        },
+    ]
+    br = book_result_from_tcm_ocr(page_results, book_code="MALFORMED")
+    cb = br.pages[0].char_boxes
+    assert cb is not None
+    assert len(cb) == 1
+    # 仅 2 个合法 det 保留，浮点已 round
+    assert cb[0] == [[13, 100, 30, 120], [5, 101, 9, 120]]
+
+
+def test_line_without_char_bboxes_key():
+    """行完全没有 char_bboxes 键时折算为空 list（非 None）。"""
+    page_results = [
+        {
+            "page_number": 1,
+            "lines": [
+                {"bbox": [10, 100, 200, 120], "fused_text": "无框行", "confidence": 0.9},
+            ],
+        },
+    ]
+    br = book_result_from_tcm_ocr(page_results, book_code="NOKEY")
+    # page_char_boxes 已构造 → 对应行是空 list
+    assert br.pages[0].char_boxes == [[]]
