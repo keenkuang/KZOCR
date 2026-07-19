@@ -4,11 +4,6 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-# 必须在 import app 之前设环境变量阻断 BookDB 真实路径
-import os
-os.environ["KZOCR_DB_DIR"] = "/nonexistent/test_db"
-
-
 from kzocr.web.app import app
 
 
@@ -25,7 +20,6 @@ class TestHealth:
         data = resp.json()
         assert "status" in data
         assert "version" in data
-        # db_dir 不存在，状态应为 degraded
         assert data["status"] in ("ok", "degraded")
 
 
