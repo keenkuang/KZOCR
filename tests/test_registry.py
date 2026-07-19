@@ -24,7 +24,6 @@ from kzocr.scheduler.registry import (
     _bayesian_score,
     _probe_one,
     probe_engines,
-    select_candidates,
 )
 
 
@@ -282,61 +281,6 @@ class TestBayesianScore:
         n, pr, lat = 5, 0.8, 1000.0
         expected = (pr * n + BAYESIAN_C * BAYESIAN_PRIOR) / (n + BAYESIAN_C) * (1.0 / lat)
         assert _bayesian_score(r) == pytest.approx(expected, rel=0.01)
-
-
-# ──────── select_candidates ────────
-
-def _mk(name: str, tier: int, pass_: int = 5, fail: int = 0,
-        latency_ms: int = 1000, status: str = "HEALTHY") -> EngineRegistration:
-    total = pass_ + fail
-    return _reg(
-        meta=_am(name, tier=tier),
-        stats=EngineStats(
-            total_pages=total, total_latency_ms=latency_ms * total,
-            glyph_pass_count=pass_, glyph_fail_count=fail,
-        ),
-        status=status,
-    )
-
-
-class TestSelectCandidates:
-    def test_tier_filter(self):
-        r = EngineRegistry()
-        a1 = _mk("a1", 1)
-        _mk("a2", 2)
-        r.register(a1)
-        r.register(_mk("a2", 2))
-        result = select_candidates(r, 1)
-        assert len(result) == 1
-        assert result[0].meta.name == "a1"
-
-    def test_excludes_unavailable(self):
-        r = EngineRegistry()
-        r.register(_mk("a1", 1, status="UNAVAILABLE"))
-        r.register(_mk("a2", 1))
-        assert len(select_candidates(r, 1)) == 1
-        assert len(select_candidates(r, 1, include_unavailable=True)) == 2
-
-    def test_prefer_speed(self):
-        r = EngineRegistry()
-        fast = _mk("fast", 1, latency_ms=100)
-        slow = _mk("slow", 1, latency_ms=500)
-        r.register(fast)
-        r.register(slow)
-        assert select_candidates(r, 1, prefer="speed")[0].meta.name == "fast"
-
-    def test_prefer_accuracy(self):
-        r = EngineRegistry()
-        r.register(_mk("hi", 1, pass_=9, fail=1))
-        r.register(_mk("lo", 1, pass_=5, fail=5))
-        result = select_candidates(r, 1, prefer="accuracy")
-        assert result[0].meta.name == "hi"
-
-    def test_default_bayesian(self):
-        r = EngineRegistry()
-        r.register(_mk("hi", 1, pass_=9, fail=1, latency_ms=200))
-        r.register(_mk("lo", 1, pass_=5, fail=5, latency_ms=200))
-        assert select_candidates(r, 1)[0].meta.name == "hi"
 
 
 # ──────── probe_engines ────────

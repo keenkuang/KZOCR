@@ -14,7 +14,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
 from kzocr.engine.types import (
     AdapterMeta,
@@ -341,31 +341,6 @@ def _bayesian_score(reg: EngineRegistration) -> float:
     pass_rate = reg.glyph_pass_rate
     latency = reg.avg_latency_per_page_ms
     return (pass_rate * n + BAYESIAN_C * BAYESIAN_PRIOR) / (n + BAYESIAN_C) * (1.0 / latency)
-
-
-def select_candidates(
-    registry: EngineRegistry,
-    tier: int,
-    prefer: Optional[Literal["speed", "accuracy"]] = None,
-    include_unavailable: bool = False,
-) -> list[EngineRegistration]:
-    """按 tier 过滤候选并按评分排序（v0.7 §4.3 / §4.5 的聚焦版）。
-
-    - 默认排除 `UNAVAILABLE` 引擎（§4.1 资源过滤：状态位缓存）；
-      `include_unavailable=True` 强制包含所有（如手动 pinned 引擎）。
-    - `prefer="speed"`：按平均单页延迟升序（最快优先）
-    - `prefer="accuracy"`：按字形通过率降序（最准优先）
-    - 默认：贝叶斯评分降序（§3.5）
-    同分时保持稳定排序（保留注册顺序）。
-    """
-    candidates = registry.list_by_tier(tier, include_unavailable=include_unavailable)
-    if prefer == "speed":
-        candidates = sorted(candidates, key=lambda e: e.avg_latency_per_page_ms)
-    elif prefer == "accuracy":
-        candidates = sorted(candidates, key=lambda e: e.glyph_pass_rate, reverse=True)
-    else:
-        candidates = sorted(candidates, key=_bayesian_score, reverse=True)
-    return candidates
 
 
 def probe_engines(
