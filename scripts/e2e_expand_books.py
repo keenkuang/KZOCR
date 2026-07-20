@@ -27,16 +27,37 @@ from kzocr.engine.types import PageInput
 from kzocr.scheduler.cross_align import load_confusion_set, run_cross_align
 
 
-def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048) -> np.ndarray:
+def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048) -> tuple[np.ndarray, bool]:
     """渲染单页为 (H,W,3) RGB，并应用与 orchestrator 全路径一致的版心裁切 + 缩放。
 
     对齐目的：orchestrator 全路径用 render_pages（_pdf_page_to_numpy + _crop_to_body +
     最长边≤max_pixels 缩放）做版心裁切，去掉两引擎共错的页眉/页脚；扩面脚本此前用全页
     渲染，导致分歧绝对数偏高。此处复用同一管线，使分歧数字与 orchestrator 全路径严格可比。
+
+    Returns:
+        (img, healthy)：img 为裁切缩放后的 RGB；healthy 为渲染健康度。
+        healthy=False 表示 fitz 文本层提取异常（xref 损坏等导致文本层缺失）且图像非空白，
+        疑似该页渲染丢字——调用方应做渲染回检（避免损坏页静默丢字，见 v4 扩面发现）。
     """
     doc = fitz.open(pdf)
     try:
         img = _pdf_page_to_numpy(doc[page_num], dpi=dpi)
+        # 渲染健康度回检：提取嵌入文本层。若抛出异常或为空、且图像非空白，
+        # 疑似 xref 损坏导致页面文本层缺失（v4 扩面中 全量中药速查总表 p30 报
+        # "cannot find object in xref" 但脚本静默继续），标记 healthy=False 供核查。
+        healthy = True
+        try:
+            raw_text = doc[page_num].get_text("text")
+        except Exception:
+            raw_text = ""
+        if not raw_text.strip():
+            try:
+                gray = img[..., :3].mean(axis=2) if img.ndim == 3 else img
+                non_blank = float(np.std(gray)) > 5.0
+            except Exception:
+                non_blank = True
+            if non_blank:
+                healthy = False
     finally:
         doc.close()
     img = _crop_to_body(img, page_num=page_num)
@@ -47,16 +68,19 @@ def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048)
         pil = PILImage.fromarray(img)
         pil = pil.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
         img = np.array(pil)
-    return img
+    return img, healthy
 
 
 def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
-               existing: dict | None = None) -> dict:
+               existing: dict | None = None, body_start: int = 0) -> dict:
     """处理单书前 `pages` 页的跨引擎分歧。
 
     `existing` 为非空时进入**增量合并**模式：从 `summary.json` 已有记录中读取已处理页号，
     只计算尚未覆盖的页（0..pages-1 中缺失者），并把累计分歧/高分歧与逐页明细合并回同一条记录。
     这样推进扩面时不会重复 OCR 已跑过的页、也不丢失历史结果。
+
+    `body_start`：跳过前 `body_start` 页（封面/目录/凡例等非正文区）再从正文起算，
+    避免「从 p0 起采样」系统性低估全书分歧率（v4 扩面发现：附子 p0–11 几乎全 0 分歧）。
     """
     name = os.path.basename(pdf)
     if existing:
@@ -71,14 +95,17 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
         per_page = []
     t0 = time.time()
     processed_new = 0
-    for pno in range(pages):
+    render_warnings: list[int] = []
+    for pno in range(body_start, pages):
         if pno in done:
             continue
         try:
-            img = render_page(pdf, pno, dpi)
+            img, healthy = render_page(pdf, pno, dpi)
         except Exception as exc:
             print(f"  [{name}] p{pno} 渲染失败: {exc}", flush=True)
             continue
+        if not healthy:
+            render_warnings.append(pno)
         a = paddle.run_page(PageInput(page_num=pno, img=img)).text or ""
         b = rapid.run_page(PageInput(page_num=pno, img=img)).text or ""
         divs = run_cross_align(pno, a, b, confusion_set=confusion_set)
@@ -91,6 +118,9 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
             print(f"  [{name}] p{pno+1}/{pages} 累计分歧={total} high={high} (本次新增 {processed_new})",
                   flush=True)
     elapsed = time.time() - t0
+    if render_warnings:
+        print(f"[warn] {name}: {len(render_warnings)} 页渲染健康度异常（疑似丢字），页码={render_warnings}",
+              flush=True)
     print(f"[完成] {name}: 本次新增 {processed_new} 页, 累计 {len(per_page)} 页, "
           f"总分歧={total}, 高={high}, 用时 {elapsed:.0f}s", flush=True)
     return {
@@ -101,6 +131,7 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
         "total_divergences": total,
         "high_divergences": high,
         "elapsed_s": round(elapsed, 1),
+        "render_warnings": render_warnings,
         "per_page": per_page,
     }
 
@@ -110,6 +141,9 @@ def main() -> int:
     ap.add_argument("--pdf", action="append", help="古籍 PDF 路径（可重复），后可跟空格+页数")
     ap.add_argument("--list", help="含多行 PDF 路径的文本文件，每行 `路径` 或 `路径 页数`")
     ap.add_argument("--pages", type=int, default=20, help="默认每本书处理页数（--list 行内可覆盖）")
+    ap.add_argument("--body-start", type=int, default=0,
+                    help="跳过前 N 页（封面/目录/凡例等非正文区）再从正文起算采样，"
+                         "避免从 p0 起采样系统性低估分歧率；默认 0")
     ap.add_argument("--dpi", type=int, default=150)
     ap.add_argument("--out", default="e2e_expand/summary.json", help="汇总输出 JSON")
     ap.add_argument("--merge", action="store_true",
@@ -165,9 +199,9 @@ def main() -> int:
         if not os.path.isfile(pdf):
             print(f"[ERR] 跳过不存在的 PDF: {pdf}", flush=True)
             continue
-        print(f"\n=== {pdf}（目标 {pages} 页）===", flush=True)
+        print(f"\n=== {pdf}（目标 {pages} 页，body_start={args.body_start}）===", flush=True)
         rec = count_book(pdf, pages, args.dpi, paddle, rapid, confusion_set,
-                         existing=existing_map.get(pdf))
+                         existing=existing_map.get(pdf), body_start=args.body_start)
         results_by_pdf[pdf] = rec
         # 每本书结束后立即落盘作为检查点：长作业防崩溃丢进度，
         # 中途退出后可用 --merge 从检查点续跑（已完成的书会被跳过）。
