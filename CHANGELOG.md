@@ -1,7 +1,20 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20T09:20+08
-> 最后更新：2026-07-20 09:20 CST
+> 文档版本：v2026-07-20T09:57+08
+> 最后更新：2026-07-20 09:57 CST
+
+---
+
+## v2026-07-20 续八 — W8 覆盖率门禁 + W3 收口 + 测试 hardening
+
+> CI 加覆盖率门禁防回归；tcm_ocr 两处 TODO 收口（注释明确化 + 回归测试）；修复 `learned_confusion.json` 全局状态污染导致的脆弱测试。新增 6 例测试（全量 **907 passed + 2 skipped + 2 deselected**，核心覆盖率 **88.94%**）；ruff 全过。版本号维持 **0.21.0**（v0.22.0 候选）。
+
+| 模块 | 说明 |
+|------|------|
+| `pyproject.toml` + `.github/workflows/test.yml` | **W8 CI 覆盖率门禁**：`pyproject` 新增 `[tool.coverage.run]`（`omit = ["kzocr/tcm_ocr/*", "tests/*"]`，排除冻结栈与测试代码）+ `[tool.coverage.report]`（`fail_under = 80`）；`test.yml` 依赖加 `pytest-cov`，主测试阶段改 `python -m pytest tests/ --cov=kzocr --cov-report=term-missing`。本地全量验证门禁通过（核心 88.94% > 80%）。 |
+| `kzocr/tcm_ocr/llm/pipeline/four_stage_pipeline.py` + `tests/test_four_stage_pipeline.py`（新增 4 例） | **W3 收口**：`four_stage_pipeline` 两处 TODO（heading 纯文本启发式、方剂名 heading 回填）经核实已闭环，将含糊注释明确化为「已实现 / deferred（冻结栈，不引入新依赖）」，新增回归测试锁定 `_backfill_formula_name`（heading 回填）+ `_classify_para_unit`（heading/text 分类），零资源、不改行为。 |
+| `tests/test_cross_align.py` / `tests/test_cross_align_logic.py` | **脆弱测试修复**：两测试原传 `tmp_path` 缺失文件期望返回空，但 `load_confusion_keys`/`load_confusion_keys_split` 总是合并全局 `_LEARNED_CONFUSION_PATH`，隐含依赖该文件为空；仓库根 `learned_confusion.json` 被历史运行污染（含 X/Y/A/B/C/D）致其偶发失败。已加 `monkeypatch` 隔离全局 learned 路径，并清理被污染的生成产物。 |
+| `tests/test_web_routes.py`（新增 2 例） | **W1 继续补测**：补 `register_submit` 的 toc 非空路径与非法 toc_json 解析失败降级两个细分支。 |
 
 ---
 
