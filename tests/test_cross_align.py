@@ -263,8 +263,12 @@ def test_load_confusion_keys_split_bidirectional(tmp_path: Path):
     assert result["correct"].get("朴") == "一级高危"
 
 
-def test_load_confusion_keys_split_empty_no_file(tmp_path: Path):
-    """缺失/空文件应返回空 wrong/correct。"""
+def test_load_confusion_keys_split_empty_no_file(tmp_path: Path, monkeypatch):
+    """缺失/空文件应返回空 wrong/correct（隔离全局 learned 集，避免环境脏数据影响）。"""
+    monkeypatch.setattr(
+        "kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH",
+        tmp_path / "learned_empty.json",
+    )
     missing = tmp_path / "nonexistent.json"
     result = load_confusion_keys_split(path=missing, reload=True)
     assert result == {"wrong": {}, "correct": {}}

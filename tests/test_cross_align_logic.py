@@ -67,5 +67,9 @@ def test_validate_confusion_rows_warns(capsys) -> None:
     assert "自身" in out
 
 
-def test_load_confusion_keys_empty(tmp_path: Path) -> None:
+def test_load_confusion_keys_empty(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH",
+        tmp_path / "learned_empty.json",
+    )
     assert load_confusion_keys(tmp_path / "missing.json", reload=True) == {}
