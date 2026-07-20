@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import types
 
 import pytest
 
@@ -126,9 +127,17 @@ class StubDB:
 
     def __init__(self):
         self.status_updates: list[tuple] = []
+        self.anomalies: list = []
+        self.wrote = False
 
     def update_cross_divergence_status(self, page_no, div_type, a_seg, b_seg, status):
         self.status_updates.append((page_no, div_type, a_seg, b_seg, status))
+
+    def write_cross_divergences(self, page_no, divs, engine_a, engine_b):
+        self.wrote = True
+
+    def record_anomaly(self, page_num, verdict, detector_chain=None):
+        self.anomalies.append((page_num, verdict))
 
 
 # ── 辅助工厂 ──
@@ -496,6 +505,77 @@ def test_arbitrate_helper_vision_exception():
     assert out["resolved"] == []
     assert out["unresolved"] == high
     assert db.status_updates == []  # 异常分支未持久化状态
+
+
+# ── 12.5 helper：保守模式覆盖 VL 接受 → 全部进人工 ──
+def test_arbitrate_helper_conservative_overrides_accept():
+    """conservative=True 时，即便 VL 给出明确接受裁决，high 分歧也全部留人工复核，
+    不自动接受（high 占比高的书 VL unresolved 率高，自动接受不可靠，见 v4 扩面结论）。"""
+    high = _high_divergences()
+    va = StubVisionAdapter(["accepted_a", "accepted_b"])  # VL 明确接受
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, conservative=True)
+    assert out["resolved"] == []
+    assert len(out["unresolved"]) == len(high)
+    # VL 仍被调用以记录裁决状态（供人工复核参考）
+    assert len(db.status_updates) == len(high)
+
+
+# ── 12.6 helper：默认（非保守）仍按 VL 裁决路由（回归守护）──
+def test_arbitrate_helper_non_conservative_keeps_accept():
+    high = _high_divergences()
+    va = StubVisionAdapter(["accepted_a", "manual"])
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {})
+    assert len(out["resolved"]) == 1
+    assert len(out["unresolved"]) == len(high) - 1
+
+
+# ── 12.7 _is_conservative 阈值与最小样本 ──
+def test_is_conservative_threshold_and_min():
+    # 样本不足 MIN_PAGES：不进入保守（避免早期 high 占比翻跳）
+    assert _orc._is_conservative({"div": 5, "high": 5}) is False
+    # 样本充足但占比低于阈值：非保守
+    assert _orc._is_conservative({"div": 10, "high": 2}) is False
+    # 样本充足且占比 ≥ 阈值：保守
+    assert _orc._is_conservative({"div": 10, "high": 5}) is True
+    assert _orc._is_conservative({"div": 100, "high": 40}) is True
+    # 边界恰好 0.40
+    assert _orc._is_conservative({"div": 10, "high": 4}) is True
+
+
+# ── 12.8 成功路径：tally 回写 + 保守模式经 VL 仍全部进人工 ──
+def test_run_success_cross_check_threads_tally(monkeypatch):
+    """_run_success_cross_check 将全书分歧累计回写 tally，并按 tally 越阈值进入
+    保守模式（VL 接受也不自动接受 high 分歧）。"""
+    fake_candidate = types.SimpleNamespace(meta=types.SimpleNamespace(name="rapid"))
+    monkeypatch.setattr(_orc, "_safe_select_candidates", lambda *a, **k: [fake_candidate])
+    monkeypatch.setattr(
+        _orc, "_run_single_engine_with_timeout",
+        lambda *a, **k: types.SimpleNamespace(text="黄芪二钱，当归三钱"),
+    )
+    db = StubDB()
+    va = StubVisionAdapter(["accepted_a", "accepted_a"])  # VL 明确接受
+    tally = {"div": 100, "high": 50}  # 已越阈值 → 保守
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    page_input = PageInput(page_num=0, img=img)
+    before_div = tally["div"]
+    is_consensus = _orc._run_success_cross_check(
+        0, "黄芪三钱，当归二钱", page_input,
+        scheduler=object(), registry=object(), db=db,
+        confusion_set={}, budget=object(), overrides=object(),
+        page_layout=object(), max_time_per_page_ms=60000,
+        vision_adapter=va, bucket=None, engine_a="paddle",
+        char_boxes=None, tally=tally,
+    )
+    assert is_consensus is False  # 有分歧 → 非共识页
+    assert tally["div"] > before_div  # tally 被回写（当前页分歧计入）
+    assert db.wrote is True  # 分歧已落库
+    # 保守模式：VL 虽接受，high 分歧仍全部进人工 → 记录 anomaly
+    assert len(db.anomalies) == 1
+
 
 
 # ── 12.5 成功路径：high 分歧 + 无 VL → 全部进人工队列（行为不变）──

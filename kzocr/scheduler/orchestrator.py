@@ -154,6 +154,7 @@ def _run_success_cross_check(
     bucket: Optional[MultiTokenRateLimiter] = None,
     engine_a: str = "tier1",
     char_boxes: Optional[list[list[list[int]]]] = None,
+    tally: Optional[dict] = None,
 ) -> bool:
     """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
 
@@ -193,11 +194,15 @@ def _run_success_cross_check(
             engine_a=engine_a, engine_b=tier2[0].meta.name,
         )
         high = [d for d in divs if d.priority == "high"]
+        # 全书 high 占比二级判据：样本充足且越阈值时进入保守模式，
+        # 该页 high 分歧全部留人工复核（见 _is_conservative / v4 扩面结论）。
+        conservative = _is_conservative(tally) if tally is not None else False
         if high:
             arb_result = _arbitrate_high_divergences(
                 page_num, high,
                 page_input.img if page_input.img is not None else None,
                 vision_adapter, bucket, db, confusion_set,
+                conservative=conservative,
             )
             # 仅 VL 无法裁决（manual）或视觉不可用时的 high 分歧进人工复核队列；
             # VL 已给出明确裁决（accepted_a/b、both_wrong）的不重复进队。
@@ -215,10 +220,37 @@ def _run_success_cross_check(
                     ),
                     detector_chain=["CrossAlign"],
                 )
+        # 回写全书累计（当前页计入后续页的保守判定；本页判定用此前累计）
+        if tally is not None:
+            tally["div"] = tally.get("div", 0) + len(divs)
+            tally["high"] = tally.get("high", 0) + len(high)
         return False  # 有分歧 → 非共识页
     except Exception as exc:
         _logger.warning("[orchestrator] success cross-check failed page=%d: %s", page_num, exc)
         return False
+
+
+# v4 扩面结论落地的二级判据：全书 high 占比 ≥ 此阈值进入「保守仲裁」（多留人工），
+# 低于则保持激进自动接受。阈值 0.40 对应 mi-678(45%)/全量中药速查总表(43%) 越线、
+# 多数书(~0.21–0.25) 在线的实测区间。
+HIGH_RATIO_CONSERVATIVE_THRESHOLD = 0.40
+# 全书样本不足此页数时不进入保守模式，避免早期 high 占比翻跳。
+_MIN_PAGES_FOR_RATIO = 10
+
+
+def _is_conservative(tally: dict) -> bool:
+    """全书 high 占比是否进入「保守仲裁」区间。
+
+    v4 扩面发现：high 占比高的书（mi-678 45%、全量中药速查总表 43%）送 VL 仲裁时
+    unresolved 比例更高、需人工兜底更多；high 占比低的书分歧多为易判差异，可更激进
+    自动接受。故当全书 high/总分歧 ≥ 阈值时，对 high 分歧更保守（多留人工复核）。
+
+    `tally` = {"div": 累计总分歧, "high": 累计 high 分歧}。前 ``_MIN_PAGES_FOR_RATIO``
+    页样本不足，不进入保守模式，避免早期翻跳。
+    """
+    if tally.get("div", 0) < _MIN_PAGES_FOR_RATIO:
+        return False
+    return (tally["high"] / tally["div"]) >= HIGH_RATIO_CONSERVATIVE_THRESHOLD
 
 
 def _arbitrate_high_divergences(
@@ -229,6 +261,7 @@ def _arbitrate_high_divergences(
     bucket: Optional[MultiTokenRateLimiter],
     db: BookDB,
     confusion_set: dict,
+    conservative: bool = False,
 ) -> dict:
     """对 high 优先级跨引擎分歧执行视觉仲裁（Box-Guided VL，退化模式）。
 
@@ -253,7 +286,9 @@ def _arbitrate_high_divergences(
             db.update_cross_divergence_status(
                 page_num, d.div_type, d.a_seg, d.b_seg, arb.decision,
             )
-            if arb.decision == "manual":
+            if conservative or arb.decision == "manual":
+                # 保守模式：即便 VL 给出明确裁决，也将 high 分歧全部留人工复核，
+                # 不自动接受（high 占比高的书 VL unresolved 率高，自动接受不可靠）。
                 unresolved.append(d)
             else:
                 resolved.append(d)
@@ -555,6 +590,9 @@ def orchestrate_book(
             len(skip_pages),
         )
 
+    # 全书跨引擎分歧累计（供 high 占比二级判据；见 _is_conservative / v4 扩面结论）
+    tally: dict = {"div": 0, "high": 0}
+
     for page_num, page_input in enumerate(render_pages(pdf_path, config)):
         # F3: 跳过已处理页
         if page_num in skip_pages:
@@ -681,6 +719,7 @@ def orchestrate_book(
                         bucket=_get_vision_bucket(),
                         engine_a=t1_engine_name,
                         char_boxes=cur_char_boxes,
+                        tally=tally,
                     )
                     # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）
                     if is_consensus and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
@@ -725,6 +764,8 @@ def orchestrate_book(
                         )
                         # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
                         high = [d for d in divs if d.priority == "high"]
+                        # 全书 high 占比二级判据（与成功路径同源，见 _is_conservative）。
+                        conservative = _is_conservative(tally) if tally is not None else False
                         if high:
                             db.record_anomaly(
                                 page_num,
@@ -745,7 +786,12 @@ def orchestrate_book(
                                 _arbitrate_high_divergences(
                                     page_num, high, page_input.img, va,
                                     _get_vision_bucket(), db, confusion_set,
+                                    conservative=conservative,
                                 )
+                        # 回写全书累计（当前页计入后续页的保守判定）
+                        if tally is not None:
+                            tally["div"] = tally.get("div", 0) + len(divs)
+                            tally["high"] = tally.get("high", 0) + len(high)
                 except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
                     _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
             vctx = DetectorContext(
