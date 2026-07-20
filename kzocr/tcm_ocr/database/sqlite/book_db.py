@@ -54,6 +54,75 @@ class BookDbConn(Protocol):
 
 
 # =============================================================================
+# raw 连接适配器（W10 闭环后补：关闭 BookDbConn 契约缺口）
+# =============================================================================
+#
+# `book_pipeline` 运行时直接建 raw `sqlite3.Connection` 承载 tcm_ocr 书籍库，
+# 但该连接**缺少 `get_cursor()`**——知识/归档层按 `BookDB` 类（提供 `get_cursor`）
+# 编写，raw 连接不满足 `BookDbConn` 契约（见 db-layering.md §7.4）。
+#
+# 本适配器复用**同一底层连接**（事务语义一致，能看到已 commit 的写入），
+# 仅补充 `get_cursor` contextmanager；其余接口（`execute` / `commit` / `close`
+# / `cursor` / `row_factory` 等）经 `__getattr__` 委托给底层连接。
+#
+# 这样：
+#   - raw `sqlite3.Connection` 仍 `isinstance(conn, BookDbConn) is False`（契约缺口事实）；
+#   - `BookConnAdapter(raw_conn)` 则 `isinstance(adapter, BookDbConn) is True`，
+#     使休眠在 4 个 knowledge 模块里的 `get_cursor()` 调用点（孤儿代码）在未来
+#     被接通时不再潜在 AttributeError。
+#
+# 注意：`book_pipeline` 全程单线程共享一个连接，适配器不改变该假设；
+# `get_cursor` 仅用于只读 SELECT，不写不提交，事务无副作用。
+class BookConnAdapter:
+    """将 raw `sqlite3.Connection` 适配为满足 `BookDbConn` 契约的薄封装。
+
+    复用**同一底层连接**（事务语义一致，能看到已 commit 的写入），
+    显式委托 `BookDbConn` 要求的全部接口（`execute` / `get_cursor` /
+    `commit` / `close` / `cursor`）外加 `row_factory`（保持与 book_pipeline
+    运行时的连接行为一致）。
+
+    不依赖 `__getattr__`，以确保 `@runtime_checkable BookDbConn` 的
+    `isinstance` 检查能正确返回 True（CPython 的 runtime_checkable 与
+    `__getattr__` 存在已知冲突）。
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    # —— BookDbConn 契约 ——
+    def execute(self, sql: str, parameters: Any = ...) -> Any:
+        if parameters is ...:
+            return self._conn.execute(sql)
+        return self._conn.execute(sql, parameters)
+
+    @contextmanager
+    def get_cursor(self) -> Iterator[sqlite3.Cursor]:
+        cur = self._conn.cursor()
+        try:
+            yield cur
+        finally:
+            cur.close()
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def cursor(self) -> sqlite3.Cursor:
+        return self._conn.cursor()
+
+    # —— 兼容性 ——
+    @property
+    def row_factory(self) -> Any:
+        return self._conn.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value: Any) -> None:
+        self._conn.row_factory = value
+
+
+# =============================================================================
 # 真实 snake_case Schema（与 book_pipeline._create_book_database 一致）
 # =============================================================================
 #

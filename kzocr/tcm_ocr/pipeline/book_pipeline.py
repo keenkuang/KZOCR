@@ -31,6 +31,7 @@ import numpy as np
 from kzocr.tcm_ocr.config.constants import (
     DPI,
 )
+from kzocr.tcm_ocr.database.sqlite.book_db import BookConnAdapter, BookDbConn
 from kzocr.tcm_ocr.pipeline.archival import archive_to_postgresql, cleanup_book_directory
 from kzocr.tcm_ocr.pipeline.auto_discovery import _run_auto_discovery
 from kzocr.tcm_ocr.pipeline.deliverables import (
@@ -103,7 +104,7 @@ class BookPipeline:
 
         # 当前处理的书籍信息
         self.current_book_id: Optional[str] = None
-        self.current_db_book: Optional[sqlite3.Connection] = None
+        self.current_db_book: Optional[BookDbConn] = None
         self.current_book_meta: Dict[str, Any] = {}
         self.page_results: List[Dict[str, Any]] = []
 
@@ -317,7 +318,7 @@ class BookPipeline:
             logger.warning("术语知识库初始化失败: %s", e)
             return _EmptyTermKB()
 
-    def _create_book_database(self, book_id: str) -> sqlite3.Connection:
+    def _create_book_database(self, book_id: str) -> BookDbConn:
         """创建书籍 SQLite 数据库。
 
         Args:
@@ -459,7 +460,7 @@ class BookPipeline:
 
         conn.commit()
         logger.info("[%s] 书籍数据库创建完成: %s", book_id, db_path)
-        return conn
+        return BookConnAdapter(conn)
 
     # =====================================================================
     # 主处理流程
@@ -655,6 +656,7 @@ class BookPipeline:
 
         db_book = sqlite3.connect(str(db_path))
         db_book.row_factory = sqlite3.Row
+        db_book = BookConnAdapter(db_book)
 
         try:
             # 1. 自动发现

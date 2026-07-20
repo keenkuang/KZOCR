@@ -1,13 +1,13 @@
 # KZOCR 下一轮开发任务计划
 
 > 起草：2026-07-20（v0.21.0 零资源收口 A/B/C/D 完成、全量 820 passed 已推送 main）
-> 最近更新：2026-07-20（W4–W7 已闭环并推送 main，全量 901 passed）
+> 最近更新：2026-07-20 续（W10 双 BookDB 统一保守收口已闭环并推送 main，全量 930 passed；v0.22.0）
 > 适用：下一开发会话的待办候选。按价值/风险分层，默认仍走 **main 直推 + 零资源优先** 工作流。
 
-## 当前基线（已核实，2026-07-20）
-- 版本 **v0.21.0**；全量 **901 passed + 2 skipped + 2 deselected**（git HEAD `90f6581`，已推送 origin/main）；ruff 默认与 `--select ANN` 三引擎文件均通过。
-- 已落地：v0.7 自适应编排层、DB 分层（BookDB 内容表 + 导出/导入校对闭环）、真实引擎（PaddleOCR/RapidOCR/GLM-4V-Flash）+ 性能基线、Celery 生产接线（已端到端验证）、25 本扩面分歧实测 v4、high 占比二级判据、§5.5 Box-Guided VL 仲裁、零资源收口 A/B/C/D、W4 VL 预算控制、W5 Celery 可观测性、W6 xref 渲染回检、W7 终校回流混淆集。
-- 覆盖率：核心模块 ~83%、ratelimit 95%、web/app.py 78%、prompt_manager 98%、scheduler 各模块 84–100%、registration 100%。
+## 当前基线（已核实，2026-07-20 续）
+- 版本 **v0.22.0**；全量 **930 passed + 2 skipped + 2 deselected**（git HEAD `974f88f`，已推送 origin/main）；ruff 默认与 `--select ANN` 三引擎文件均通过。
+- 已落地：v0.7 自适应编排层、DB 分层（BookDB 内容表 + 导出/导入校对闭环）、真实引擎（PaddleOCR/RapidOCR/GLM-4V-Flash）+ 性能基线、Celery 生产接线（已端到端验证）、25 本扩面分歧实测 v4、high 占比二级判据、§5.5 Box-Guided VL 仲裁、零资源收口 A/B/C/D、W4 VL 预算控制、W5 Celery 可观测性、W6 xref 渲染回检、W7 终校回流混淆集、W10 双 BookDB 统一（保守收口）+ 自动发现 `BookConnAdapter` 契约闭环。
+- 覆盖率：核心模块 ~89%（排除 tcm_ocr 后）、ratelimit 95%、web/app.py 89%、prompt_manager 98%、scheduler 各模块 84–100%、registration 100%。
 - 主线**无真实未完成 TODO**（仅 book 级引擎的意图性 `NotImplementedError`）。
 
 ## 工作流约定（沿用）
@@ -86,17 +86,20 @@
 - **已清零（2026-07-20 续）**：补全 kzocr/tcm_ocr/ 下 37 文件的 ruff ANN 注解（非求值，零运行时变更），`ruff --select ANN kzocr/tcm_ocr/` 归零，ruff 全绿，全量 925 passed。提交 `bd1f4ba`。
 - **决策更新**：W9 原定"不专项投入"，本轮经用户确认已专项清零；P3 仅剩 W10。
 
-### W10  tcm_ocr 与主线 BookDB 统一
+### W10  tcm_ocr 与主线 BookDB 统一（已闭环 ✅，2026-07-20 续，提交 `974f88f`）
 - tcm_ocr 仍保留自有 `BookDB`（`kzocr/tcm_ocr/database/sqlite/book_db.py`，被 4 个 knowledge 模块 import）与 `archival.py`；Phase 4 已让其经 `BookPipelineAdapter` 产主线 `BookResult` 并走主线 BookDB。
-- **决策**：属长期架构整合，风险高；当前双轨共存已验证无损，**非紧急**。
+- **已闭环（保守收口）**：主线 `kzocr.storage.db.BookDB` 是唯一系统 of record；tcm_ocr 的 `BookDB` 类为未接通遗留死亡代码。新增 `BookDbConn` Protocol 统一类型契约、重指 5 处注解、`initialize_schema` 改用真实 snake_case DDL、db-layering.md §7 澄清三层职责、新增 `test_tcm_ocr_db_unified.py` 守卫测试（5 例）。
+- **续做（同轮）**：经调研校正，自动发现链路的 4 处 `get_cursor()` 实为孤儿死代码（非运行期失效）；真实缺口为 raw 连接不满足 `BookDbConn` 契约。已新增 `BookConnAdapter`（`book_db.py`）让 `book_pipeline` 连接满足契约，关闭该缺口（纯增量、零行为变更），并新增 `test_tcm_ocr_auto_discovery_conn.py`（11 例）守护。知识模块需 `RuntimeDB` 的更深不兼容留待独立立项。
+- **P3 已无可选项**（W9 ANN 清零 + W10 闭环）。版本 0.21.0→0.22.0。
 
 ---
 
-## 推荐下轮启动顺序（2026-07-20 更新）
+## 推荐下轮启动顺序（2026-07-20 续更新）
 
 - **W1–W7 已全部闭环并推送 main**：W4/W5 早实现；W6 `3b9423e`、W7 `90f6581`；W1 web 续补测本轮再推进至 89%（+18 测试）。
 - **W8/W3 已闭环**（见上）；W9 tcm_ocr ANN 本轮专项清零（192→0，提交 `bd1f4ba`）。
-- **当前状态**：全量 **925 passed + 2 skipped + 2 deselected**，核心覆盖率 88.94%，web/app.py 89%，ruff 全过。
-- **P3 仅剩 W10 双 BookDB 统一**（重大架构改动，需 plan mode，非紧急）。W9 已清零。
+- **W10 双 BookDB 统一（保守收口）+ 自动发现 `BookConnAdapter` 契约闭环**已推送 main（提交 `974f88f`），版本 0.21.0→0.22.0。
+- **当前状态**：全量 **930 passed + 2 skipped + 2 deselected**，核心覆盖率 ~89%（排除 tcm_ocr 后），web/app.py 89%，ruff 全过。
+- **P3 已无可选项**（W9 ANN 清零 + W10 闭环）——计划内 W1–W10 全部收口。
 
-> 注：以上为候选清单，非承诺范围。下轮开始前建议与用户确认本轮回聚焦哪 1–3 项。
+> 注：以上为候选清单，原计划内任务已耗尽。下一轮如需继续，需从新方向立项（如：校对台/导出增强、质量/性能再提升、或知识模块 `RuntimeDB` 接回 `book_pipeline` 的独立架构任务）。开始前建议与用户确认聚焦哪 1–3 项。

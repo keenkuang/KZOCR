@@ -196,4 +196,39 @@ push_book_to_zai(book, db_path="work/v2.db", persist_bookdb=True)
 - **PostgreSQL 运营库**（RuntimeDB）= 元数据 + 方剂归档（`FormulaComposition` 已有归档表）+ 统计/知识库。
 - **`custom.db`**（zai 校对工作台）= 从主线 BookDB 打包导出的可移植校对包（见 §5 决策 1）。
 
+### 7.4 已知潜在隐患（契约缺口，已部分闭环）
+
+tcm_ocr 自动发现链路的连接契约问题，经 W10 后补（2026-07-20 续）调研澄清并修复。以下描述已校正早期误述。
+
+**校正（重要）**：早期记录称"运行期触发 `get_cursor` AttributeError 被 try/except 吞掉、自动发现静默缺失"——
+**该机制在当前代码中不会发生**。原因：`_run_auto_discovery`（`auto_discovery.py:23`）调用的是**同模块本地桩函数**
+（`:72/148/220`，自大集成提交 `bd6f5ba` 起存在），桩函数直接用 `db_book.execute()`（raw 连接自带），**根本不进入**
+4 个 knowledge 模块的 `get_cursor()` 分支。所以自动发现**实际有产出**（用较弱的朴素差分），并非失效。
+
+**4 处 `get_cursor()` 调用是孤儿死代码**：
+- `knowledge/herb_pattern/auto_discover.py:413`
+- `knowledge/meridian_pattern/auto_discover.py:452`
+- `knowledge/context_pattern/auto_discover.py:187`
+- `knowledge/formula/extractor.py:1091`
+
+它们所在函数（前 3 个）无任何外部调用方，第 4 个所在的 `FormulaExtractor` 全仓库无实例化，故运行期不会被执行。
+（注：这些函数还进一步要求 `db_pg.create_*_pattern(...)`——`RuntimeDB` 方法，而 `book_pipeline` 传的是原生 psycopg2
+连接，即使补了 `get_cursor` 仍会在 `db_pg` 上崩；这进一步证明它们针对的是 `manager.py` 的 `BookDB`/`RuntimeDB` 架构。）
+
+**真实缺口有两点**：
+1. **`BookDbConn` 契约缺口**：raw `sqlite3.Connection` 缺少 `get_cursor()`，不满足 `@runtime_checkable BookDbConn`
+   Protocol（`tests/test_tcm_ocr_db_unified.py::test_bookdb_conn_protocol_contract` 固化记录此事实）。
+2. **深层架构不兼容**：知识模块需要 `db_pg` 提供 `RuntimeDB.create_*_pattern`，原生 psycopg2 连接无此方法——
+   即使接通知识模块，仍会崩溃。属更大的架构决策，不在本次范围。
+
+**已闭环（Option A，2026-07-20 续）**：新增 `BookConnAdapter`（`book_db.py`），将 `book_pipeline` 创建的
+raw `sqlite3.Connection` 包成满足 `BookDbConn` 的薄封装（复用同一底层连接、补充 `get_cursor`、显式委托
+`execute/commit/close/cursor` 并兼容 `row_factory`）。`book_pipeline._create_book_database` 与 `finalize_book`
+改用该适配器返回/传入。这**关闭缺口 (1)**，使 4 个休眠调用点将来被接通时不再潜在 AttributeError；**纯增量、零行为变更**，
+不改变当前自动发现走本地桩的事实。
+- 新增 `tests/test_tcm_ocr_auto_discovery_conn.py`（11 例）守护：adapter 满足 `BookDbConn` / raw conn 仍不满足 /
+  委托 `execute`/`commit`/`get_cursor` / `_run_auto_discovery` 用 adapter 不抛错 / 3 个可调用知识函数用 adapter 不再崩溃。
+- 缺口 (2) 仍**待独立立项**（如需让知识模块真正产出高质量模式，需把 `manager.py` 的 `BookDB`/`RuntimeDB` 接线接回
+  `book_pipeline`，远超原 latent-bug 范围）。
+
 > 范围边界：本次**不做**指针统一（herb/meridian 改查主线 `proofread` 表）与 schema 合并（formula/content_node 迁进主线 BookDB）——后者违背 §1「主线只存 OCR 全量、Postgres 存元数据」的定调，且高风险、非紧急。
