@@ -11,6 +11,7 @@ from kzocr.scheduler.review_manifest import (
     build_review_manifest,
     export_divergence_html,
     feedback_apply,
+    visualize_char_boxes,
 )
 from kzocr.storage.db import BookDB
 
@@ -63,10 +64,27 @@ def cmd_review_html(args: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_review_boxes(args: argparse.Namespace) -> int:
+    """``kzocr review boxes <book_code> <page_num> [--pdf PATH] [--out PATH]`` — 字符级 bbox 可视化。"""
+    cfg = load_config()
+    db = BookDB(args.book_code, db_dir=cfg.scheduler.db_dir)
+    try:
+        path = visualize_char_boxes(
+            db, args.book_code, args.page_num,
+            pdf_path=args.pdf,
+            out_path=args.out,
+        )
+        print(f"已生成 bbox 可视化图：{path}")
+        return 0
+    finally:
+        db.close()
+
+
 def build_review_parser(sub: argparse._SubParsersAction) -> None:
     """在子命令解析器上注册 review 子命令组。"""
     from kzocr.cli_review import (
         cmd_review_apply,
+        cmd_review_boxes,
         cmd_review_html,
         cmd_review_manifest,
     )
@@ -82,3 +100,11 @@ def build_review_parser(sub: argparse._SubParsersAction) -> None:
     vh.add_argument("book_code", help="书籍编码")
     vh.add_argument("--out", default=None, help="输出 HTML 路径（默认 <book_code>_divergence.html）")
     vh.set_defaults(review_func=cmd_review_html)
+    vb = vsub.add_parser("boxes", help="渲染字符级 bbox 可视化图像")
+    vb.add_argument("book_code", help="书籍编码")
+    vb.add_argument("page_num", type=int, help="页码")
+    vb.add_argument("--pdf", default=None, help="PDF 文件路径（可选，叠加框线于页图上）")
+    vb.add_argument("--out", default=None, help="输出 PNG 路径（默认 <book_code>_p<page_num>_boxes.png）")
+    vb.set_defaults(review_func=cmd_review_boxes)
+
+

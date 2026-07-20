@@ -256,3 +256,112 @@ def feedback_apply(manifest: ReviewManifest, db: BookDB) -> int:
                 )
                 count += 1
     return count
+
+
+def visualize_char_boxes(
+    db: BookDB,
+    book_code: str,
+    page_num: int,
+    pdf_path: str | None = None,
+    out_path: str | None = None,
+    dpi: int = 150,
+) -> str:
+    """渲染字符级 bbox 可视化图像。
+
+    从 BookDB 读取某页的 ``char_boxes``（逐行逐字 [x1,y1,x2,y2]），
+    在页图像（或空白画布）上以彩色矩形绘出每个字符框。
+    不同行使用不同颜色，便于直观验证逐字定位质量。
+
+    Args:
+        db: BookDB 实例。
+        book_code: 书籍编码（用于输出文件名）。
+        page_num: 页码。
+        pdf_path: 可选 PDF 路径。提供时渲染该页为底图，框线精确叠加。
+        out_path: 输出 PNG 路径；缺省为 ``<book_code>_p<page_num>_boxes.png``。
+        dpi: PDF 渲染 DPI（默认 150；仅当提供 pdf_path 时生效）。
+
+    Returns:
+        实际写出的 PNG 文件路径。
+
+    零资源降级：无 PDF 时用空白画布（仅显示框坐标），可离线运行。
+    """
+
+    from PIL import Image, ImageDraw
+
+    cb = db.get_page_char_boxes(page_num)
+    if not cb:
+        raise ValueError(f"页 {page_num} 无 char_boxes 数据")
+
+    # 计算边界
+    xs = [b[0] for line in cb for b in line if len(b) >= 4] + [b[2] for line in cb for b in line if len(b) >= 4]
+    ys = [b[1] for line in cb for b in line if len(b) >= 4] + [b[3] for line in cb for b in line if len(b) >= 4]
+    if not xs:
+        raise ValueError(f"页 {page_num} char_boxes 数据为空")
+
+    margin = 40
+    canvas_w = max(xs) + margin * 2
+    canvas_h = max(ys) + margin * 2
+
+    img: Image.Image
+    if pdf_path:
+        import fitz  # PyMuPDF
+        doc = fitz.open(pdf_path)
+        try:
+            page = doc[page_num]
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            pix = page.get_pixmap(matrix=mat)
+            if pix.n != 3:
+                pix = fitz.Pixmap(pix, 0)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        finally:
+            doc.close()
+        # 缩放框坐标
+        scale_x = pix.width / max(xs) if max(xs) > 0 else 1
+        scale_y = pix.height / max(ys) if max(ys) > 0 else 1
+    else:
+        img = Image.new("RGB", (int(canvas_w), int(canvas_h)), "white")
+        scale_x = scale_y = 1
+
+    draw = ImageDraw.Draw(img)
+
+    # 调色板：8 种易区分的颜色（RGB）
+    palette = [
+        (220, 50, 50),    # 红
+        (50, 130, 220),   # 蓝
+        (50, 180, 80),    # 绿
+        (220, 160, 40),   # 橙
+        (160, 50, 200),   # 紫
+        (200, 80, 140),   # 粉
+        (80, 190, 190),   # 青绿
+        (180, 120, 60),   # 棕
+    ]
+
+    for line_idx, line_boxes in enumerate(cb):
+        if not line_boxes:
+            continue
+        color = palette[line_idx % len(palette)]
+        # 半透明填充 + 实线边框
+        fill = (*color, 40)
+        for b in line_boxes:
+            if len(b) < 4:
+                continue
+            x1, y1, x2, y2 = b[:4]
+            scaled = (
+                int(x1 * scale_x),
+                int(y1 * scale_y),
+                int(x2 * scale_x),
+                int(y2 * scale_y),
+            )
+            draw.rectangle(scaled, outline=color, width=2)
+            draw.rectangle(scaled, fill=fill)
+
+        # 行号标注（该行第一个字符框上方）
+        first = line_boxes[0]
+        label = f"L{line_idx}"
+        lx = int(first[0] * scale_x)
+        ly = int(first[1] * scale_y) - 8
+        draw.text((lx, ly), label, fill=color)
+
+    path = out_path or f"{book_code}_p{page_num}_boxes.png"
+    img.save(path)
+    return path
