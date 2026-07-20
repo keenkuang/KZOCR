@@ -18,8 +18,8 @@ from pathlib import Path
 from kzocr import __version__
 from kzocr.config import load_config
 from kzocr.engine import run as engine_run
-from kzocr.adapter import push_book_to_zai
-from kzocr.export_zai import export_book_markdown
+from kzocr.doc import push_book_to_zai
+from kzocr.doc.export import export_book_markdown
 from kzocr.khub import client as khub_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -60,7 +60,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     else:
         cfg.zai_db = "kzocr.db"
     if args.format == "json":
-        from kzocr.export_zai import export_json
+        from kzocr.doc.export import export_json
         data = export_json(args.book_code, db_path=cfg.zai_db)
         out = _safe_out_path(args.out or f"{args.book_code}.json", args.book_code)
         with open(out, "w", encoding="utf-8") as f:
