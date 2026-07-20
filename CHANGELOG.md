@@ -5,6 +5,19 @@
 
 ---
 
+## v2026-07-20 续二 — 零资源收口（核心模块补测 / web 路由补测 / tcm_ocr 清理）
+
+> 纯逻辑测试 + 注释/注解清理，零运行时风险；全量 **820 passed + 2 skipped**（较 v0.21.0 的 753 +67）；ruff 默认与 `--select ANN` 三引擎文件均通过。版本号维持 **0.21.0**
+
+| 模块 | 说明 |
+|------|------|
+| A 核心模块纯逻辑补测（`f5f7495`） | 新增 5 个测试文件共 **30 例**：`test_engine_config`(7)、`test_registration`(7，registration.py 覆盖 82%→100%)、`test_to_zai_prisma_logic`(8，_uid/_resolve_db/freeze_custom_db/_restrict_db_perms)、`test_modelscope_pool_logic`(2，拆文本/视觉 provider 两场景)、`test_cross_align_logic`(6，混淆文件边界)。零系统资源消耗 |
+| B web/app.py 路由单测（`d39af17`） | 新增 `test_web_routes.py` **37 例**（临时目录隔离 4 个环境变量，零网络零真实 DB）；覆盖 prompts/engines/registration/book 空库降级/monitor/benchmark 等路由。web/app.py 覆盖 **35%→53%+**（纠正原记忆「~100%」偏差）；顺带修正 `app.version` 硬编码 `0.19.0`→动态读 `__version__`（现 0.21.0） |
+| C tcm_ocr stub 注释规范化（`d1b0dd3`） | `graded_scheduler.py` 三处误导性 "stub" 注释改为「已知未接入引擎类型，降级返回空（设计意图）」；four_stage_pipeline/page_pipeline 的真实 TODO 保留不删；tcm_ocr 平行栈保持冻结 |
+| D tcm_ocr 核心引擎类型注解（`0fa79fc`） | `graded_scheduler`/`mineru_adapter`/`paddleocr_adapter` 三文件 **14 处 ANN401 全部清零**（tcm_ocr 全栈 206→192）；`__exit__` 异常三元组改 `type[BaseException]\|None`/`BaseException\|None`/`types.TracebackType\|None`；`_init_engine3/4` 返回 `Optional[Dict[str,Any]]`；`term_kb` 鸭子类型抽 `TermKnowledgeBase` Protocol；`_preprocess_rec_image` 用 `TYPE_CHECKING` 守卫的 `paddle.Tensor` 前向引用 |
+
+---
+
 ## v2026-07-20 — 古籍跨引擎分歧实测 v4（9 本追加，25 本全量复盘）
 
 > 文档/ANA 更新，无代码变更；数据来源 `e2e_expand/summary_v4.json`（9 本 / 337 页）；合并前 16 本 = **25 本 / 1177 页 / 15688 分歧 / 4158 高分歧**，平均 div/pg=13.3、high 占比 26.5%
