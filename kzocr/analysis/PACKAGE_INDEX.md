@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [storage/](../storage/PACKAGE_INDEX.md)
+
 # analysis/ — 方剂分析
 
 | 文件 | 说明 |

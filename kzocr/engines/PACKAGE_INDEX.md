@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [scheduler/](../scheduler/PACKAGE_INDEX.md)
+
 # engines/ — 共享基础设施
 
 | 文件 | 说明 |

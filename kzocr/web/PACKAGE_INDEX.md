@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [scheduler/](../scheduler/PACKAGE_INDEX.md) · [storage/](../storage/PACKAGE_INDEX.md)
+
 # web/ — FastAPI Web 面板
 
 | 文件 | 说明 |

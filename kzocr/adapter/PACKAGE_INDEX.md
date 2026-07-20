@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [doc/](../doc/PACKAGE_INDEX.md)（委托目标）
+
 # adapter/ — 向后兼容层
 
 | 文件 | 说明 |

@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md)
+
 # resources/ — 内置资源
 
 | 文件 | 说明 |

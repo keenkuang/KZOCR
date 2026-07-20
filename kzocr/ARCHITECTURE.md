@@ -4,7 +4,7 @@
 
 ```
 kzocr/cli.py           CLI 入口（pipeline / export / push / review / benchmark / web 等）
-kzocr/web/app.py       FastAPI Web 管理面板（独立进程）
+kzocr/web/app.py       FastAPI Web 管理面板（独立进程）── [PACKAGE_INDEX.md](web/PACKAGE_INDEX.md)
 ```
 
 ## 模块依赖关系
@@ -34,15 +34,15 @@ CLI ──→ engine/run.py ──→ adapters/engine_runners.py ──→ sched
 
 | 层 | 模块 | 职责 |
 |----|------|------|
-| **引擎层** | `engine/` | OCR 引擎运行、核心类型 `BookResult`/`PageResult`/`LineResult` |
-| **适配器层** | `adapters/` | 引擎适配器（BookPipelineAdapter、MockAdapter 等） |
-| **编排层** | `scheduler/` | v0.7 自适应引擎编排（注册→调度→验证→仲裁→分歧对齐） |
-| **存储层** | `storage/` | BookDB（每书一个 SQLite，系统 of record） |
-| **文档层** | `doc/` | zai 校对台写入/导出 Markdown+JSON/校对导入/冻结 |
-| **发布层** | `khub/` | 文档 HTTP 推送至 kHUB |
-| **Web 面板** | `web/` | FastAPI 管理界面 |
-| **共享基础设施** | `engines/` | 错误类型、限流器、原子写、出站安全 |
+| **引擎层** | [`engine/`](engine/PACKAGE_INDEX.md) | OCR 引擎运行、核心类型 `BookResult`/`PageResult`/`LineResult` |
+| **适配器层** | [`adapters/`](adapters/PACKAGE_INDEX.md) | 引擎适配器（BookPipelineAdapter、MockAdapter 等） |
+| **编排层** | [`scheduler/`](scheduler/PACKAGE_INDEX.md) | v0.7 自适应引擎编排（注册→调度→验证→仲裁→分歧对齐） |
+| **存储层** | [`storage/`](storage/PACKAGE_INDEX.md) | BookDB（每书一个 SQLite，系统 of record） |
+| **文档层** | [`doc/`](doc/PACKAGE_INDEX.md) | zai 校对台写入/导出 Markdown+JSON/校对导入/冻结 |
+| **发布层** | [`khub/`](khub/PACKAGE_INDEX.md) | 文档 HTTP 推送至 kHUB |
+| **Web 面板** | [`web/`](web/PACKAGE_INDEX.md) | FastAPI 管理界面 |
+| **共享基础设施** | [`engines/`](engines/PACKAGE_INDEX.md) | 错误类型、限流器、原子写、出站安全 |
 | **配置** | `config.py` | 全局配置（环境变量 + 默认值） |
-| **适配器兼容层** | `adapter/` | 旧 `to_zai_prisma.py` 的向后兼容委托层（已迁移至 `doc/`） |
-| **分析** | `analysis/` | 配方解析、质量质检 |
+| **适配器兼容层** | [`adapter/`](adapter/PACKAGE_INDEX.md) | 旧 `to_zai_prisma.py` 的向后兼容委托层（已迁移至 `doc/`） |
+| **分析** | [`analysis/`](analysis/PACKAGE_INDEX.md) | 配方解析、质量质检 |
 | **平行栈** | `tcm_ocr/` | TCM-OCR 子系统（知识抽取/数据库/管线，独立迭代） |

@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [storage/](../storage/PACKAGE_INDEX.md) · [adapter/](../adapter/PACKAGE_INDEX.md)（旧位置）
+
 # doc/ — 文档导出模块
 
 | 文件 | 说明 |

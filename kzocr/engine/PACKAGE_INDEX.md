@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [adapters/](../adapters/PACKAGE_INDEX.md) · [scheduler/](../scheduler/PACKAGE_INDEX.md)
+
 # engine/ — OCR 引擎运行与核心类型
 
 | 文件 | 说明 |

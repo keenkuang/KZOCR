@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [doc/](../doc/PACKAGE_INDEX.md)（导出数据源）
+
 # khub/ — kHUB 发布客户端
 
 | 文件 | 说明 |

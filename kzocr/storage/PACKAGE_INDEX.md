@@ -1,3 +1,5 @@
+> 参见：[ARCHITECTURE.md](../ARCHITECTURE.md) · [doc/](../doc/PACKAGE_INDEX.md) · [scheduler/](../scheduler/PACKAGE_INDEX.md)
+
 # storage/ — 数据存储
 
 | 文件 | 说明 |
