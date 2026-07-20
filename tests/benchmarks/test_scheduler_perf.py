@@ -25,14 +25,14 @@ def _register_engines(n: int = 10) -> EngineRegistry:
     return reg
 
 
-def _populate_stats(reg: EngineRegistry, n: int = 50):
+def _populate_stats(reg: EngineRegistry, n: int = 50) -> None:
     """给每个引擎注入 n 条 benchmark 记录。"""
     for i in range(n):
         for name in [e.meta.name for e in reg.list()]:
             reg.record(name, success=True, glyph="PASS", latency_ms=500 + i * 10, pages=1)
 
 
-def test_select_candidates_performance():
+def test_select_candidates_performance() -> None:
     """select_candidates 应在 10ms 内完成。"""
     reg = _register_engines(20)
     _populate_stats(reg, 100)
@@ -45,7 +45,7 @@ def test_select_candidates_performance():
     assert elapsed < 0.01, f"select_candidates avg {elapsed*1000:.1f}ms > 10ms"
 
 
-def test_bayesian_score_performance():
+def test_bayesian_score_performance() -> None:
     """_compute_bayesian_score 应在 1ms 内完成。"""
     reg = _register_engines(1)
     _populate_stats(reg, 100)

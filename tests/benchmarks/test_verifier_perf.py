@@ -10,7 +10,7 @@ from kzocr.scheduler.verifier import (
 )
 
 
-def test_verify_plain_text_performance():
+def test_verify_plain_text_performance() -> None:
     """verify 纯文本应在 50ms 内完成。"""
     ver = GlyphVerifier()
     ctx = DetectorContext(page_num=1)
@@ -21,7 +21,7 @@ def test_verify_plain_text_performance():
     assert elapsed < 0.05, f"verify avg {elapsed*1000:.1f}ms > 50ms"
 
 
-def test_verify_toxic_text_performance():
+def test_verify_toxic_text_performance() -> None:
     """含毒性药材的文本应在 50ms 内完成。"""
     ver = GlyphVerifier()
     ctx = DetectorContext(page_num=1)
@@ -32,7 +32,7 @@ def test_verify_toxic_text_performance():
     assert elapsed < 0.05, f"verify toxic avg {elapsed*1000:.1f}ms > 50ms"
 
 
-def test_verify_long_text_performance():
+def test_verify_long_text_performance() -> None:
     """长文本（1000 字）应在 200ms 内完成。"""
     ver = GlyphVerifier()
     ctx = DetectorContext(page_num=1)

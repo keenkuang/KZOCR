@@ -26,7 +26,7 @@ def _create_pdf(n_pages: int = 100) -> str:
 
 
 @pytest.mark.benchmark
-def test_full_book_100_pages():
+def test_full_book_100_pages() -> None:
     """100 页 mock 全书编排应在 60s 内完成。"""
     pdf = _create_pdf(100)
     td = tempfile.mkdtemp()
@@ -46,7 +46,7 @@ def test_full_book_100_pages():
 
 
 @pytest.mark.benchmark
-def test_full_book_10_pages():
+def test_full_book_10_pages() -> None:
     """10 页 mock 全书编排应在 30s 内完成（新增检测器后阈值放宽）。"""
     pdf = _create_pdf(10)
     td = tempfile.mkdtemp()
