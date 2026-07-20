@@ -5,11 +5,112 @@ P0/P1/P2），审核结果可经 ``feedback_apply`` 回写到底层 BookDB。
 """
 from __future__ import annotations
 
+import difflib
+import html
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Optional, Tuple
 
 from kzocr.scheduler.cross_align import add_learned_confusion
 from kzocr.storage.db import BookDB
+
+
+_PRIORITY_RANK = {"high": 0, "critical": 0, "P0": 0, "medium": 1, "P1": 1, "low": 2, "P2": 2}
+
+
+def _esc(text: str) -> str:
+    return html.escape(text or "")
+
+
+def _highlight_diff(a: str, b: str) -> Tuple[str, str]:
+    """对两串做字符级差异高亮，返回 (a_html, b_html)，差异处包 ``<mark>``。
+
+    仅用 SequenceMatcher 做轻量对齐，不依赖 OCR 引擎/图像，零资源。
+    """
+    sm = difflib.SequenceMatcher(None, a or "", b or "", autojunk=False)
+    a_parts: list[str] = []
+    b_parts: list[str] = []
+    for op, i1, i2, j1, j2 in sm.get_opcodes():
+        a_seg = _esc(a[i1:i2])
+        b_seg = _esc(b[j1:j2])
+        if op == "equal":
+            a_parts.append(a_seg)
+            b_parts.append(b_seg)
+        else:
+            a_parts.append(f'<mark class="diff">{a_seg}</mark>')
+            b_parts.append(f'<mark class="diff">{b_seg}</mark>')
+    return "".join(a_parts), "".join(b_parts)
+
+
+def export_divergence_html(db: BookDB, book_code: str, out_path: Optional[str] = None) -> str:
+    """渲染跨引擎分歧为 HTML 报告（分歧片段高亮），返回写出路径。
+
+    零资源：仅用 ``cross_divergence`` 已存片段（a_seg/b_seg/priority/status），
+    不依赖 OCR 引擎或页图像。按优先级分组、差异片段以 ``<mark>`` 高亮，
+    便于人工终校快速定位两引擎分歧处。
+
+    Args:
+        db: BookDB 实例（已连接该书）。
+        book_code: 书籍编码（用于报告标题与默认文件名）。
+        out_path: 输出 HTML 路径；缺省为 ``<book_code>_divergence.html``。
+
+    Returns:
+        实际写出的 HTML 文件路径。
+    """
+    rows = db.get_cross_divergences()
+    by_pri: dict[str, list[dict]] = {}
+    for r in rows:
+        pri = r.get("priority") or "medium"
+        by_pri.setdefault(pri, []).append(r)
+
+    sections: list[str] = []
+    for pri in sorted(by_pri, key=lambda p: _PRIORITY_RANK.get(p, 9)):
+        items = by_pri[pri]
+        cards: list[str] = []
+        for r in items:
+            a_seg = r.get("a_seg") or ""
+            b_seg = r.get("b_seg") or ""
+            a_html, b_html = _highlight_diff(a_seg, b_seg)
+            cards.append(
+                "<div class='card'>"
+                f"<div class='meta'>页 {r.get('page_no')} · "
+                f"{_esc(r.get('div_type') or '')} · "
+                f"状态 {_esc(r.get('status') or 'pending')} · "
+                f"{_esc(r.get('engine_a') or '')} ↔ {_esc(r.get('engine_b') or '')}</div>"
+                "<div class='row'><span class='label'>A</span>"
+                f"<span class='seg'>{a_html}</span></div>"
+                "<div class='row'><span class='label'>B</span>"
+                f"<span class='seg'>{b_html}</span></div>"
+                "</div>"
+            )
+        sections.append(
+            f"<section><h2>优先级 {_esc(pri)}（{len(items)} 处）</h2>"
+            f"{''.join(cards)}</section>"
+        )
+
+    body = "".join(sections) or "<p>无跨引擎分歧记录。</p>"
+    doc = f"""<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>分歧高亮 · {_esc(book_code)}</title>
+<style>
+ body{{font-family:system-ui,sans-serif;margin:2rem;color:#222}}
+ h1{{font-size:1.3rem}} h2{{font-size:1.05rem;margin-top:1.5rem}}
+ .card{{border:1px solid #ddd;border-radius:8px;padding:.6rem .8rem;margin:.5rem 0}}
+ .meta{{color:#666;font-size:.8rem;margin-bottom:.3rem}}
+ .row{{display:flex;gap:.5rem;align-items:baseline;margin:.15rem 0}}
+ .label{{font-weight:700;color:#999;width:1.2rem}}
+ .seg{{white-space:pre-wrap}}
+ mark.diff{{background:#ffe08a;border-radius:3px;padding:0 1px}}
+</style></head>
+<body>
+<h1>跨引擎分歧高亮报告 · {_esc(book_code)}</h1>
+<p>共 {len(rows)} 处分歧（按优先级分组，黄色为两引擎差异片段）。</p>
+{body}
+</body></html>"""
+
+    path = out_path or f"{book_code}_divergence.html"
+    Path(path).write_text(doc, encoding="utf-8")
+    return path
 
 
 def _parse_confusion_pair(details: str) -> Tuple[str, str]:
