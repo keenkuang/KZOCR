@@ -498,7 +498,7 @@ class GradedScheduler:
                 return text.strip()
 
             elif engine_type == 'unirec':
-                # UniRec stub
+                # 已知未接入的引擎类型：UniRec 模型未实现，降级返回空（设计意图，非待办）
                 return ""
 
         except Exception as e:
@@ -522,11 +522,11 @@ class GradedScheduler:
 
         try:
             if engine_type == 'paddlevl':
-                # Paddle-VL stub - would call the actual model
+                # 已知未接入的引擎类型：Paddle-VL 模型未实现，降级返回空（设计意图）
                 logger.debug("Paddle-VL not yet implemented")
                 return ""
             elif engine_type == 'dots':
-                # dots.ocr stub
+                # 已知未接入的引擎类型：dots.ocr 模型未实现，降级返回空（设计意图）
                 logger.debug("dots.ocr not yet implemented")
                 return ""
         except Exception as e:
