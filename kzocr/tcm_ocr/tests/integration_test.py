@@ -96,7 +96,7 @@ class TestFullPipelineMock:
         # Step 6: Push decision logging
         mock_cursor = mock_db.get_cursor.return_value
         call_count = [0]
-        def _fetchone():
+        def _fetchone() -> dict[str, int]:
             call_count[0] += 1
             return {"id": call_count[0]}
         mock_cursor.fetchone = _fetchone
@@ -155,7 +155,7 @@ class TestFullPipelineMock:
         # Log dosage alert
         mock_cursor = mock_db.get_cursor.return_value
         call_count = [0]
-        def _fetchone():
+        def _fetchone() -> dict[str, int]:
             call_count[0] += 1
             return {"id": call_count[0]}
         mock_cursor.fetchone = _fetchone

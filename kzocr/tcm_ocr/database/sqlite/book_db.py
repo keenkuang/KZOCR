@@ -226,7 +226,7 @@ class BookDB:
     def __enter__(self) -> 'BookDB':
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object) -> None:
         self.close()
 
     # =====================================================================
@@ -249,7 +249,7 @@ class BookDB:
     # 书籍元数据管理
     # =====================================================================
 
-    def set_book_meta(self, **kwargs) -> int:
+    def set_book_meta(self, **kwargs: object) -> int:
         """
         设置书籍元数据
 
@@ -311,7 +311,7 @@ class BookDB:
         order_seq: int = 0,
         start_page: Optional[int] = None,
         end_page: Optional[int] = None,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建目录节点
@@ -513,7 +513,7 @@ class BookDB:
         self,
         page_id: int,
         sequence_in_page: int,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建段落
@@ -603,7 +603,7 @@ class BookDB:
         sequence_in_paragraph: int,
         page_num: int,
         paragraph_id: Optional[int] = None,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建行记录
@@ -880,7 +880,7 @@ class BookDB:
         corrected_text: str,
         corrected_by: str,
         correction_stage: str,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建校对记录
@@ -949,7 +949,7 @@ class BookDB:
         page_id: Optional[int] = None,
         paragraph_id: Optional[int] = None,
         line_id: Optional[int] = None,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建图片索引
@@ -1100,7 +1100,7 @@ class BookDB:
         book_registry_id: int,
         formula_uuid: str,
         formula_name: str,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建方剂组成
@@ -1197,7 +1197,7 @@ class BookDB:
         self,
         formula_composition_id: int,
         herb_name: str,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建方剂成分

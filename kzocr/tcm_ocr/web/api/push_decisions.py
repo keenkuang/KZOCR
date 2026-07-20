@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -41,7 +41,7 @@ router = APIRouter(prefix="/api/push-decisions", tags=["push-decisions"])
 # 依赖注入辅助函数
 # =============================================================================
 
-def get_runtime_db():
+def get_runtime_db() -> Callable[..., object]:
     """
     获取 RuntimeDB 实例的依赖注入函数
 
@@ -50,7 +50,7 @@ def get_runtime_db():
     """
     from fastapi import Request
 
-    def _get_db(request: Request):
+    def _get_db(request: Request) -> object:
         runtime_db = getattr(request.app.state, "runtime_db", None)
         if runtime_db is None:
             raise HTTPException(
@@ -62,7 +62,7 @@ def get_runtime_db():
     return _get_db
 
 
-def get_push_decision_logger(runtime_db=Depends(get_runtime_db())):
+def get_push_decision_logger(runtime_db: object = Depends(get_runtime_db())) -> object:
     """
     获取 PushDecisionLogger 实例的依赖注入函数
     """
@@ -137,8 +137,8 @@ async def list_push_decisions(
     reason_code: Optional[str] = Query(None, description="按原因代码筛选"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> PushDecisionListResponse:
     """
     获取推送决策列表
 
@@ -227,8 +227,8 @@ async def list_push_decisions(
 @router.get("/{decision_id}", response_model=PushDecisionDetail)
 async def get_push_decision(
     decision_id: int,
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> PushDecisionDetail:
     """
     获取推送决策详情
 
@@ -266,8 +266,8 @@ async def get_push_decision(
 async def resolve_push_decision(
     decision_id: int,
     body: ResolveRequest,
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> ApiResponse:
     """
     提交校对结果解决推送决策
 
@@ -332,8 +332,8 @@ async def resolve_push_decision(
 @router.get("/stats", response_model=PushStats)
 async def get_push_decision_stats(
     book_id: Optional[str] = Query(None, description="按书籍ID筛选统计"),
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> PushStats:
     """
     获取推送决策统计信息
 
@@ -463,8 +463,8 @@ async def get_push_decision_stats(
 
 @router.get("/reasons", response_model=List[PushReasonDictItem])
 async def get_push_reason_dict(
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> list[PushReasonDictItem]:
     """
     获取推送原因字典
 
@@ -539,8 +539,8 @@ async def get_push_reason_dict(
 @router.post("/batch-resolve", response_model=BatchResolveResponse)
 async def batch_resolve(
     body: BatchResolveRequest,
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> BatchResolveResponse:
     """
     批量处理推送决策
 
@@ -642,8 +642,8 @@ async def batch_resolve(
 @router.get("/{decision_id}/chain", response_model=DecisionChainResponse)
 async def get_decision_chain(
     decision_id: int,
-    runtime_db=Depends(get_runtime_db()),
-):
+    runtime_db: object = Depends(get_runtime_db()),
+) -> DecisionChainResponse:
     """
     获取决策的完整链路信息
 

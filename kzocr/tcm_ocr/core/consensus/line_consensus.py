@@ -29,7 +29,7 @@ WEIGHT_LENGTH_PENALTY = 0.1
 
 def line_consensus(
     engine_results: Dict[str, str],
-    term_kb: Any,
+    term_kb: object,
     book_meta: Optional[Dict[str, Any]] = None,
     line_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -124,7 +124,7 @@ def line_consensus(
 
 def multi_engine_consensus(
     engine_results: Dict[str, str],
-    term_kb: Any,
+    term_kb: object,
     book_meta: Optional[Dict[str, Any]] = None,
     line_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -234,7 +234,7 @@ def multi_engine_consensus(
 def _vote_on_aligned_chars(
     aligned_results: List[Tuple[str, List[Optional[str]]]],
     base_text: str,
-    term_kb: Any,
+    term_kb: object,
     engine_results: Dict[str, str]
 ) -> Dict[str, Any]:
     """Vote on each character position across aligned engine results.
@@ -328,7 +328,7 @@ def _attempt_error_correction(
     text: str,
     disputed_positions: List[int],
     engine_results: Dict[str, str],
-    term_kb: Any
+    term_kb: object
 ) -> Tuple[str, int]:
     """Attempt to correct disputed positions using term knowledge base.
 
@@ -362,7 +362,7 @@ def _attempt_error_correction(
 
 def two_engine_consensus(
     raw_texts: List[str],
-    term_kb: Any,
+    term_kb: object,
     book_meta: Optional[Dict[str, Any]] = None,
     line_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -556,7 +556,7 @@ def align_to_base(
 def get_base_weight(
     engine: str,
     text: str,
-    term_kb: Any
+    term_kb: object
 ) -> float:
     """Calculate the voting weight for an engine based on text characteristics.
 

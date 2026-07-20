@@ -62,7 +62,7 @@ class PagePipeline:
         self,
         config: Dict[str, Any],
         engines: Dict[str, Any],
-        term_kb: Any,
+        term_kb: object,
     ) -> None:
         """初始化单页处理流水线。
 
@@ -1303,7 +1303,7 @@ class PagePipeline:
         self,
         book_id: str,
         page_data_list: List[Dict[str, Any]],
-        db_book: Any,
+        db_book: object,
     ) -> None:
         """将页面数据写入书籍数据库。
 

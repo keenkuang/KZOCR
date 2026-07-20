@@ -524,7 +524,7 @@ def render_full_markdown_from_doc(final_doc: Dict[str, Any]) -> str:
 
 def _build_final_doc_from_book_db(
     book_id: str,
-    db_book: Any,
+    db_book: object,
     book_meta: Dict[str, Any],
 ) -> Dict[str, Any]:
     """从书籍数据库构建 final_doc 数据结构。
@@ -751,7 +751,7 @@ def _replace_image_paths(
     if not path_map:
         return
 
-    def _replace_in_value(value: Any) -> Any:
+    def _replace_in_value(value: object) -> object:
         if isinstance(value, str):
             for abs_path, new_path in path_map.items():
                 value = value.replace(abs_path, new_path)
@@ -795,8 +795,8 @@ def _compute_file_sha256(file_path: Path) -> str:
 def export_final_outputs(
     book_id: str,
     output_dir: str,
-    db_book: Any,
-    runtime_db: Any,
+    db_book: object,
+    runtime_db: object,
 ) -> Dict[str, Any]:
     """导出书籍的最终交付物。
 
@@ -912,7 +912,7 @@ def export_final_outputs(
 # =============================================================================
 
 
-def _load_book_meta(db_book: Any, book_id: str) -> Dict[str, Any]:
+def _load_book_meta(db_book: object, book_id: str) -> Dict[str, Any]:
     """从数据库加载书籍元数据。
 
     Args:
@@ -938,7 +938,7 @@ def _load_book_meta(db_book: Any, book_id: str) -> Dict[str, Any]:
 
 def _rebuild_with_mineru_popo(
     final_doc: Dict[str, Any],
-    runtime_db: Any,
+    runtime_db: object,
 ) -> Dict[str, Any]:
     """使用 MinerU-Popo 重建文档树。
 
@@ -968,7 +968,7 @@ def _rebuild_with_mineru_popo(
 
 def _rebuild_with_fallback_llm(
     final_doc: Dict[str, Any],
-    runtime_db: Any,
+    runtime_db: object,
 ) -> Dict[str, Any]:
     """使用通用 LLM（Qwen2.5-7B）重建文档树。
 
@@ -1024,7 +1024,7 @@ def _concatenate_final_doc_text(final_doc: Dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
-def _load_disputed_lines(db_book: Any, book_id: str) -> List[Dict[str, Any]]:
+def _load_disputed_lines(db_book: object, book_id: str) -> List[Dict[str, Any]]:
     """加载争议行列表。
 
     Args:

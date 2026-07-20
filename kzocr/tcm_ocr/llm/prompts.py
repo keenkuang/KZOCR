@@ -222,7 +222,7 @@ BLOCK_ROLE_INSTRUCTION: Dict[str, str] = {
 # 辅助函数
 # ───────────────────────────────────────────────────────
 
-def _safe_format(template: str, **fields: Any) -> str:
+def _safe_format(template: str, **fields: object) -> str:
     """按字面替换 {field} 占位符。
 
     Prompt 模板内含 JSON 示例（含大量花括号），若用 str.format 会把

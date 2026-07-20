@@ -33,7 +33,7 @@ def _create_mock_db_with_return(return_id: int = 1) -> MagicMock:
     mock_db = MagicMock()
     mock_cursor = MagicMock()
     call_count = [0]
-    def _fetchone():
+    def _fetchone() -> dict[str, int]:
         call_count[0] += 1
         return {"id": return_id}
     mock_cursor.fetchone.side_effect = _fetchone

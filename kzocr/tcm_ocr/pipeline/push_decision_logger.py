@@ -146,7 +146,7 @@ class PushDecisionLogger:
     # 初始化
     # =========================================================================
 
-    def __init__(self, runtime_db) -> None:
+    def __init__(self, runtime_db: object) -> None:
         """
         初始化推送决策日志记录器
 
@@ -1445,7 +1445,7 @@ class PushDecisionLogger:
 
     def _record_chain_event(
         self,
-        cursor,
+        cursor: object,
         decision_id: int,
         event_type: str,
         event_data: Dict[str, Any],

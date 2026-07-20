@@ -224,7 +224,7 @@ async def list_tasks(
     book_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-):
+) -> dict[str, object]:
     """获取校对任务列表"""
     filtered = [t for t in DEMO_TASKS if t["status"] == status]
     
@@ -246,7 +246,7 @@ async def list_tasks(
 
 
 @router.get("/tasks/{task_id}")
-async def get_task_detail(task_id: str):
+async def get_task_detail(task_id: str) -> dict[str, object]:
     """获取单个任务详情（含推送原因详情）"""
     task = next((t for t in DEMO_TASKS if t["task_id"] == task_id), None)
     if not task:
@@ -307,7 +307,7 @@ async def get_task_detail(task_id: str):
 
 
 @router.post("/tasks/{task_id}/submit")
-async def submit_proofread(task_id: str, submit: ProofreadSubmit):
+async def submit_proofread(task_id: str, submit: ProofreadSubmit) -> dict[str, object]:
     """提交校对结果"""
     task = next((t for t in DEMO_TASKS if t["task_id"] == task_id), None)
     if not task:
@@ -366,7 +366,7 @@ def _get_next_pending_task_id(current_id: str) -> Optional[str]:
 
 
 @router.post("/tasks/{task_id}/assign")
-async def assign_task(task_id: str, reviewer_id: str):
+async def assign_task(task_id: str, reviewer_id: str) -> dict[str, object]:
     """分配任务给校对员"""
     task = next((t for t in DEMO_TASKS if t["task_id"] == task_id), None)
     if not task:
@@ -385,7 +385,7 @@ async def list_results(
     book_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-):
+) -> dict[str, object]:
     """获取校对结果列表（用于导入/审核）"""
     results = list(PROOFREAD_RESULTS.values())
     
@@ -405,7 +405,7 @@ async def list_results(
 
 
 @router.post("/results/import")
-async def import_results(results: List[dict]):
+async def import_results(results: List[dict[str, object]]) -> dict[str, object]:
     """
     批量导入校对结果
     支持从外部系统导入已完成的校对数据
@@ -425,13 +425,13 @@ async def import_results(results: List[dict]):
 
 
 @router.get("/stats/reviewers")
-async def get_reviewer_stats():
+async def get_reviewer_stats() -> list[dict[str, object]]:
     """获取校对员统计"""
     return list(REVIEWER_STATS.values())
 
 
 @router.get("/stats/overview")
-async def get_proofread_overview():
+async def get_proofread_overview() -> dict[str, object]:
     """获取校对概况"""
     total_tasks = len(DEMO_TASKS)
     pending = len([t for t in DEMO_TASKS if t["status"] == "pending"])
@@ -458,7 +458,7 @@ async def get_proofread_overview():
 
 
 @router.get("/reason-dict")
-async def get_reason_dictionary():
+async def get_reason_dictionary() -> list[dict[str, object]]:
     """获取推送原因字典"""
     return [
         {"code": "NEGATION_VIOLATION", "name": "否定词完整性破坏", "priority": "P0", "color": "#FF3B30"},

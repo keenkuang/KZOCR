@@ -128,7 +128,7 @@ class BookPipeline:
                 self.config["cuda_visible_devices"]
             )
 
-    def _init_postgresql(self, pg_dsn: str) -> Any:
+    def _init_postgresql(self, pg_dsn: str) -> object:
         """初始化 PostgreSQL 连接。
 
         Args:
@@ -286,7 +286,7 @@ class BookPipeline:
 
         return engines
 
-    def _init_term_kb(self, kb_path: str) -> Any:
+    def _init_term_kb(self, kb_path: str) -> object:
         """初始化术语知识库。
 
         新版 TermKB 依赖 PostgreSQL RuntimeDB；本地运行无 PG 时返回空知识库。

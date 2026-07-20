@@ -34,7 +34,7 @@ class CacheManager:
     _instance: Optional['CacheManager'] = None
     _instance_lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs) -> 'CacheManager':
+    def __new__(cls, *args: object, **kwargs: object) -> 'CacheManager':
         """单例模式确保全局只有一个 CacheManager 实例"""
         if cls._instance is None:
             with cls._instance_lock:
@@ -189,7 +189,7 @@ class CacheManager:
 
         return report
 
-    def register_component_cache(self, name: str, cache: Any) -> None:
+    def register_component_cache(self, name: str, cache: object) -> None:
         """
         注册组件缓存，纳入统一管理
 

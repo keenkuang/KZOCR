@@ -14,7 +14,6 @@ import base64
 import io
 import logging
 import os
-from typing import Any
 
 import numpy as np
 import requests
@@ -215,8 +214,8 @@ def _extract_reasoning_output(reasoning: str) -> str:
         text = body
     return text.strip()
 
-    def __enter__(self) -> "SenseNovaAdapter":
+    def __enter__(self: object) -> "SenseNovaAdapter":
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self: object, *exc: object) -> None:
         self.close()

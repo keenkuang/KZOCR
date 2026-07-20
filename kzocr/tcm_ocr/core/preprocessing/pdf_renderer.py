@@ -60,7 +60,7 @@ class PDFRenderer:
         pdf_path: str,
         dpi: int = 300,
         cache_size: int = 50,
-    ):
+    ) -> None:
         """初始化 PDF 渲染器。
 
         Parameters
@@ -251,15 +251,15 @@ class PDFRenderer:
             self._doc.close()
             self._doc = None  # type: ignore[assignment]
 
-    def __enter__(self):
+    def __enter__(self) -> "PDFRenderer":
         """上下文管理器入口。"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object) -> None:
         """上下文管理器出口，确保资源释放。"""
         self.close()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """析构函数，尝试释放资源。"""
         try:
             self.close()

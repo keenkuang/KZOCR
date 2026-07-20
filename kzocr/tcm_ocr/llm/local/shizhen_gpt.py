@@ -130,7 +130,7 @@ class ShizhenGPTClient:
             logger.error("[ShizhenGPT] 模型加载失败: %s", traceback.format_exc())
             raise RuntimeError(f"ShizhenGPT 模型加载失败: {exc}") from exc
 
-    def _build_quantization_config(self) -> Optional[Any]:
+    def _build_quantization_config(self) -> Optional[object]:
         """根据 quantization 参数构建量化配置。
 
         Returns:
@@ -401,6 +401,6 @@ class ShizhenGPTClient:
         """上下文管理器入口。"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object) -> None:
         """上下文管理器出口，自动关闭。"""
         self.close()

@@ -592,9 +592,9 @@ class FourStagePipeline:
 
     def __init__(
         self,
-        local_llm: Any,
-        cloud_llm: Any,
-        glyph_verifier: Any,
+        local_llm: object,
+        cloud_llm: object,
+        glyph_verifier: object,
         config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化四级决策流水线。

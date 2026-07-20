@@ -11,7 +11,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import Any, AsyncIterator, Callable, Coroutine
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,7 +45,7 @@ _AUDIT_LOG_MAX_SIZE = 1000
 class UnifiedJSONResponse(JSONResponse):
     """统一JSON响应格式：{data, meta, error}"""
 
-    def render(self, content: Any) -> bytes:
+    def render(self, content: object) -> bytes:
         if isinstance(content, dict) and ("error" in content or "detail" in content):
             # 错误响应已包装，直接返回
             return super().render(content)
@@ -173,7 +173,7 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
 # =============================================================================
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期管理"""
     logger.info("=" * 60)
     logger.info("TCM-Modern-OCR Dashboard V%s starting up...", API_VERSION)
@@ -261,7 +261,7 @@ else:
 # =============================================================================
 
 @app.get("/")
-async def root():
+async def root() -> Response | dict[str, object]:
     """根路由 - 返回 Dashboard 首页"""
     dashboard_html = FRONTEND_DIR / "dashboard.html"
     if dashboard_html.exists():
@@ -273,7 +273,7 @@ async def root():
 
 
 @app.get("/dashboard")
-async def dashboard():
+async def dashboard() -> Response | dict[str, object]:
     """Dashboard 页面路由"""
     dashboard_html = FRONTEND_DIR / "dashboard.html"
     if dashboard_html.exists():
@@ -285,7 +285,7 @@ async def dashboard():
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, object]:
     """健康检查端点"""
     return {
         "data": {
@@ -304,7 +304,7 @@ async def health_check():
 
 
 @app.get("/health/audit-log")
-async def get_audit_log(limit: int = 100):
+async def get_audit_log(limit: int = 100) -> dict[str, object]:
     """查看审计日志（调试用）"""
     return {
         "data": {

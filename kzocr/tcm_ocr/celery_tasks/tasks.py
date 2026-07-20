@@ -134,7 +134,7 @@ app.config_from_object(celery_config)
 
 
 @worker_process_init.connect
-def _log_celery_version(sender=None, **kwargs) -> None:
+def _log_celery_version(sender: object = None, **kwargs: dict[str, Any]) -> None:
     logger.info(
         "Celery worker 启动 | celery=%s app=%s broker=%s",
         CELERY_VERSION,
@@ -164,21 +164,41 @@ class TCMOCRBaseTask(Task):
     max_retries = 2
     default_retry_delay = 60
 
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
+    def on_failure(
+        self,
+        exc: BaseException,
+        task_id: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        einfo: object,
+    ) -> None:
         """任务失败时的回调。"""
         logger.error(
             "任务 %s (id=%s) 失败: %s | args=%s kwargs=%s",
             self.name, task_id, exc, args, kwargs,
         )
 
-    def on_success(self, retval, task_id, args, kwargs):
+    def on_success(
+        self,
+        retval: object,
+        task_id: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> None:
         """任务成功时的回调。"""
         logger.info(
             "任务 %s (id=%s) 成功完成",
             self.name, task_id,
         )
 
-    def on_retry(self, exc, task_id, args, kwargs, einfo):
+    def on_retry(
+        self,
+        exc: BaseException,
+        task_id: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        einfo: object,
+    ) -> None:
         """任务重试时的回调。"""
         logger.warning(
             "任务 %s (id=%s) 重试中 (第 %d 次): %s",

@@ -408,7 +408,7 @@ class DatabaseManager:
     def __enter__(self) -> 'DatabaseManager':
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object) -> None:
         self.close_all()
 
     # =====================================================================

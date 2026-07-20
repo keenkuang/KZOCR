@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 # =============================================================================
@@ -196,7 +196,7 @@ class ResolveRequest(BaseModel):
 
     @field_validator("final_text")
     @classmethod
-    def validate_final_text_for_modify(cls, v: Optional[str], info) -> Optional[str]:
+    def validate_final_text_for_modify(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
         """当action为modify时，final_text不能为空"""
         values = info.data
         if values.get("action") == ResolveAction.MODIFY and (v is None or v.strip() == ""):

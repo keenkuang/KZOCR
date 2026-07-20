@@ -14,7 +14,7 @@ import logging
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 import numpy as np
 import requests
@@ -224,5 +224,5 @@ class PaddleOCRVl16Adapter:
     def __enter__(self) -> 'PaddleOCRVl16Adapter':
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: None) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: None) -> None:
         self.close()

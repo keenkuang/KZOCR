@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict, Generator, List, Optional
+from typing import Dict, Generator, List, Optional
 
 import pytest
 
@@ -51,7 +51,7 @@ class MockCursor:
     def __enter__(self) -> "MockCursor":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         pass
 
 
@@ -66,7 +66,7 @@ class MockRuntimeDB:
         self._decision_id_counter = 0
         self._events: List[dict] = []
 
-    def get_cursor(self):
+    def get_cursor(self) -> MockCursor:
         """Return cursor context manager."""
         return self._cursor
 

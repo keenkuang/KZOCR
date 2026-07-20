@@ -247,7 +247,7 @@ class FormulaExtractor:
         _term_kb: TermKB 实例
     """
 
-    def __init__(self, db_book: BookDB, term_kb: Any) -> None:
+    def __init__(self, db_book: BookDB, term_kb: object) -> None:
         """
         初始化 FormulaExtractor
 
@@ -496,7 +496,7 @@ class FormulaExtractor:
         self,
         formula_id: int,
         ingredients: List[dict],
-        term_kb: Any,
+        term_kb: object,
     ) -> Tuple[List[dict], List[dict]]:
         """
         验证方剂组成

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Dict, List
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,7 +27,7 @@ from kzocr.tcm_ocr.knowledge.term.importer import TermImporter
 # Helper: Create importer with fully mocked DB
 # ============================================================================
 
-def _create_importer(mock_db: Any, dict_dir: str = "/tmp") -> TermImporter:
+def _create_importer(mock_db: object, dict_dir: str = "/tmp") -> TermImporter:
     """Create a TermImporter with mocked _get_or_create_sublib to avoid DB calls."""
     importer = TermImporter.__new__(TermImporter)
     importer._runtime_db = mock_db
@@ -60,7 +60,7 @@ class TestParseHerbLine:
     """Test suite for TermImporter.parse_herb_line method."""
 
     @pytest.fixture(autouse=True)
-    def setup(self, mock_runtime_db: Any) -> None:
+    def setup(self, mock_runtime_db: object) -> None:
         """Set up importer instance."""
         self.importer = _create_importer(mock_runtime_db)
 
@@ -146,7 +146,7 @@ class TestClassifyHerbAlias:
     """Test suite for TermImporter.classify_herb_alias method."""
 
     @pytest.fixture(autouse=True)
-    def setup(self, mock_runtime_db: Any) -> None:
+    def setup(self, mock_runtime_db: object) -> None:
         """Set up importer instance."""
         self.importer = _create_importer(mock_runtime_db)
 
@@ -231,7 +231,7 @@ class TestIsFormulaName:
     """Test suite for TermImporter.is_formula_name method."""
 
     @pytest.fixture(autouse=True)
-    def setup(self, mock_runtime_db: Any) -> None:
+    def setup(self, mock_runtime_db: object) -> None:
         """Set up importer instance."""
         self.importer = _create_importer(mock_runtime_db)
 
@@ -306,7 +306,7 @@ class TestAutoAssignSafety:
     """Test suite for TermImporter.auto_assign_safety method."""
 
     @pytest.fixture(autouse=True)
-    def setup(self, mock_runtime_db: Any) -> None:
+    def setup(self, mock_runtime_db: object) -> None:
         """Set up importer instance."""
         self.importer = _create_importer(mock_runtime_db)
 
@@ -380,7 +380,7 @@ class TestGenerateMeridianVariants:
     """Test suite for TermImporter.generate_meridian_variants method."""
 
     @pytest.fixture(autouse=True)
-    def setup(self, mock_runtime_db: Any) -> None:
+    def setup(self, mock_runtime_db: object) -> None:
         """Set up importer instance."""
         self.importer = _create_importer(mock_runtime_db)
 
@@ -464,7 +464,7 @@ class TestGenerateMeridianVariants:
 class TestImportHerbDict:
     """Test suite for TermImporter.import_herb_dict method."""
 
-    def test_import_herb_dict_file_not_found(self, mock_runtime_db: Any) -> None:
+    def test_import_herb_dict_file_not_found(self, mock_runtime_db: object) -> None:
         """Test import when dictionary file does not exist."""
         importer = _create_importer(mock_runtime_db, dict_dir="/nonexistent/path/")
 
@@ -479,7 +479,7 @@ class TestImportHerbDict:
         assert result["primaries"] == []
 
     def test_import_herb_dict_with_file(
-        self, mock_runtime_db: Any, sample_herb_lines: List[str]
+        self, mock_runtime_db: object, sample_herb_lines: List[str]
     ) -> None:
         """Test importing herb dictionary from a real file."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -507,7 +507,7 @@ class TestImportHerbDict:
             assert "大黄" in result["primaries"]
 
     def test_import_herb_dict_skips_comments_and_empty(
-        self, mock_runtime_db: Any
+        self, mock_runtime_db: object
     ) -> None:
         """Test that comment lines and empty lines are skipped."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -543,7 +543,7 @@ class TestMemorySize:
     """Test suite for memory size estimation of normalized maps."""
 
     @pytest.fixture(autouse=True)
-    def setup(self, mock_runtime_db: Any) -> None:
+    def setup(self, mock_runtime_db: object) -> None:
         """Set up importer instance."""
         self.importer = _create_importer(mock_runtime_db)
 
@@ -605,7 +605,7 @@ class TestMemorySize:
 class TestInsertTermValidation:
     """Test suite for _insert_term input validation."""
 
-    def test_insert_term_validates_reason_codes(self, mock_runtime_db: Any) -> None:
+    def test_insert_term_validates_reason_codes(self, mock_runtime_db: object) -> None:
         """Test that _insert_term validates reason codes."""
         from kzocr.tcm_ocr.pipeline.push_decision_logger import PushDecisionLogger
 
@@ -623,7 +623,7 @@ class TestInsertTermValidation:
                 priority="P1",
             )
 
-    def test_insert_term_validates_priority(self, mock_runtime_db: Any) -> None:
+    def test_insert_term_validates_priority(self, mock_runtime_db: object) -> None:
         """Test that _insert_term validates priority."""
         from kzocr.tcm_ocr.pipeline.push_decision_logger import PushDecisionLogger
 
@@ -649,26 +649,26 @@ class TestInsertTermValidation:
 class TestSublibConfig:
     """Test suite for SUBLIB_CONFIG constants."""
 
-    def test_sublib_config_has_11_entries(self, mock_runtime_db: Any) -> None:
+    def test_sublib_config_has_11_entries(self, mock_runtime_db: object) -> None:
         """Test that SUBLIB_CONFIG has exactly 11 entries."""
         importer = _create_importer(mock_runtime_db)
         assert len(importer.SUBLIB_CONFIG) == 11
 
-    def test_sublib_config_required_keys(self, mock_runtime_db: Any) -> None:
+    def test_sublib_config_required_keys(self, mock_runtime_db: object) -> None:
         """Test that each sublib config has required keys."""
         importer = _create_importer(mock_runtime_db)
         for sublib_id, config in importer.SUBLIB_CONFIG.items():
             assert "file" in config, f"{sublib_id} missing 'file'"
             assert "base_category" in config, f"{sublib_id} missing 'base_category'"
 
-    def test_toxic_herbs_critical_not_empty(self, mock_runtime_db: Any) -> None:
+    def test_toxic_herbs_critical_not_empty(self, mock_runtime_db: object) -> None:
         """Test that toxic herbs critical set is populated."""
         importer = _create_importer(mock_runtime_db)
         assert len(importer.TOXIC_HERBS_CRITICAL) > 0
         assert "附子" in importer.TOXIC_HERBS_CRITICAL
         assert "砒霜" in importer.TOXIC_HERBS_CRITICAL
 
-    def test_processing_prefixes_order(self, mock_runtime_db: Any) -> None:
+    def test_processing_prefixes_order(self, mock_runtime_db: object) -> None:
         """Test that processing prefixes are ordered by length descending."""
         importer = _create_importer(mock_runtime_db)
         lengths = [len(p) for p in importer.PROCESSING_PREFIXES]
@@ -684,12 +684,12 @@ class TestSublibConfig:
         assert "炒" in importer.PROCESSING_PREFIXES
         assert "炙" in importer.PROCESSING_PREFIXES
 
-    def test_formula_suffixes_count(self, mock_runtime_db: Any) -> None:
+    def test_formula_suffixes_count(self, mock_runtime_db: object) -> None:
         """Test that formula suffixes has exactly 17 entries."""
         importer = _create_importer(mock_runtime_db)
         assert len(importer.FORMULA_SUFFIXES) == 17
 
-    def test_formula_exceptions_populated(self, mock_runtime_db: Any) -> None:
+    def test_formula_exceptions_populated(self, mock_runtime_db: object) -> None:
         """Test that formula exceptions set is populated."""
         importer = _create_importer(mock_runtime_db)
         assert "方法" in importer.FORMULA_EXCEPTIONS

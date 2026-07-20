@@ -209,7 +209,7 @@ class RuntimeDB:
             raise RuntimeError(f"Failed to initialize database connection pool: {e}") from e
 
     @contextmanager
-    def get_cursor(self, cursor_factory=None) -> Iterator:
+    def get_cursor(self, cursor_factory: object | None = None) -> Iterator:
         """
         获取数据库游标的 context manager
 
@@ -272,7 +272,7 @@ class RuntimeDB:
     def __enter__(self) -> 'RuntimeDB':
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object) -> None:
         self.close()
 
     # =====================================================================
@@ -397,7 +397,7 @@ class RuntimeDB:
                 )
             return [dict(row) for row in cursor.fetchall()]
 
-    def set_book_meta(self, book_registry_id: int, **kwargs) -> int:
+    def set_book_meta(self, book_registry_id: int, **kwargs: object) -> int:
         """
         设置或更新书籍元数据
 
@@ -825,7 +825,7 @@ class RuntimeDB:
             cursor.execute("SELECT id, name, description FROM Sublib ORDER BY name")
             return [dict(row) for row in cursor.fetchall()]
 
-    def create_term(self, **kwargs) -> int:
+    def create_term(self, **kwargs: object) -> int:
         """
         创建术语记录
 
@@ -1427,7 +1427,7 @@ class RuntimeDB:
     # 系统配置管理
     # =====================================================================
 
-    def get_config(self, key: str, default: Any = None) -> Any:
+    def get_config(self, key: str, default: object | None = None) -> object:
         """
         获取系统配置项
 
@@ -1448,7 +1448,7 @@ class RuntimeDB:
                 return result['value']
             return default
 
-    def set_config(self, key: str, value: Any, description: Optional[str] = None) -> bool:
+    def set_config(self, key: str, value: object, description: Optional[str] = None) -> bool:
         """
         设置系统配置项
 
@@ -1665,7 +1665,7 @@ class RuntimeDB:
         formula_uuid: str,
         formula_name: str,
         page_num: int,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         归档方剂组成
@@ -1719,7 +1719,7 @@ class RuntimeDB:
         book_registry_id: int,
         formula_composition_id: int,
         herb_name: str,
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         归档方剂成分
@@ -1773,7 +1773,7 @@ class RuntimeDB:
         correct_herb: str,
         ocr_error_pattern: str,
         error_type: str = 'similar_glyph',
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建中药名 OCR 范式
@@ -1887,7 +1887,7 @@ class RuntimeDB:
         correct_name: str,
         ocr_error_pattern: str,
         entity_type: str = 'acupoint',
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建经络穴位 OCR 范式
@@ -1942,7 +1942,7 @@ class RuntimeDB:
         self,
         pattern_text: str,
         pattern_type: str = 'heading_prefix',
-        **kwargs,
+        **kwargs: object,
     ) -> int:
         """
         创建方剂上下文衔接模式

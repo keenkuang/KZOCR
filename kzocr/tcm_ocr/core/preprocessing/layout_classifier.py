@@ -49,7 +49,7 @@ class LayoutClassifier:
         min_table_line_ratio: float = 0.08,
         min_col_gap_ratio: float = 0.04,
         min_col_count: int = 2,
-    ):
+    ) -> None:
         """初始化版式分类器。
 
         Parameters

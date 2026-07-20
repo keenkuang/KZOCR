@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import sqlite3
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -210,7 +210,7 @@ PHARMACOPOEIA_VERSIONS: Dict[str, str] = {
 }
 
 
-def check_term_conflict(text_a: str, text_b: str, term_kb: Any) -> bool:
+def check_term_conflict(text_a: str, text_b: str, term_kb: object) -> bool:
     """检查两段文本在术语知识库中是否存在冲突。
 
     冲突定义为：文本 A 和文本 B 包含不同的术语释义，
@@ -269,7 +269,7 @@ def _extract_terms_from_text(text: str) -> Set[str]:
     return terms
 
 
-def _get_term_context(term: str, text: str, term_kb: Any) -> Optional[Dict]:
+def _get_term_context(term: str, text: str, term_kb: object) -> Optional[Dict]:
     """获取术语在文本中的上下文信息。
 
     Args:
@@ -671,7 +671,7 @@ def compute_sha256(file_path: str) -> str:
 
 # ---- 段落文本获取 ----------------------------------------------------------
 
-def get_paragraph_text_from_lines(db_book: Any, para_id: str) -> str:
+def get_paragraph_text_from_lines(db_book: object, para_id: str) -> str:
     """从书籍数据库中获取指定段落的所有行文本并拼接。
 
     按行号排序后拼接，行之间不添加额外空格。
@@ -887,7 +887,7 @@ def build_fallback_tree_prompt(normalized: str) -> str:
 # ---- 通用 LLM 后处理备选方案 -----------------------------------------------
 
 def fallback_llm_post_process(
-    mineru_structure: Any,
+    mineru_structure: object,
     proofread_text_map: Dict[str, str],
     mineru_mapping: Dict[str, str],
 ) -> List[Dict]:
@@ -1167,7 +1167,7 @@ def get_image_dpi(image_path: str) -> int:
 
 # ---- 字典/列表工具 ---------------------------------------------------------
 
-def safe_get(d: Dict, key: str, default: Any = None) -> Any:
+def safe_get(d: Dict, key: str, default: object = None) -> object:
     """安全地从字典取值，支持嵌套键（用 '.' 分隔）。
 
     Args:
@@ -1188,7 +1188,7 @@ def safe_get(d: Dict, key: str, default: Any = None) -> Any:
         return default
 
     keys = key.split(".")
-    current: Any = d
+    current: object = d
     for k in keys:
         if isinstance(current, dict) and k in current:
             current = current[k]

@@ -370,7 +370,7 @@ def detect_adhesion_with_context(
     char_details: List[Dict[str, Any]],
     img: np.ndarray,
     text: str,
-    term_kb: Optional[Any] = None
+    term_kb: Optional[object] = None
 ) -> List[Dict[str, Any]]:
     """Enhanced adhesion detection with term KB context.
 

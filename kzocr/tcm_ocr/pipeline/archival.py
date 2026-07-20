@@ -17,7 +17,7 @@ import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from kzocr.tcm_ocr.config.constants import (
     TABLE_BOOK_CONTENT_TREE,
@@ -58,10 +58,10 @@ def _get_sqlite_connection(book_library_dir: Path, book_id: str) -> sqlite3.Conn
 
 
 def _pg_execute(
-    db_pg: Any,
+    db_pg: object,
     sql: str,
     params: tuple = (),
-) -> Any:
+) -> object:
     """在 PostgreSQL 上执行 SQL。
 
     Args:
@@ -91,8 +91,8 @@ def _pg_execute(
 
 def archive_to_postgresql(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """将书籍数据从 SQLite 归档到 PostgreSQL。
 
@@ -158,8 +158,8 @@ def archive_to_postgresql(
 
 def _archive_proofread_records(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """归档 ProofreadRecord → LineCorrectionArchive。
 
@@ -241,8 +241,8 @@ def _archive_proofread_records(
 
 def _archive_engine_results(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """归档 LineEngineResult → OCRLineResultArchive。
 
@@ -311,8 +311,8 @@ def _archive_engine_results(
 
 def _archive_content_tree(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """归档 ContentNode 树 → BookContentTree。
 
@@ -381,8 +381,8 @@ def _archive_content_tree(
 
 def _archive_formula_compositions(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """跨页方剂合并归档到 PostgreSQL。
 
@@ -512,7 +512,7 @@ def _archive_formula_compositions(
 
 def _archive_final_document_ref(
     book_id: str,
-    db_pg: Any,
+    db_pg: object,
 ) -> None:
     """记录 final_document.json 的归档引用。
 

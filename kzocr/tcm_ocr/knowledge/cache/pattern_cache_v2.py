@@ -15,7 +15,7 @@ import logging
 import sys
 import threading
 from collections import OrderedDict
-from typing import Any, Optional, Set
+from typing import Optional, Set
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
 
@@ -824,7 +824,7 @@ class PatternCacheV2:
     # LRU 操作
     # ========================================================================
 
-    def _lru_get(self, key: str) -> Optional[Any]:
+    def _lru_get(self, key: str) -> Optional[object]:
         """
         从 LRU 缓存中获取值。
 
@@ -840,7 +840,7 @@ class PatternCacheV2:
                 return dict(self._lru_cache[key]) if isinstance(self._lru_cache[key], dict) else self._lru_cache[key]
         return None
 
-    def _lru_set(self, key: str, value: Any) -> None:
+    def _lru_set(self, key: str, value: object) -> None:
         """
         设置 LRU 缓存值，超出容量时淘汰最久未使用的条目。
 

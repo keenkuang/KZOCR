@@ -286,7 +286,7 @@ def detect_missing_chars_in_text(
     text: str,
     char_details: List[Dict[str, Any]],
     img: np.ndarray,
-    term_kb: Optional[Any] = None
+    term_kb: Optional[object] = None
 ) -> List[Dict[str, Any]]:
     """High-level missing character detection with term KB integration.
 

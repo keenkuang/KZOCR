@@ -10,7 +10,7 @@
 """
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 def _run_auto_discovery(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """对指定书籍运行全部自动发现流程。
 
@@ -71,8 +71,8 @@ def _run_auto_discovery(
 
 def auto_discover_herb_ocr_patterns(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """自动发现药材 OCR 错误模式。
 
@@ -147,8 +147,8 @@ def auto_discover_herb_ocr_patterns(
 
 def auto_discover_meridian_patterns(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """自动发现经络穴位 OCR 模式。
 
@@ -219,8 +219,8 @@ def auto_discover_meridian_patterns(
 
 def auto_discover_context_patterns(
     book_id: str,
-    db_book: Any,
-    db_pg: Any,
+    db_book: object,
+    db_pg: object,
 ) -> None:
     """自动发现方剂上下文 OCR 模式。
 
@@ -416,7 +416,7 @@ def _merge_similar_patterns(patterns: list) -> list:
 def _write_patterns_to_pg(
     patterns: list,
     table_name: str,
-    db_pg: Any,
+    db_pg: object,
 ) -> None:
     """将发现的模式写入 PostgreSQL。
 

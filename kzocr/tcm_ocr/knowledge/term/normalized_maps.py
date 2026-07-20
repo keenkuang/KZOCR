@@ -123,7 +123,7 @@ class HerbNormalizedMaps:
     }
 
     @classmethod
-    def build_from_db(cls, runtime_db: Any) -> None:
+    def build_from_db(cls, runtime_db: object) -> None:
         """从数据库构建反规范化字典
 
         查询 Term 和 TermRelation 表，构建别名映射。

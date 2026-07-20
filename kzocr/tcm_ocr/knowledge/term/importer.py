@@ -221,7 +221,7 @@ class TermImporter:
         '足三阳经': '足阳明胃经、足太阳膀胱经、足少阳胆经',
     }
 
-    def __init__(self, runtime_db: Any, dict_dir: str = '/mnt/agents/upload/') -> None:
+    def __init__(self, runtime_db: object, dict_dir: str = '/mnt/agents/upload/') -> None:
         """初始化 TermImporter
 
         Args:
