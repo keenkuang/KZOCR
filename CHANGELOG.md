@@ -1,7 +1,19 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20T04:30+08
-> 最后更新：2026-07-20 04:30 CST
+> 文档版本：v2026-07-20T05:40+08
+> 最后更新：2026-07-20 05:40 CST
+
+---
+
+## v2026-07-20 续四 — W1 web 补测续（带数据分支 + 未测路由）
+
+> `test_web_routes.py` 在既有 37 例基础上 **+30 例**（共 67），补全此前仅测「空库降级」的 handler 的「带数据」分支，以及此前完全未测的 `/`、`/health`、`/api/confusion`、`/engines/status/all`（含配置）等路由；全量 **861 passed + 2 skipped + 2 deselected**（较 831 +30）。web/app.py 覆盖 **53%→78%**。零运行时风险，版本号维持 **0.21.0**（v0.22.0 候选）
+
+| 模块 | 说明 |
+|------|------|
+| 带数据分支补全 | 复用 `_populate_book` 助手（写 page/ocr/verify/anomaly/benchmark/cross_divergence/quality 真实数据）驱动：book 详情/异常/解决/方剂/分歧/质检/看板/方剂详情/工作台、monitor/benchmark/monitor-api 看板、search 带查询、REST `/api/books`(列表/详情/页/异常/方剂/分歧/解决)、`/api/engines`、`/registrations`、`/register/{code}` 编辑等 handler 的「有数据」路径 |
+| 此前未测路由 | `test_index_with_data`（首页汇总）、`test_health`（`/health` 健康态）、`test_api_confusion_post`/`test_api_confusion_invalid_json`（`/api/confusion` 自学习混淆对 JSON 端点，路径经 monkeypatch 指向临时目录避免污染仓库 `learned_confusion.json` 与模块级缓存）、`test_engines_status_all_with_config`（`/engines/status/all` 配置非空分支，ftp:// 无效 URL 不联网直达 offline） |
+| 覆盖率未覆盖项 | 仍空缺：真实网络探测分支（`/engines/{name}/status`、`/engines/status/all` 联网探测体、`/api/engines/{name}/test` 端口/进程检查）、`/health` 降级（`db_ok=False`）、`register_submit` 空 code 重定向等，属内存测试难以覆盖部分 |
 
 ---
 
