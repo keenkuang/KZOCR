@@ -1,7 +1,25 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20T06:40+08
-> 最后更新：2026-07-20 06:40 CST
+> 文档版本：v2026-07-20T09:20+08
+> 最后更新：2026-07-20 09:20 CST
+
+---
+
+## v2026-07-20 续七 — W7 终校反馈→混淆集自动回流
+
+> `review_manifest.feedback_apply` 在人工终校修正 (误认字 ocr_char → 正确字 expected) 时自动调 `add_learned_confusion` 回流进 `learned_confusion.json`，形成「分歧→仲裁→终校→回流」闭环；`load_confusion_keys`/`load_confusion_keys_split` 合并学习集（修分侧检测器看不到回流的不一致）。新增 8 例端到端测试（全量 **901 passed + 2 skipped + 2 deselected**，较 893 +8）。零运行时风险，版本号维持 **0.21.0**（v0.22.0 候选）
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/review_manifest.py` | 新增 `_parse_confusion_pair` 解析 anomaly.details `confusion;wrong=X;correct=Y`（verifier.py:228 写入）；`build_review_manifest` 据此填 `ReviewIssue.ocr_char`，供人工终校后回流；`feedback_apply` 对每个 `ocr_char`/`expected` 非空且相异的 issue 调 `add_learned_confusion(source="review_manifest")`（首次即写、去重，不做频率门控） |
+| `kzocr/scheduler/cross_align.py` | 新增 `_merge_split_keys` 公共合并 helper；`load_confusion_keys`/`load_confusion_keys_split` 合并 `learned_confusion.json`（与 `load_confusion_set` 行为对齐）；`add_learned_confusion` 同步 `_KEYS_CACHE`/`_KEYS_SPLIT_CACHE`（学习对归三级通用，已有更高优先级不降级） |
+| `tests/test_review_backflow.py`（新增 8 例） | `_parse_confusion_pair` 解析/非混淆；`build_review_manifest` 从 confusion 异常填 ocr_char、非混淆不填；`feedback_apply` 回流落盘 + `_is_priority` 命中 + 分侧检测器受益；ocr_char==expected / expected 空不回流；回流去重 |
+
+---
+
+## v2026-07-20 续六·补 — W6 xref 渲染健康度回检（已推送 origin/main）
+
+> 新增 `scripts/check_render_health.py`，全量跑 v4 九本（共 **541 页**）：异常 **102 页**、**真丢字风险页 0 页**，所有异常（整本扫描件 / 封面无文本层 / xref 告警但文本完好）对图像 OCR 良性。报告落档 `e2e_expand/render_health/report.md` + `report.json` + 异常截图。**修复**：脚本原 `_crop_to_body` 拉起 PaddleX `PP-DocLayoutV3` 偶发 SIGTERM 崩溃（首轮回检只跑 3 本且未出报告），改纯投影降级 `_crop_to_body_fallback`。提交 `3b9423e`（与 W5 `419d908` 一并推送 `2ffad9c..3b9423e`）。
 
 ---
 

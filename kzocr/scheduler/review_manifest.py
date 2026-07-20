@@ -6,9 +6,25 @@ P0/P1/P2），审核结果可经 ``feedback_apply`` 回写到底层 BookDB。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
+from kzocr.scheduler.cross_align import add_learned_confusion
 from kzocr.storage.db import BookDB
+
+
+def _parse_confusion_pair(details: str) -> Tuple[str, str]:
+    """从 anomaly.details 提取 ``confusion;wrong=X;correct=Y`` 的 (wrong, correct)。
+
+    ``verifier.ConfusionSetDetector`` 命中静态/学习混淆集时写入该格式（verifier.py:228），
+    是人工终校回流所需 (误认字→正确字) 对的来源。无混淆信息时两路均返空串。
+    """
+    wrong = correct = ""
+    for tok in (details or "").split(";"):
+        if tok.startswith("wrong="):
+            wrong = tok[len("wrong="):]
+        elif tok.startswith("correct="):
+            correct = tok[len("correct="):]
+    return wrong, correct
 
 
 @dataclass
@@ -72,6 +88,17 @@ def build_review_manifest(db: BookDB) -> ReviewManifest:
 
         # issues
         issues: list[ReviewIssue] = []
+        # 终校回流数据源：ConfusionSetDetector 命中混淆集时 details 写入
+        # "confusion;wrong=X;correct=Y"（verifier.py:228）。解析误认字 X 作为
+        # ReviewIssue.ocr_char，供人工终校后随 feedback_apply 回流进学习集。
+        wrong, _suggested = _parse_confusion_pair(details)
+        if wrong:
+            issues.append(ReviewIssue(
+                position=0,
+                ocr_char=wrong,
+                issue_type="glyph",
+                severity="info",
+            ))
         # 如果 details 包含 conf_low 标记，则添加一个 info 级别 issue
         if "conf_low" in details.lower():
             issues.append(ReviewIssue(
@@ -109,25 +136,22 @@ def feedback_apply(manifest: ReviewManifest, db: BookDB) -> int:
     """
     count = 0
     for page in manifest.pages:
-        has_fix = any(
-            iss.expected is not None and iss.expected != ""
-            for iss in page.issues
-        )
-        if has_fix:
-            for iss in page.issues:
-                if iss.expected and iss.expected != "":
-                    # 按位置信息写入到 page 中
-                    # 简化：按 page_num 逐行写入修正文本
-                    pass
-            # 标记 page 的 human_final（简化：修正文本写入第一行）
-            if page.issues:
-                first = page.issues[0]
-                if first.expected:
-                    db.save_line_human_final(
-                        page_num=page.page_num,
-                        para_seq=1,
-                        line_seq=1,
-                        human_final=first.expected,
-                    )
-                    count += 1
+        # 终校回流：人工修正 (误认字 ocr_char → 正确字 expected) 自动 enrich 自学习
+        # 混淆集（learned_confusion.json）。仅当 ocr_char 与 expected 均非空且不同
+        # （确为修正）才回流，避免误标/空值污染。阈值=首次即写（去重由
+        # add_learned_confusion 保证），不做频率门控。
+        for iss in page.issues:
+            if iss.ocr_char and iss.expected and iss.ocr_char != iss.expected:
+                add_learned_confusion(iss.ocr_char, iss.expected, source="review_manifest")
+        # 回写人工终校文本到底层 BookDB（既有逻辑：修正文本写入第一行 human_final）
+        if page.issues:
+            first = page.issues[0]
+            if first.expected:
+                db.save_line_human_final(
+                    page_num=page.page_num,
+                    para_seq=1,
+                    line_seq=1,
+                    human_final=first.expected,
+                )
+                count += 1
     return count
