@@ -21,7 +21,7 @@
 
 ## P0 — 零资源快赢（建议作为下轮开局）
 
-### W1  web/app.py 路由单测续补（覆盖 53% → 70%+）
+### W1  web/app.py 路由单测续补（覆盖 78% → 89%，已达成 ✅）
 - **背景**：B 方向已补 37 例覆盖 prompts/engines/registration/book 空库降级/monitor/benchmark，但仍有大量 handler（导出、khub 推送、pipeline 执行结果展示、search 详情、workspace 编辑提交等）未测。
 - **范围**：用 B 方向已建立的 `dirs` fixture（临时目录隔离 4 环境变量）继续补齐；导出/推送 handler 走 mock client，零网络。
 - **验收**：web/app.py 覆盖率 ≥70%；ruff + 全量仍绿。
@@ -81,9 +81,10 @@
 
 ## P3 — 技术债务（建议暂缓）
 
-### W9  tcm_ocr 全栈 ANN 补全（192 处）
-- 全栈仍 192 处 ANN 缺失（44 ANN001 / 27 ANN201 / 17 ANN003 / 94 ANN401 等）。D 方向已清三核心引擎文件（14 处）。
-- **决策**：tcm_ocr 是冻结平行栈，补全收益低、易引入错误；建议维持排除，仅在触碰具体文件时顺手补，**不专项投入**。
+### W9  tcm_ocr 全栈 ANN 补全（192 处，已清零 ✅）
+- 全栈曾 192 处 ANN 缺失（目录扫描口径）。D 方向已清三核心引擎文件（14 处）。
+- **已清零（2026-07-20 续）**：补全 kzocr/tcm_ocr/ 下 37 文件的 ruff ANN 注解（非求值，零运行时变更），`ruff --select ANN kzocr/tcm_ocr/` 归零，ruff 全绿，全量 925 passed。提交 `bd1f4ba`。
+- **决策更新**：W9 原定"不专项投入"，本轮经用户确认已专项清零；P3 仅剩 W10。
 
 ### W10  tcm_ocr 与主线 BookDB 统一
 - tcm_ocr 仍保留自有 `BookDB`（`kzocr/tcm_ocr/database/sqlite/book_db.py`，被 4 个 knowledge 模块 import）与 `archival.py`；Phase 4 已让其经 `BookPipelineAdapter` 产主线 `BookResult` 并走主线 BookDB。
@@ -93,9 +94,9 @@
 
 ## 推荐下轮启动顺序（2026-07-20 更新）
 
-- **W1–W7 已全部闭环并推送 main**：W4/W5 早实现；W6 `3b9423e`、W7 `90f6581`；W1/W2 零资源补测此前亦已完成（web/app.py 53%→78%、核心模块边界补测）。
-- **本会话追加闭环**：W8 覆盖率门禁（CI 防回归）、W3 tcm_ocr 两处 TODO 收口（注释明确化 + 回归测试）、W1 web 继续补测（register_submit 细分支，含非法 toc 降级）；并修复 `learned_confusion.json` 全局状态污染导致的 2 个脆弱测试（加固 + 清理产物）。
-- **当前状态**：全量 **907 passed + 2 skipped + 2 deselected**，核心覆盖率 88.94%，ruff 全过。
-- **P3（W9/W10）目前不建议投入**（冻结栈 ANN 补全 / 双 BookDB 统一，风险高、收益低）。
+- **W1–W7 已全部闭环并推送 main**：W4/W5 早实现；W6 `3b9423e`、W7 `90f6581`；W1 web 续补测本轮再推进至 89%（+18 测试）。
+- **W8/W3 已闭环**（见上）；W9 tcm_ocr ANN 本轮专项清零（192→0，提交 `bd1f4ba`）。
+- **当前状态**：全量 **925 passed + 2 skipped + 2 deselected**，核心覆盖率 88.94%，web/app.py 89%，ruff 全过。
+- **P3 仅剩 W10 双 BookDB 统一**（重大架构改动，需 plan mode，非紧急）。W9 已清零。
 
 > 注：以上为候选清单，非承诺范围。下轮开始前建议与用户确认本轮回聚焦哪 1–3 项。
