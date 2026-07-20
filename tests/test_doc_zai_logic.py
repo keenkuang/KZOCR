@@ -1,4 +1,4 @@
-"""kzocr/adapter/to_zai_prisma.py 纯逻辑单测（零网络/零引擎，仅文件与路径逻辑）。
+"""kzocr/doc/zai.py + freeze.py 纯逻辑单测（零网络/零引擎，仅文件与路径逻辑）。
 
 覆盖 _uid 格式、_resolve_db 三路优先级、_resolve_bookdb_path 构造、freeze_custom_db 冻结/缺失分支、_restrict_db_perms 权限限制。
 """
@@ -11,13 +11,13 @@ import pytest
 from pathlib import Path
 
 from kzocr import config
-from kzocr.adapter.to_zai_prisma import (
+from kzocr.doc.zai import (
     _resolve_bookdb_path,
     _resolve_db,
     _restrict_db_perms,
     _uid,
-    freeze_custom_db,
 )
+from kzocr.doc.freeze import freeze_custom_db
 
 
 def test_uid_format_and_unique() -> None:

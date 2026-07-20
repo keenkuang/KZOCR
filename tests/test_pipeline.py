@@ -8,8 +8,7 @@ import sqlite3
 import tempfile
 
 from kzocr.engine.mock import mock_book_result
-from kzocr.adapter.to_zai_prisma import push_book_to_zai, export_markdown
-from kzocr.export_zai import export_book_markdown
+from kzocr.doc import push_book_to_zai, export_markdown, export_book_markdown
 
 
 def test_mock_engine_produces_expected_book():

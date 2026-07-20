@@ -1,4 +1,4 @@
-"""kzocr/adapter/to_zai_prisma.py 覆盖补全（纯逻辑，零网络/零引擎）。
+"""kzocr/doc/zai.py + export.py + proofread.py + freeze.py 覆盖补全（纯逻辑，零网络/零引擎）。
 
 针对覆盖报告中未覆盖的分支：
 - push_book_to_zai 的 is_mock 阻断分支
@@ -25,12 +25,8 @@ from kzocr.engine.types import (
     MeridianPattern,
     TermEntry,
 )
-from kzocr.adapter.to_zai_prisma import (
-    export_markdown,
-    freeze_custom_db,
-    import_proofread_package,
-    push_book_to_zai,
-)
+from kzocr.doc import push_book_to_zai, export_markdown, import_proofread_package
+from kzocr.doc.freeze import freeze_custom_db
 
 
 def _book_with_extras(code: str = "TCM-COV-001") -> BookResult:

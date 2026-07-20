@@ -19,7 +19,7 @@ client = TestClient(app)
 # ── JSON 导出测试 ──
 
 def test_export_json():
-    from kzocr.export_zai import export_json
+    from kzocr.doc.export import export_json
     td = tempfile.mkdtemp()
     os.environ["KZOCR_DB_DIR"] = td
     db = BookDB("json-test", db_dir=td)

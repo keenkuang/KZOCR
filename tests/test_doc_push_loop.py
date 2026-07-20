@@ -1,4 +1,4 @@
-"""tcm_ocr BookResult 走通 push/import 闭环（G5，复用既有导出/导入）。
+"""kzocr.doc push/import 闭环（G5，复用既有导出/导入）。
 
 验证：转换器产 BookResult → push_book_to_zai（落 BookDB）→ 改 humanFinal
 → import_proofread_package 写回 BookDB。
@@ -10,7 +10,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from kzocr.adapter.to_zai_prisma import import_proofread_package, push_book_to_zai
+from kzocr.doc import import_proofread_package, push_book_to_zai
 from kzocr.storage.db import BookDB
 from kzocr.tcm_ocr.pipeline.book_result_convert import book_result_from_tcm_ocr
 

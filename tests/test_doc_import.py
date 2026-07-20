@@ -1,4 +1,4 @@
-"""to_zai_prisma 导入回路 + 冻结单测（mock 数据，无引擎/Postgres）。
+"""kzocr.doc 导入回路 + 冻结单测（mock 数据，无引擎/Postgres）。
 
 验证：push_book_to_zai 导出可移植校对包 → 人工改 humanFinal → import_proofread_package
 按层级键写回 BookDB；freeze_custom_db 冻结旧库。
@@ -14,9 +14,7 @@ from kzocr.engine.mock import mock_book_result
 from kzocr.engine.types import (
     BookResult, PageResult, ParagraphResult, LineResult,
 )
-from kzocr.adapter.to_zai_prisma import (
-    push_book_to_zai, import_proofread_package, freeze_custom_db,
-)
+from kzocr.doc import push_book_to_zai, import_proofread_package, freeze_custom_db
 from kzocr.storage.db import BookDB
 
 
