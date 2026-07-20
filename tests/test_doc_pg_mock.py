@@ -7,15 +7,12 @@
 """
 from __future__ import annotations
 
-import os
 import sqlite3
-import tempfile
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 from kzocr.doc import import_proofread_package, push_book_to_zai
 from kzocr.engine.mock import mock_book_result
-from kzocr.storage.db import BookDB
 
 
 def _make_realistic_book(book_code: str):
