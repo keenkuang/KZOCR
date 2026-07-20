@@ -15,13 +15,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from kzocr import __version__
 from kzocr.scheduler.cross_align import add_learned_confusion
 from kzocr.storage.db import BookDB
 
 app = FastAPI(
     title="KZOCR REST API",
     description="中医古籍 OCR 编排系统 API。管理书籍、方剂、校对异常、质检结果。",
-    version="0.19.0",
+    version=__version__,
     contact={"name": "KZOCR Team", "url": "https://github.com/keenkuang/KZOCR"},
 )
 
