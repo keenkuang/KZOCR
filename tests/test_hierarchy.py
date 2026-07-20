@@ -122,3 +122,10 @@ class TestIntegrationWithPagesText:
         loose = check_hierarchy_anomaly(pages, char_count_threshold=3.0)
         assert len(strict) == 1
         assert len(loose) == 0
+
+    def test_insufficient_neighbors_skipped(self):
+        """目标页四周无足够非空邻居 → 跳过该页（line 96 分支）。"""
+        pages = ["", "X" * 50, "", "", ""]
+        # idx=1 的双边窗口内邻居均为空页 → 邻居不足 min_neighbors=2 → 跳过
+        result = check_hierarchy_anomaly(pages, window=1, min_neighbors=2)
+        assert result == []

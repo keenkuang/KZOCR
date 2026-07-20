@@ -110,3 +110,53 @@ class TestApplyDefense:
         bl.feed("z" * 100)
         result = apply_leakage_defense(["单独一页"], bl)
         assert result == ["单独一页"]
+
+
+class TestLeakageEdgeBranches:
+    """覆盖探针/规范化/四层判定中的边界分支（覆盖率查漏）。"""
+
+    def test_is_excluded_true(self):
+        """探针由排除词组成且较短 → 判为排除（line 85）。"""
+        assert LeakageDetector._is_excluded("组成") is True
+
+    def test_is_excluded_false(self):
+        """长文本即使含排除词也不排除。"""
+        assert LeakageDetector._is_excluded("组成方用白术三钱茯苓") is False
+
+    def test_detect_whitespace_only_b(self):
+        """text_b 全空白 → 规范化后为空 → 直接返回 None（line 117-118）。"""
+        assert LeakageDetector.detect("正文内容。", "   ", min_probe=2) is None
+
+    def test_detect_excluded_probe_skipped(self):
+        """page_b 前缀为排除词 → 探针被排除不误报（line 127）。"""
+        a = "第一页正文内容。" * 5
+        b = "组成方后续描述。"  # 前缀「组成」属排除词
+        assert LeakageDetector.detect(
+            a, b, min_probe=2, max_probe=10, step=1, min_overlap_pct=0.1
+        ) is None
+
+    def test_apply_l1_over_threshold_logged(self):
+        """L1：页面超基线阈值 → 触发告警分支（line 179-183），不崩溃。"""
+        bl = CharCountBaseline(window=3)
+        for p in ["x" * 100, "y" * 100, "z" * 100]:
+            bl.feed(p)
+        pages = ["a" * 200, "b" * 100, "c" * 100]  # 200 > threshold 150
+        result = apply_leakage_defense(pages, bl, max_tokens=2048)
+        assert len(result) == 3
+
+    def test_apply_l2_over_maxtokens_logged(self):
+        """L2：页面超 max_tokens*2 → 触发告警分支（line 185-189）。"""
+        bl = CharCountBaseline(window=3)
+        for p in ["x" * 100, "y" * 100, "z" * 100]:
+            bl.feed(p)
+        pages = ["a" * 5000]  # 5000 > 2048*2=4096
+        result = apply_leakage_defense(pages, bl, max_tokens=2048)
+        assert result == pages
+
+    def test_apply_skips_empty_adjacent(self):
+        """L4 相邻空页 → 跳过该对（line 196 分支）。"""
+        bl = CharCountBaseline(window=3)
+        for p in ["x" * 100, "y" * 100, "z" * 100]:
+            bl.feed(p)
+        result = apply_leakage_defense(["a" * 100, "", "c" * 100], bl)
+        assert result[1] == ""

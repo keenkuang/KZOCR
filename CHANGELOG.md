@@ -1,7 +1,20 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20T05:40+08
-> 最后更新：2026-07-20 05:40 CST
+> 文档版本：v2026-07-20T06:40+08
+> 最后更新：2026-07-20 06:40 CST
+
+---
+
+## v2026-07-20 续五 — W2 核心模块纯逻辑补测查漏
+
+> 新增 3 个测试文件共 **+19 例**（全量 **880 passed + 2 skipped + 2 deselected**，较 861 +19）；4 个候选模块覆盖率：errors 100%、leakage 100%、hierarchy 96%→98%、to_zai_prisma 78%→84%（4 模块合计 86%→90%）。零运行时风险，版本号维持 **0.21.0**（v0.22.0 候选）
+
+| 模块 | 说明 |
+|------|------|
+| `tests/test_to_zai_prisma_coverage.py`（新增 11 例） | 覆盖 `push_book_to_zai` 的 is_mock 阻断、三大范式库（herb/meridian/context）+ Term + Formula/FormulaIngredient 插入分支、`export_markdown` 正文/范式/术语/方剂渲染（含 out_path 写文件）、冻结库保护（`overwrite=False` 抛错 / `overwrite=True` 解除重写）、`import_proofread_package` 无 Line 行返回 `book_code=None`、文件缺失 `FileNotFoundError`、BookDB 落库失败记 `[DATA INTEGRITY]` 告警不阻断导出 |
+| `tests/test_leakage.py` 增补（9 例） | `LeakageDetector._is_excluded` 含/不含排除词、`detect` 空白 page_b / 排除词前缀探针跳过的边界、`apply_leakage_defense` 的 L1 超基线阈值 / L2 超 max_tokens*2 / 相邻空页跳过等四层判定边界日志分支 |
+| `tests/test_hierarchy.py` 增补（1 例） | 目标页四周非空邻居不足 → 跳过该页分支 |
+| 未覆盖项（合理范围） | to_zai_prisma 剩余空缺均为环境相关分支：Postgres 元数据注册/归档路径（111-136、491-510，需 psycopg2+PG 连接）、chmod OSError 降级（85-86、215-216、218-221）、重导出 `except` 兜底（270-271）；hierarchy 剩余 1 行为不可达的 `median==0` 防御分支（邻居空页已被跳过，中位数恒为正） |
 
 ---
 
