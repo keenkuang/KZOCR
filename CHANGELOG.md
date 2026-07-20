@@ -5,6 +5,17 @@
 
 ---
 
+## v2026-07-20 续六 — W5 Celery 可观测性结构化日志
+
+> `process_book_task` 结束记结构化汇总日志（页数/分歧数/BookDB 落库成败/耗时），机器可解析字段挂在 `celery_task_metrics`；新增 7 例回归测试。零运行时风险，版本号维持 **0.21.0**（v0.22.0 候选）
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/tcm_ocr/celery_tasks/tasks.py` | `_persist_to_mainline_bookdb` 返回三态 `True/False`（成功/失败，此前恒 `None`）；新增 `_log_task_summary` helper，把 `pages`/`lines`/`divergences`(tcm_ocr `disputed_lines`)/`vl_calls`(本路径恒 0)/`elapsed_seconds`/`bookdb_persisted`(None=未开启) 聚合成带 `extra={"celery_task_metrics": {...}}` 的一条结构化日志；`process_book_task` 成功路径与幂等跳过路径均调用。VL 调用数沿用 0（视觉仲裁由 v0.7 orchestrator 路径承担），未引入 prometheus 依赖（按计划「先确认再实现」保留） |
+| `tests/test_celery_task_summary.py`（新增 7 例） | `_log_task_summary` 字段完整 + 跳过标签 `n/a`；persist 返回 `True`(成功)/`False`(失败)；集成调 `process_book_task.__wrapped__.__func__` 配 fake self，断言汇总 `pages/lines/divergences/elapsed` 与 fake result 一致、`bookdb_persisted=None`(env 关)/`True`(env 开落库成功)/`False`(env 开落库失败且不抛) |
+
+---
+
 ## v2026-07-20 续五 — W2 核心模块纯逻辑补测查漏
 
 > 新增 3 个测试文件共 **+19 例**（全量 **880 passed + 2 skipped + 2 deselected**，较 861 +19）；4 个候选模块覆盖率：errors 100%、leakage 100%、hierarchy 96%→98%、to_zai_prisma 78%→84%（4 模块合计 86%→90%）。零运行时风险，版本号维持 **0.21.0**（v0.22.0 候选）

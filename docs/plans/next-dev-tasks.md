@@ -48,12 +48,13 @@
   - `orchestrate_book` 构造 tracker 并透传三处 VL 调用点；书末打印 VL 预算使用对账日志。
 - **测试**：`tests/test_vl_budget.py`（7 例：不限/per_run 边界/per_day 跨书累计/日期隔离/双维度）+ `tests/test_orchestrator.py` 增 3 例（预耗尽全跳/逐次计数/抽样耗尽）。零资源可测。
 
-### W5  Celery 生产可观测性
+### W5  Celery 生产可观测性 ✅ 已实现
 - **背景**：worker 已打印 celery 版本与 broker（3fb3738）；但处理吞吐、队列深度、BookDB 落库成功率、VL 调用数无聚合视图。
-- **范围（可选，按需求裁剪）**：
-  - `process_book_task` 结束记结构化日志（页数/分歧数/VL 调用数/BookDB 落库成功与否/耗时）。
-  - 可选：暴露 Prometheus 指标（task 计数、耗时直方图）。**先确认是否真需要再实现**，避免引入 prometheus-client 依赖。
-- **验收**：单测断言日志字段完整；生产接线回归测试覆盖落库失败路径。
+- **实现**：
+  - `_persist_to_mainline_bookdb` 由返回 `None` 改为返回三态 `True/False`（成功/失败），调用点捕获 `persisted` 标志。
+  - 新增 `_log_task_summary` helper：把页数/分歧数（tcm_ocr 的 `disputed_lines`）/VL 调用数（本路径恒 0，VL 仲裁走 v0.7 orchestrator）/BookDB 落库成败/耗时聚合成一条带 `extra={"celery_task_metrics": {...}}` 的结构化日志，生产可 grep / 日志平台聚合。
+  - `process_book_task` 在成功路径与幂等跳过路径调用该 helper；不引入 prometheus 依赖（按计划「先确认再实现」保留）。
+- **测试**：`tests/test_celery_task_summary.py`（7 例：`_log_task_summary` 字段完整 + 跳过标签；persist 返回 True/False；集成调 `process_book_task` 断言汇总与 result 一致、落库开/关、落库失败 `bookdb_persisted=False` 不抛）。全量无回归。
 
 ### W6  xref 损坏渲染回检专项
 - **背景**：v4 扩面发现速查表 p30 等源文件有 MuPDF xref 损坏告警（文本层缺失）。`--body-start` + `render_page` 返回 `healthy=False` 标记已加，但**未做专用回检闭环**。
@@ -91,7 +92,7 @@
 ## 推荐下轮启动顺序
 1. ~~**W4（VL 预算控制）**~~ ✅ 已实现（v0.21 后续）。
 2. **W1（web 补测续）**——延续零资源快赢节奏，低风险提升覆盖。
-3. 视用户优先级再选 W5/W6/W7。
+3. 视用户优先级再选 W6/W7（W4/W5 已实现）。
 4. P3 两项目前不建议投入。
 
 > 注：以上为候选清单，非承诺范围。下轮开始前建议与用户确认本轮回聚焦哪 1–3 项。

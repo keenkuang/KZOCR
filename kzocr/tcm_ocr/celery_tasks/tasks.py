@@ -11,6 +11,8 @@ Celery 任务定义模块。
 所有任务均实现幂等控制。
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -39,7 +41,7 @@ def _persist_to_mainline_bookdb(
     page_results: List[Dict[str, Any]],
     book_id: str,
     db_dir: str,
-) -> None:
+) -> bool:
     """把 tcm_ocr 的 BookPipeline.page_results 转换并持久化到主线 BookDB。
 
     KZOCR_PERSIST_DB=1 时由 process_book_task 调用（与 run_engine 落库开关一致）。
@@ -49,6 +51,10 @@ def _persist_to_mainline_bookdb(
         page_results: BookPipeline.process_book 填充的 self.page_results。
         book_id: 书籍唯一标识（作为 BookDB 主键）。
         db_dir: BookDB 存放目录。
+
+    Returns:
+        True: 落库成功。
+        False: 落库失败（已记录告警，不抛出）。
     """
     try:
         from kzocr.tcm_ocr.pipeline.book_result_convert import book_result_from_tcm_ocr
@@ -61,8 +67,59 @@ def _persist_to_mainline_bookdb(
         )
         BookDB.persist_book_result(book_result, db_dir=db_dir)
         logger.info("[%s] 主线 BookDB 落库完成: %d pages", book_id, len(book_result.pages))
+        return True
     except Exception as exc:
         logger.error("[%s] 主线 BookDB 落库失败: %s", book_id, exc, exc_info=True)
+        return False
+
+
+def _log_task_summary(
+    book_id: str,
+    *,
+    status: str,
+    pages: int,
+    lines: int,
+    divergences: int,
+    vl_calls: int,
+    elapsed: float,
+    bookdb_persisted: Optional[bool],
+) -> None:
+    """记 process_book_task 结束的结构化汇总日志（机器可解析字段）。
+
+    W5 可观测性：把每本书的处理吞吐/分歧/落库成败/耗时聚合成一条带
+    ``celery_task_metrics`` 结构化字段的日志，便于生产环境 grep / 日志平台
+    聚合（无需引入 Prometheus 依赖）。
+
+    VL 调用数（vl_calls）在本 tcm_ocr 路径恒为 0：视觉仲裁由 v0.7 orchestrator
+    路径（GLM-4V-Flash）承担，BookPipeline 不发起 VL 调用；保留字段以统一结构。
+
+    Args:
+        book_id: 书籍唯一标识。
+        status: 任务状态（completed / failed / skipped）。
+        pages: 处理页数。
+        lines: 处理行数。
+        divergences: 争议/分歧行数（tcm_ocr 的 disputed_lines）。
+        vl_calls: VL 调用次数（本路径恒为 0）。
+        elapsed: 耗时（秒）。
+        bookdb_persisted: 主线 BookDB 落库结果；None 表示未开启落库。
+    """
+    metrics = {
+        "book_id": book_id,
+        "status": status,
+        "pages": pages,
+        "lines": lines,
+        "divergences": divergences,
+        "vl_calls": vl_calls,
+        "elapsed_seconds": elapsed,
+        "bookdb_persisted": bookdb_persisted,
+    }
+    persisted_label = "n/a" if bookdb_persisted is None else ("ok" if bookdb_persisted else "fail")
+    logger.info(
+        "[%s] 任务结构化汇总 | status=%s pages=%d lines=%d divergences=%d "
+        "vl_calls=%d elapsed=%.1fs bookdb_persisted=%s",
+        book_id, status, pages, lines, divergences, vl_calls, elapsed, persisted_label,
+        extra={"celery_task_metrics": metrics},
+    )
 
 # =============================================================================
 # Celery 应用实例
@@ -268,6 +325,16 @@ def process_book_task(
     # --- 幂等检查 ---
     if _check_task_idempotency(book_id, "completed", book_library_dir):
         logger.info("[%s] 幂等命中：书籍已处理完成，跳过", book_id)
+        _log_task_summary(
+            book_id,
+            status="skipped",
+            pages=0,
+            lines=0,
+            divergences=0,
+            vl_calls=0,
+            elapsed=0.0,
+            bookdb_persisted=None,
+        )
         return {
             "book_id": book_id,
             "status": "skipped",
@@ -310,8 +377,9 @@ def process_book_task(
         # ── DB 分层闭环：将 tcm_ocr 产出持久化到主线 BookDB ──
         # KZOCR_PERSIST_DB=1 时触发（与 run_engine 落库开关一致），失败不影响
         # 主流程（log 告警），确保生产链路不因落库异常中断。
+        persisted: Optional[bool] = None
         if os.environ.get("KZOCR_PERSIST_DB", "0") in ("1", "true", "True"):
-            _persist_to_mainline_bookdb(
+            persisted = _persist_to_mainline_bookdb(
                 pipeline.page_results,
                 book_id,
                 config.get("db_dir", os.environ.get("KZOCR_DB_DIR", "")),
@@ -322,6 +390,18 @@ def process_book_task(
             "completed_at": datetime.now().isoformat(),
             "output_dir": result.get("outputs", {}).get("output_dir", ""),
         })
+
+        # ── W5 可观测性：结构化汇总日志 ──
+        _log_task_summary(
+            book_id,
+            status=str(result.get("status", "completed")),
+            pages=int(result.get("pages_processed", 0) or 0),
+            lines=int(result.get("lines_processed", 0) or 0),
+            divergences=int(result.get("disputed_lines", 0) or 0),
+            vl_calls=0,
+            elapsed=float(result.get("elapsed_seconds", 0) or 0),
+            bookdb_persisted=persisted,
+        )
 
         logger.info("[%s] 任务完成: %s", book_id, result.get("status"))
         return result
