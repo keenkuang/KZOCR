@@ -334,11 +334,17 @@ class PagePipeline:
             return 0.5
 
     def _is_toc_page(self, page_img: np.ndarray, page_num: int) -> bool:
-        """判断是否为目录页。"""
+        """判断是否为目录页。
+
+        说明：本步骤（版式分类）位于管线步骤 1，早于 OCR（步骤 6），此刻
+        尚无 OCR 文本可用，因此「结合 OCR 文本中的目录关键词」的精确判定
+        无法直接在此接入。当前保守返回 False（不误判正文为目录），目录页的
+        关键词增强应在 OCR 之后（或接入 MinerU layout 文本）再判定，留作
+        后续增强项。
+        """
         # 前 10 页内且文本特征符合目录
         if page_num > 10:
             return False
-        # TODO: 结合 OCR 文本中的目录关键词
         return False
 
     # =========================================================================

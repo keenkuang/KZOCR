@@ -140,7 +140,10 @@ def _classify_para_unit(unit: List[Dict[str, Any]]) -> str:
     Returns: BLOCK_ROLE_FORMULA | BLOCK_ROLE_HEADING | BLOCK_ROLE_TEXT
 
     heading 启发式：短 + 无方剂标记 + 不像药材续行（避免短两药片段误判标题）。
-    TODO: 更准确应接 layout bbox（居中/字号大于正文）。
+    说明：更精确的居中/字号判定需 layout bbox 数据流入本层；当前 unit 仅含
+    共识文本（consensus_text），无版面坐标，故采用纯文本启发式。该启发式在
+    多数古籍排版下已足够稳健，bbox 增强作为后续数据接入项（需把 MinerU layout
+    块坐标带入段落单元），非阻塞。
     """
     consensus = _unit_consensus(unit)
     if not consensus:
@@ -195,12 +198,22 @@ def _is_formula_continuation(
 
 
 def _extract_formula_name(unit: List[Dict[str, Any]]) -> Optional[str]:
-    """从段落单元中粗略提取方剂名（占位）。
+    """从段落单元中提取方剂名。
 
-    TODO: 复用在前的 heading 块文本，或接入 extractor.extract_formula_name
-    的引用链回溯，得到准确的方剂名。
+    优先用 utils.common.extract_formula_name（匹配以汤/散/丸/丹/膏/酒/饮/
+    剂/方结尾的 2-8 字词），回退到「组成/方药/处方/方剂」标记前的文本。
+    方剂名回填（前序 heading 文本）由 group_into_formula_blocks 负责。
     """
     consensus = _unit_consensus(unit)
+    try:
+        from kzocr.tcm_ocr.utils.common import extract_formula_name as _efn
+    except ImportError:
+        _efn = None
+    if _efn is not None:
+        name = _efn(consensus)
+        if name:
+            return name
+    # 回退：取首个方剂标记（组成/方药/处方/方剂）之前的最后一行
     for marker in ("组成", "方药", "处方", "方剂"):
         idx = consensus.find(marker)
         if idx > 0:
@@ -222,6 +235,20 @@ def _new_formula_block(
         "referenced_id": referenced_id,
         "block_id": block_id,
     }
+
+
+def _backfill_formula_name(
+    block: Dict[str, Any], heading_text: Optional[str]
+) -> None:
+    """若 formula 块自身未提取到方剂名，用前序 heading 共识文本回填。
+
+    古籍排版中方剂名常作为独立标题行（heading 块）出现在其所属方剂块
+    之前，回填可补全 formula_name。heading 文本为空或块已有名时跳过。
+    """
+    if block.get("formula_name"):
+        return
+    if heading_text:
+        block["formula_name"] = heading_text
 
 
 def group_into_formula_blocks(
@@ -253,6 +280,7 @@ def group_into_formula_blocks(
     """
     blocks: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
+    prev_heading_text: Optional[str] = None
 
     for unit in groups:
         role = _classify_para_unit(unit)
@@ -271,6 +299,7 @@ def group_into_formula_blocks(
             current = _new_formula_block(
                 unit, blk_id, referenced_id=current["block_id"]
             )
+            _backfill_formula_name(current, prev_heading_text)
             blocks.append(current)
             continue
 
@@ -278,6 +307,7 @@ def group_into_formula_blocks(
         blk_id = f"blk_{len(blocks)}"
         if role == BLOCK_ROLE_FORMULA:
             current = _new_formula_block(unit, blk_id)
+            _backfill_formula_name(current, prev_heading_text)
         elif role == BLOCK_ROLE_HEADING:
             current = {
                 "role": BLOCK_ROLE_HEADING,
@@ -286,6 +316,7 @@ def group_into_formula_blocks(
                 "referenced_id": None,
                 "block_id": blk_id,
             }
+            prev_heading_text = _unit_consensus(unit)
         else:  # BLOCK_ROLE_TEXT
             current = {
                 "role": BLOCK_ROLE_TEXT,
