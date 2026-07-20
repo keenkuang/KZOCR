@@ -23,6 +23,7 @@ from kzocr.engine.types import (
 )
 from kzocr.scheduler import orchestrator as _orc
 from kzocr.scheduler.orchestrator import orchestrate_book
+from kzocr.scheduler.vl_budget import VLBudgetConfig, VLBudgetTracker
 from kzocr.scheduler.registry import EngineRegistry
 from kzocr.scheduler.scheduler import EngineOverrides
 from kzocr.scheduler import verifier as _verifier
@@ -137,7 +138,7 @@ class StubDB:
         self.wrote = True
 
     def record_anomaly(self, page_num, verdict, detector_chain=None):
-        self.anomalies.append((page_num, verdict))
+        self.anomalies.append((page_num, verdict, detector_chain))
 
 
 # ── 辅助工厂 ──
@@ -533,7 +534,79 @@ def test_arbitrate_helper_non_conservative_keeps_accept():
     assert len(out["unresolved"]) == len(high) - 1
 
 
-# ── 12.7 _is_conservative 阈值与最小样本 ──
+# ── 12.7 W4 VL 预算守卫：超预算停止 VL 调用、分歧留人工队列 ──
+def test_arbitrate_helper_vl_budget_per_run_exhausted():
+    """预算已耗尽（调用前 per_run 达上限）时，整页 high 分歧全部跳过 VL，
+    不调 arbitrate_divergence、全部进 unresolved，记一条 VLBudget 观测异常。"""
+    high = _high_divergences()
+    va = StubVisionAdapter(["accepted_a", "manual"])
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    budget = VLBudgetTracker(VLBudgetConfig(per_run=1))
+    budget.spend()  # 调用前即耗尽预算
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, vl_budget=budget)
+    assert va.arbitrated == []  # 未发起任何 VL 调用
+    assert len(out["resolved"]) == 0
+    assert len(out["unresolved"]) == len(high)
+    # 记了一条 VLBudget 观测异常
+    vl_anoms = [a for a in db.anomalies if "VLBudget" in (a[2] or [])]
+    assert len(vl_anoms) == 1
+    assert "vl_budget_exhausted" in vl_anoms[0][1].details
+
+
+def test_arbitrate_helper_vl_budget_partial_per_run():
+    """预算未耗尽前逐次仲裁；耗尽后剩余分歧跳过（per_run 逐次计数）。"""
+    high = _high_divergences()
+    va = StubVisionAdapter(["accepted_a", "manual"])
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    budget = VLBudgetTracker(VLBudgetConfig(per_run=1))
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, vl_budget=budget)
+    # 首个分歧送 VL 并被接受（resolved）；第二个因预算耗尽跳过 → unresolved
+    assert va.arbitrated == high[:1]
+    assert budget.run_used == 1
+    assert len(out["resolved"]) == 1
+    assert len(out["unresolved"]) == len(high) - 1
+
+
+def test_arbitrate_helper_vl_budget_unlimited_no_change():
+    """预算不限（默认 None / per_run=0）时行为与不传预算完全一致。"""
+    high = _high_divergences()
+    va = StubVisionAdapter(["accepted_a", "manual"])
+    db = StubDB()
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    budget = VLBudgetTracker(VLBudgetConfig(per_run=0))
+    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, vl_budget=budget)
+    assert len(out["resolved"]) == 1
+    assert len(out["unresolved"]) == len(high) - 1
+    assert va.arbitrated == high  # 全部送 VL
+    assert db.anomalies == []  # 无 VLBudget 异常
+
+
+# ── 12.8 _sample_consensus_error 预算耗尽跳过 VL ──
+def test_sample_consensus_error_vl_budget_exhausted():
+    """预算耗尽时共识抽样跳过 VL 复核，记 VLBudget 异常，不调 recheck。"""
+
+    class SpyVision:
+        api_key = "k"
+
+        def recheck(self, **kwargs):
+            raise AssertionError("recheck 不应被调用（预算已耗尽）")
+
+    db = StubDB()
+    budget = VLBudgetTracker(VLBudgetConfig(per_run=0, per_day=1))
+    budget.spend()  # 预先耗尽当日预算
+    _orc._sample_consensus_error(
+        0, "黄芪三钱", np.zeros((8, 8, 3), dtype=np.uint8),
+        SpyVision(), db, 1.0, None, vl_budget=budget,
+    )
+    vl_anoms = [a for a in db.anomalies if "VLBudget" in (a[2] or [])]
+    assert len(vl_anoms) == 1
+    assert "vl_budget_exhausted" in vl_anoms[0][1].details
+
+
+# ── 12.9 _is_conservative 阈值与最小样本 ──
+
 def test_is_conservative_threshold_and_min():
     # 样本不足 MIN_PAGES：不进入保守（避免早期 high 占比翻跳）
     assert _orc._is_conservative({"div": 5, "high": 5}) is False

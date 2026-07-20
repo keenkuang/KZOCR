@@ -46,6 +46,7 @@ from kzocr.scheduler.cross_align import (
 from kzocr.storage.db import BookDB
 from kzocr.scheduler.concurrency import run_engines_concurrent, AdaptiveController
 from kzocr.engines.ratelimit import MultiTokenRateLimiter
+from kzocr.scheduler.vl_budget import VLBudgetConfig, VLBudgetTracker
 import numpy as np
 
 # ── conf≤gate 置信度门控阈值 ──
@@ -155,6 +156,7 @@ def _run_success_cross_check(
     engine_a: str = "tier1",
     char_boxes: Optional[list[list[list[int]]]] = None,
     tally: Optional[dict] = None,
+    vl_budget: Optional[VLBudgetTracker] = None,
 ) -> bool:
     """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
 
@@ -202,7 +204,7 @@ def _run_success_cross_check(
                 page_num, high,
                 page_input.img if page_input.img is not None else None,
                 vision_adapter, bucket, db, confusion_set,
-                conservative=conservative,
+                conservative=conservative, vl_budget=vl_budget,
             )
             # 仅 VL 无法裁决（manual）或视觉不可用时的 high 分歧进人工复核队列；
             # VL 已给出明确裁决（accepted_a/b、both_wrong）的不重复进队。
@@ -262,6 +264,7 @@ def _arbitrate_high_divergences(
     db: BookDB,
     confusion_set: dict,
     conservative: bool = False,
+    vl_budget: Optional[VLBudgetTracker] = None,
 ) -> dict:
     """对 high 优先级跨引擎分歧执行视觉仲裁（Box-Guided VL，退化模式）。
 
@@ -271,6 +274,9 @@ def _arbitrate_high_divergences(
     - resolved：VL 给出明确裁决（accepted_a / accepted_b / both_wrong），无需再进人工队列；
     - unresolved：VL 无法裁决（manual）或视觉不可用，需进人工复核。
 
+    ``vl_budget`` 非 None 且预算耗尽时，停止 VL 调用、本页 high 分歧全部以
+    unresolved 返回，并记一条 ``VLBudget`` 观测异常（与保守模式同语义降级）。
+
     纯增强：视觉不可用 / 单点异常均不影响主流程，绝不阻断编排。
     """
     if vision_adapter is None or page_img is None:
@@ -278,11 +284,29 @@ def _arbitrate_high_divergences(
         return {"resolved": [], "unresolved": high}
     resolved: list = []
     unresolved: list = []
+    budget_logged = False
     for d in high:
+        # W4 预算守卫：逐次检查，超预算则停止 VL 调用、本分歧留人工队列。
+        # 每页记一条 VLBudget 观测异常（避免每处分歧重复记）。
+        if vl_budget is not None and not vl_budget.can_spend():
+            if not budget_logged:
+                db.record_anomaly(
+                    page_num,
+                    GlyphVerdict(
+                        status="UNKNOWN", confidence=0.0,
+                        details=f"vl_budget_exhausted;{vl_budget.summary()}",
+                    ),
+                    detector_chain=["VLBudget"],
+                )
+                budget_logged = True
+            unresolved.append(d)
+            continue
         try:
             arb = vision_adapter.arbitrate_divergence(
                 d, page_img, confusion_set=confusion_set, bucket=bucket,
             )
+            if vl_budget is not None:
+                vl_budget.spend()
             db.update_cross_divergence_status(
                 page_num, d.div_type, d.a_seg, d.b_seg, arb.decision,
             )
@@ -308,12 +332,14 @@ def _sample_consensus_error(
     db: BookDB,
     sample_rate: float,
     bucket: Optional[MultiTokenRateLimiter],
+    vl_budget: Optional[VLBudgetTracker] = None,
 ) -> None:
     """共识一致页抽样送视觉仲裁：覆盖「两引擎同错」盲区。
 
     对两引擎文本一致的页面，以 sample_rate 概率抽样，调 VL 模型做整页视觉核对。
     - 有 VL 且图像可用 → 执行 recheck，FAIL/UNKNOWN 结果入 ConsensusErrorArbitration 队列
     - 无 VL / 无图像 → 记录抽样命中标记（no_vision_skip），留待人工复核
+    - ``vl_budget`` 耗尽 → 记录 vl_budget_exhausted 标记，跳过 VL 调用
     """
     import random
 
@@ -333,6 +359,18 @@ def _sample_consensus_error(
         )
         return
 
+    if vl_budget is not None and not vl_budget.can_spend():
+        # 预算耗尽：跳过本次 VL 复核，记一条观测异常（与 high 分歧同语义降级）
+        db.record_anomaly(
+            page_num,
+            GlyphVerdict(
+                status="UNKNOWN", confidence=0.0,
+                details=f"consensus_sampled;vl_budget_exhausted;{vl_budget.summary()}",
+            ),
+            detector_chain=["VLBudget"],
+        )
+        return
+
     try:
         if bucket is not None:
             bucket.acquire()
@@ -340,6 +378,8 @@ def _sample_consensus_error(
             text=text, page_img=page_img,
             engine_label="consensus-check",
         )
+        if vl_budget is not None:
+            vl_budget.spend()
         if verdict.status in ("FAIL", "UNKNOWN"):
             db.record_anomaly(
                 page_num, verdict,
@@ -465,6 +505,18 @@ def orchestrate_book(
             max_time_per_page_ms=getattr(config, "max_time_per_page_ms", 120000),
             allow_cloud_vision=bool(getattr(config, "allow_cloud_vision", False)),
         )
+    # W4 VL 仲裁预算守卫：限制单次编排（per_run）与跨书当日（per_day）视觉仲裁调用数，
+    # 防止 GLM-4V-Flash 等付费端点失控开销。默认 0=不限。
+    vl_budget = VLBudgetTracker(
+        VLBudgetConfig(
+            per_run=scheduler_cfg.vl_budget_per_run
+            if scheduler_cfg is not None
+            else int(getattr(config, "vl_budget_per_run", 0) or 0),
+            per_day=scheduler_cfg.vl_budget_per_day
+            if scheduler_cfg is not None
+            else int(getattr(config, "vl_budget_per_day", 0) or 0),
+        )
+    )
     verifier = GlyphVerifier()
     # 形近字黑名单（供跨引擎分歧对齐标记 high 优先级，失败路径比对时复用）
     confusion_set = load_confusion_set()
@@ -720,6 +772,7 @@ def orchestrate_book(
                         engine_a=t1_engine_name,
                         char_boxes=cur_char_boxes,
                         tally=tally,
+                        vl_budget=vl_budget,
                     )
                     # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）
                     if is_consensus and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
@@ -729,6 +782,7 @@ def orchestrate_book(
                             _get_vision_adapter(), db,
                             overrides.consensus_sample_rate,
                             _get_vision_bucket(),
+                            vl_budget=vl_budget,
                         )
 
                 trace.extend(page_trace)
@@ -787,6 +841,7 @@ def orchestrate_book(
                                     page_num, high, page_input.img, va,
                                     _get_vision_bucket(), db, confusion_set,
                                     conservative=conservative,
+                                    vl_budget=vl_budget,
                                 )
                         # 回写全书累计（当前页计入后续页的保守判定）
                         if tally is not None:
@@ -863,6 +918,12 @@ def orchestrate_book(
     _log_engine_report(
         book_code, pages_text, failed_pages, uncertain_pages, engine_usage_counter, elapsed_s
     )
+    # W4 VL 预算使用对账（仅在任一维度设限时有意义）
+    if vl_budget is not None and (vl_budget.per_run or vl_budget.per_day):
+        _logger.info(
+            "[orchestrator] VL budget usage book=%s %s",
+            book_code, vl_budget.summary(),
+        )
 
     total = len(pages_text) + len(failed_pages) + len(uncertain_pages)
     failed_ratio = len(failed_pages) / max(total, 1)

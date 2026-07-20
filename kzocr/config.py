@@ -51,6 +51,10 @@ class SchedulerConfig:
     cross_check: bool = True  # 自 v0.7 稳定后默认开；设 KZOCR_ENABLE_CROSS_CHECK=0 关闭
     consensus_sample_rate: float = 0.0
     persist_db: bool = False
+    # W4 VL 仲裁预算（0 = 不限）：per_run 限制单次编排视觉仲裁调用数，
+    # per_day 跨书当日累计（经 JSON 文件 best-effort），防止付费端点失控开销。
+    vl_budget_per_run: int = 0
+    vl_budget_per_day: int = 0
     db_dir: str = ""
     half_life_days: float = 7.0
 
@@ -72,6 +76,8 @@ class SchedulerConfig:
             cross_check=_safe_bool(os.environ.get("KZOCR_ENABLE_CROSS_CHECK", ""), True),
             consensus_sample_rate=float(os.environ.get("KZOCR_CONSENSUS_SAMPLE_RATE", "0.0") or "0.0"),
             persist_db=_safe_bool(os.environ.get("KZOCR_PERSIST_DB", ""), False),
+            vl_budget_per_run=_safe_int(os.environ.get("KZOCR_VL_BUDGET_PER_RUN", "0"), 0, "KZOCR_VL_BUDGET_PER_RUN"),
+            vl_budget_per_day=_safe_int(os.environ.get("KZOCR_VL_BUDGET_PER_DAY", "0"), 0, "KZOCR_VL_BUDGET_PER_DAY"),
             db_dir=os.environ.get("KZOCR_DB_DIR", ""),
             half_life_days=float(os.environ.get("KZOCR_DECAY_HALF_LIFE_DAYS", "7.0") or "7.0"),
         )

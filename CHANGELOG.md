@@ -5,6 +5,21 @@
 
 ---
 
+## v2026-07-20 续三 — W4 VL 仲裁预算控制（防止付费端点失控开销）
+
+> 新增 `vl_budget.py` + `SchedulerConfig` 两字段 + orchestrator 三处 VL 调用点透传；全量 **831 passed + 2 skipped + 2 deselected**（较 820 基线 +11，含 test_vl_budget 7 例 + test_orchestrator 3 例）。版本号维持 **0.21.0**（v0.22.0 候选）
+
+| 模块 | 说明 |
+|------|------|
+| VL 预算守卫（`kzocr/scheduler/vl_budget.py`） | `VLBudgetConfig(per_run/per_day)` + `VLBudgetTracker`：per_run 内存计数限制单次编排视觉仲裁调用数；per_day 经可注入 `DayStore`（`_FileDayStore` JSON best-effort / `_MemDayStore` 测试）跨书当日累计。每次实际 VL 调用（`arbitrate_divergence`/`recheck`）前 `can_spend()` 判余量、调用后 `spend()` 计数 |
+| 配置接入 | `SchedulerConfig` 新增 `vl_budget_per_run`/`vl_budget_per_day`，环境变量 `KZOCR_VL_BUDGET_PER_RUN`/`KZOCR_VL_BUDGET_PER_DAY`（默认 0=不限，经 `_safe_int` 解析） |
+| orchestrator 透传 | `_arbitrate_high_divergences` 与 `_sample_consensus_error` 逐次检查预算，超预算停止 VL 调用、分歧留人工队列（同 conservative 降级语义），记 `detector_chain=["VLBudget"]` 观测异常；`orchestrate_book` 构造 tracker 透传三处调用点，书末打印 `VL budget usage` 对账日志 |
+| 测试 | `tests/test_vl_budget.py` 7 例（不限/per_run 边界/per_day 跨书累计/fake clock 日期隔离/双维度）；`tests/test_orchestrator.py` 增 3 例（预算预耗尽全跳/逐次计数/抽样耗尽）。零资源可测，无真实 VL 调用 |
+
+**使用**：大批量处理前设 `KZOCR_VL_BUDGET_PER_RUN=200`（单书上限）与 `KZOCR_VL_BUDGET_PER_DAY=1000`（当日上限），超预算的 high 分歧自动转人工队列，避免 GLM-4V-Flash 等付费端点失控。
+
+---
+
 ## v2026-07-20 续二 — 零资源收口（核心模块补测 / web 路由补测 / tcm_ocr 清理）
 
 > 纯逻辑测试 + 注释/注解清理，零运行时风险；全量 **820 passed + 2 skipped**（较 v0.21.0 的 753 +67）；ruff 默认与 `--select ANN` 三引擎文件均通过。版本号维持 **0.21.0**

@@ -39,13 +39,14 @@
 
 ## P1 — 生产硬化（真实价值，需少量运行时）
 
-### W4  VL 仲裁预算/配额控制（推荐下轮主线）
+### W4  VL 仲裁预算/配额控制（推荐下轮主线）✅ 已实现
 - **背景**：GLM-4V-Flash 走 z.ai/智谱付费端点。当前成功路径每个 high 分歧页都送 VL；25 本实测 high 占比 ~26%（mi-678 45.2%、速查表 43.4%），大批量处理会产生可观付费调用，且无上限保护。
-- **范围**：
-  - 新增 `KZOCR_VL_BUDGET_PER_RUN` / `KZOCR_VL_BUDGET_PER_DAY` 环境变量（默认合理值，0=不限）。
-  - `orchestrator._arbitrate_high_divergences` 内累计调用计数，超预算则停止 VL 调用、剩余 high 全部留人工队列（与 conservative 模式同语义降级）。
-  - 预算耗尽记一条 `record_anomaly(VL_BUDGET)` 便于观测。
-- **验收**：单测覆盖预算内/超预算/日配额跨书累计（用 fake clock + 内存计数 mock）；真实书抽验无超额调用；零资源可测。
+- **实现**（提交见 CHANGELOG）：
+  - 新增 `kzocr/scheduler/vl_budget.py`：`VLBudgetConfig` + `VLBudgetTracker`（per_run 内存计数、per_day 经可注入 `DayStore` 跨书当日累计；JSON 文件 best-effort）。
+  - `SchedulerConfig` 新增 `vl_budget_per_run` / `vl_budget_per_day`，环境变量 `KZOCR_VL_BUDGET_PER_RUN` / `KZOCR_VL_BUDGET_PER_DAY`（默认 0=不限）。
+  - `_arbitrate_high_divergences` 与 `_sample_consensus_error` 逐次 `can_spend()` 检查，超预算停止 VL 调用、分歧留人工队列，记 `detector_chain=["VLBudget"]` 观测异常（同 conservative 降级语义）。
+  - `orchestrate_book` 构造 tracker 并透传三处 VL 调用点；书末打印 VL 预算使用对账日志。
+- **测试**：`tests/test_vl_budget.py`（7 例：不限/per_run 边界/per_day 跨书累计/日期隔离/双维度）+ `tests/test_orchestrator.py` 增 3 例（预耗尽全跳/逐次计数/抽样耗尽）。零资源可测。
 
 ### W5  Celery 生产可观测性
 - **背景**：worker 已打印 celery 版本与 broker（3fb3738）；但处理吞吐、队列深度、BookDB 落库成功率、VL 调用数无聚合视图。
@@ -88,7 +89,7 @@
 ---
 
 ## 推荐下轮启动顺序
-1. **W4（VL 预算控制）**——最高真实价值，且可零资源单测，契合工作流。
+1. ~~**W4（VL 预算控制）**~~ ✅ 已实现（v0.21 后续）。
 2. **W1（web 补测续）**——延续零资源快赢节奏，低风险提升覆盖。
 3. 视用户优先级再选 W5/W6/W7。
 4. P3 两项目前不建议投入。
