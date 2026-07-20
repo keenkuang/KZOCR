@@ -16,8 +16,9 @@ Features:
 
 import logging
 import re
+import types
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
 
 import cv2
 import numpy as np
@@ -26,6 +27,22 @@ from kzocr.tcm_ocr.core.engines.mineru_adapter import MinerUAdapter
 from kzocr.tcm_ocr.core.engines.paddleocr_adapter import PaddleOCRAdapter
 
 logger = logging.getLogger(__name__)
+
+
+class TermKnowledgeBase(Protocol):
+    """Duck-typed term knowledge base for contextual correction.
+
+    Concrete implementations provide ``has_conflict`` and ``score_text``;
+    callers pass ``None`` or any object exposing these methods (guarded by
+    ``hasattr`` in the consuming functions).
+    """
+
+    def has_conflict(self, text: str) -> bool:
+        ...
+
+    def score_text(self, text: str) -> float:
+        ...
+
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -132,7 +149,7 @@ class GradedScheduler:
         logger.info("GradedScheduler initialized with %d engines",
                     2 + (1 if self.engine3 else 0) + (1 if self.engine4 else 0))
 
-    def _init_engine3(self, config: Dict[str, Any]) -> Any:
+    def _init_engine3(self, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Initialize the third fallback engine.
 
         Args:
@@ -162,7 +179,7 @@ class GradedScheduler:
             logger.error("Failed to initialize engine3 (%s): %s", engine_type, e)
             return None
 
-    def _init_engine4(self, config: Dict[str, Any]) -> Any:
+    def _init_engine4(self, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Initialize the vision-language engine.
 
         Args:
@@ -190,7 +207,7 @@ class GradedScheduler:
         self,
         page_img: np.ndarray,
         line_bbox: List[float],
-        term_kb: Any,
+        term_kb: Optional[TermKnowledgeBase],
         book_meta: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Recognize a single text line using graded engine scheduling.
@@ -549,7 +566,12 @@ class GradedScheduler:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
         """Context manager exit."""
         self.close()
 
@@ -598,7 +620,7 @@ def has_glyph_dispute_at_confusable(text_a: str, text_b: str) -> bool:
 def fast_consensus_check(
     text_a: str,
     text_b: str,
-    term_kb: Any
+    term_kb: Optional[TermKnowledgeBase]
 ) -> Dict[str, Any]:
     """Perform fast consensus check between two engine results.
 

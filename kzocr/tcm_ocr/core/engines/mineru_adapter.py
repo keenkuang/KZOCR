@@ -10,6 +10,7 @@ Layout model detects 8 block types:
 
 import logging
 import time
+import types
 from typing import Any, Dict, List
 
 import cv2
@@ -187,5 +188,10 @@ class MinerUAdapter:
     def __enter__(self) -> 'MinerUAdapter':
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
         self.close()

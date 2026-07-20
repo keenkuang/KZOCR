@@ -9,12 +9,18 @@ capabilities. Supports:
 - Custom character dictionary for TCM terminology
 """
 
+from __future__ import annotations
+
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+import types
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+if TYPE_CHECKING:
+    import paddle
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +261,7 @@ class PaddleOCRAdapter:
 
         return char_details
 
-    def _preprocess_rec_image(self, line_img: np.ndarray) -> Any:
+    def _preprocess_rec_image(self, line_img: np.ndarray) -> paddle.Tensor:
         """Preprocess image for recognition model input.
 
         Args:
@@ -527,6 +533,11 @@ class PaddleOCRAdapter:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
         """Context manager exit."""
         self.close()
