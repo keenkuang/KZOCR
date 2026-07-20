@@ -1,11 +1,31 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20T续九+08
-> 最后更新：2026-07-20 续九 CST
+> 文档版本：v2026-07-20 续十+08
+> 最后更新：2026-07-20 续十 CST
 
 ---
 
-## v2026-07-20 续九 — W10 双 BookDB 统一（保守收口）
+## v2026-07-20 续十 — 校对台增强 + 优先级分级 + 并发估算
+
+> 四大切入点全部落地：分歧高亮 HTML 报告、字符级 bbox 可视化、VL 仲裁自动回填 &
+> 优先级三级（P0/P1/normal）、页级并发基准估算脚本。全量 **948 passed + 2 skipped
+> + 2 deselected**；ruff 全过。版本号 **0.22.0 → 0.23.0**。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/review_manifest.py` | **F1** 新增 `export_divergence_html` 渲染跨引擎分歧为 HTML 报告（字符级差异高亮 `<mark>`，零资源）；**F2** 新增 `visualize_char_boxes` 用 PIL 在页图/空白画布上绘逐行逐字字符框（不同行不同颜色）。 |
+| `kzocr/cli_review.py` | `apply` 支持多书批量（`nargs="+"`）；新增 `html` 子命令（分歧高亮报告）；新增 `boxes` 子命令（bbox 可视化）。 |
+| `tests/test_review_divergence_html.py`（5 例） | 高亮标记/HTML 转义/相同串无 mark/分组排序/空表。 |
+| `tests/test_review_viz_boxes.py`（3 例） | 无 PDF 降级/缺数据/多行颜色区分。 |
+| `kzocr/scheduler/orchestrator.py` | **F3** 新增 `_apply_vl_fix` 函数：VL 裁决 accepted_a/accepted_b 时自动搜索行文本并回填 `line.human_final`；`_arbitrate_high_divergences` 内 try/except 兜底。 |
+| `kzocr/scheduler/cross_align.py` | **F3** `_is_priority` 从二元（high/normal）增强为三级：P0（剂量数字分歧）、P1（形近字黑名单）、normal（其他）。 |
+| `kzocr/storage/db.py` | 新增 `get_page_lines(page_num)` 方法。 |
+| `tests/test_vl_fix.py`（4 例） | accepted_a/b 回填、非 accepted 跳过、无匹配静默。 |
+| `scripts/bench_page_concurrency.py` | **F4** 页级并发基准估算工具：模拟顺序编排与页面级并行，量化吞吐与理论加速比；支持 mock 引擎参数配置。 |
+
+> 范围边界：F4 为估算工具（文档/分析），并非生产并发编排实现。计划中的页面级并发
+> 生产化（ThreadPoolExecutor 处理多页）涉及 orchestrator 状态管理重构，属后续迭代。**
+
 
 > 消除"双 BookDB"概念混乱：主线 `kzocr.storage.db.BookDB` 是唯一系统 of record；tcm_ocr 的 `BookDB` 类是未接通的遗留死亡代码（Capitalized 表名 + 读取缺失迁移文件），真实 tcm_ocr 库是独立的 snake_case 知识抽取工作台。本次引入共享 `BookDbConn` Protocol 统一类型契约、重指 5 处注解、修复死亡类 schema 源。新增 5 例守卫测试（全量 **930 passed + 2 skipped + 2 deselected**，核心覆盖率 **88.94%**）；ruff 全过。版本号 **0.21.0 → 0.22.0**。
 
