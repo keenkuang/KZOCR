@@ -162,3 +162,38 @@ push_book_to_zai(book, db_path="work/v2.db", persist_bookdb=True)
 - `kzocr/engine/types.py:242` `AdapterPageResult.char_boxes` 字段已加。
 - `kzocr/engine/adapters.py` `PaddleOCRAdapter.run_page` 已 `return_word_box=True`，`_parse_ppocr_result` 已解析 `text_word_boxes` → `char_boxes`（实测单页 37 行 / 801 逐字框）。
 - RapidOCR 无字符级框，`char_boxes=None`。
+
+---
+
+## 7. W10 双 BookDB 统一（保守收口，2026-07-20）
+
+> 结论：**本项目只有一个系统 of record 的 `BookDB`**，即 `kzocr.storage.db.BookDB`。
+> tcm_ocr 平行栈里的 `kzocr.tcm_ocr.database.sqlite.book_db.BookDB` **不是**同一概念——
+> 它是 tcm_ocr 的"知识抽取工作台"连接封装，二者职责不同、不应混为一谈。
+
+### 7.1 两套"BookDB"的真实关系（澄清）
+
+| 维度 | 主线 `kzocr.storage.db.BookDB` | tcm_ocr `kzocr.tcm_ocr.database.sqlite.book_db.BookDB` |
+|------|------|------|
+| 角色 | **系统 of record**（OCR 内容/终校/分歧权威源） | tcm_ocr 知识抽取工作台的 SQLite 连接封装 |
+| Schema | `book`/`page`/`line`(+char_boxes)/`proofread`/`cross_divergence`/`hierarchy_anomaly`/… | 真实库为 **snake_case**：`book_metadata`/`page`/`content_node`/`proofread_record`/`line_engine_result`/`formula_composition`/`formula_ingredient`/`image_index`（由 `book_pipeline._create_book_database` 建出） |
+| 谁在用 | orchestrator / run.py / to_zai_prisma / Celery / web | `database/manager.py` 注册/打开书籍时实例化；4 个 knowledge 模块仅以**类型注解**引用 |
+| 运行时库来源 | `KZOCR_DB_DIR/{book_code}.db` | `{book_library_dir}/{book_id}.db`（raw `sqlite3.Connection`，非该类的实例） |
+
+关键事实：tcm_ocr 运行时真正的书籍库是 `book_pipeline` 用 raw `sqlite3.Connection` 建的 **snake_case** 库；`book_db.py` 里的 `BookDB` 类此前 `initialize_schema()` 去读一个**仓库中已不存在的迁移文件**（`migrations/002_book_schema.sql`），属未接通的遗留代码。`book_pipeline` 与 4 个 knowledge 模块在运行期都直接传 raw connection，调用 `execute()`/`get_cursor()`。
+
+### 7.2 统一做法（保守收口，零运行时风险）
+
+1. **共享连接契约 `BookDbConn`（Protocol）**：在 `book_db.py` 新增 `@runtime_checkable BookDbConn`，声明知识/归档层在 `db_book` 上实际用到的最小接口（`execute`/`get_cursor`/`commit`/`close`/`cursor`）。运行时传入的 raw `sqlite3.Connection` 天然满足。
+2. **重指类型注解**：4 个 knowledge 模块（`herb_pattern`/`meridian_pattern`/`context_pattern`/`formula`）与 `database/manager.py` 的 `db_book` 注解由 `BookDB` 改为 `BookDbConn`；manager 内部 `BookDB(db_path)` 实例化保留（冻结栈不删）。
+3. **修复死亡类的 schema 源**：`BookDB.initialize_schema()` 默认改用内置的真实 snake_case DDL（与 `book_pipeline._create_book_database` 一致），消除 `FileNotFoundError`。
+4. **守卫测试** `tests/test_tcm_ocr_db_unified.py`：`test_only_mainline_bookdb_in_production` 用 AST 扫描生产入口，凡出现 `BookDB` 必须解析到 `kzocr.storage.db.BookDB`，证明生产 OCR 链路不依赖 tcm_ocr 的 `BookDB` 类。
+
+### 7.3 最终职责分层（含 tcm_ocr 侧）
+
+- **主线 `BookDB`**（`kzocr.storage.db.BookDB`，每书 SQLite）= OCR 系统 of record（book/page/line + char_boxes + proofread + 分歧/异常）。
+- **tcm_ocr snake_case 库**（`{book_id}.db`）= 知识抽取工作台（formula/content_node/proofread_record），由 `book_pipeline` 建库、经 `archival.py` 归档进 Postgres。其连接统一以 `BookDbConn` Protocol 表达，不叫"BookDB"。
+- **PostgreSQL 运营库**（RuntimeDB）= 元数据 + 方剂归档（`FormulaComposition` 已有归档表）+ 统计/知识库。
+- **`custom.db`**（zai 校对工作台）= 从主线 BookDB 打包导出的可移植校对包（见 §5 决策 1）。
+
+> 范围边界：本次**不做**指针统一（herb/meridian 改查主线 `proofread` 表）与 schema 合并（formula/content_node 迁进主线 BookDB）——后者违背 §1「主线只存 OCR 全量、Postgres 存元数据」的定调，且高风险、非紧急。

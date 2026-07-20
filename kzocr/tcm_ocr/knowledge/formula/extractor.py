@@ -23,7 +23,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from kzocr.tcm_ocr.database.sqlite.book_db import BookDB
+from kzocr.tcm_ocr.database.sqlite.book_db import BookDbConn
 
 logger = logging.getLogger(__name__)
 
@@ -243,16 +243,16 @@ class FormulaExtractor:
     处理上下文引用关系，并保存到数据库。
 
     Attributes:
-        _db_book: BookDB 实例
+        _db_book: BookDbConn 契约（SQLite 书籍库连接）
         _term_kb: TermKB 实例
     """
 
-    def __init__(self, db_book: BookDB, term_kb: object) -> None:
+    def __init__(self, db_book: BookDbConn, term_kb: object) -> None:
         """
         初始化 FormulaExtractor
 
         Args:
-            db_book: BookDB 实例（SQLite 书籍库）
+            db_book: BookDbConn 契约（SQLite 书籍库连接）
             term_kb: TermKB 实例（术语知识库）
         """
         self._db_book = db_book

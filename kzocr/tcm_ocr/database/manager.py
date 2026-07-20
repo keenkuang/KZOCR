@@ -20,7 +20,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
-from kzocr.tcm_ocr.database.sqlite.book_db import BookDB
+from kzocr.tcm_ocr.database.sqlite.book_db import BookDB, BookDbConn
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class DatabaseManager:
             'TCM_BOOKS_DIR',
             os.path.join(os.getcwd(), 'data', 'books'),
         )
-        self._book_dbs: Dict[int, BookDB] = {}
+        self._book_dbs: Dict[int, BookDbConn] = {}
 
         # 确保书籍存储目录存在
         os.makedirs(self._books_dir, exist_ok=True)
@@ -179,7 +179,7 @@ class DatabaseManager:
             logger.error("Failed to register new book: %s", e)
             raise RuntimeError(f"Failed to register new book: {e}") from e
 
-    def get_book_db(self, book_registry_id: int, auto_create: bool = False) -> BookDB:
+    def get_book_db(self, book_registry_id: int, auto_create: bool = False) -> BookDbConn:
         """
         获取指定书籍的 SQLite 数据库连接
 
@@ -188,7 +188,7 @@ class DatabaseManager:
             auto_create: 如果数据库不存在是否自动创建
 
         Returns:
-            BookDB: 书籍数据库连接实例
+            BookDbConn: 书籍数据库连接实例
 
         Raises:
             FileNotFoundError: 当数据库文件不存在且 auto_create=False 时
@@ -226,7 +226,7 @@ class DatabaseManager:
         self._book_dbs[book_registry_id] = book_db
         return book_db
 
-    def open_book_db(self, book_registry_id: int) -> BookDB:
+    def open_book_db(self, book_registry_id: int) -> BookDbConn:
         """
         打开书籍数据库（同 get_book_db，语义更清晰）
 
@@ -234,7 +234,7 @@ class DatabaseManager:
             book_registry_id: 书籍注册 ID
 
         Returns:
-            BookDB: 书籍数据库连接实例
+            BookDbConn: 书籍数据库连接实例
         """
         return self.get_book_db(book_registry_id)
 

@@ -20,7 +20,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
-from kzocr.tcm_ocr.database.sqlite.book_db import BookDB
+from kzocr.tcm_ocr.database.sqlite.book_db import BookDbConn
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +409,7 @@ def _is_acupuncture_related(text: str) -> bool:
 
 def auto_discover_meridian_patterns(
     book_id: str,
-    db_book: BookDB,
+    db_book: BookDbConn,
     db_pg: RuntimeDB,
 ) -> List[dict]:
     """
@@ -425,7 +425,7 @@ def auto_discover_meridian_patterns(
 
     Args:
         book_id: 书籍 ID
-        db_book: BookDB 实例（SQLite 书籍库）
+        db_book: BookDbConn 契约（SQLite 书籍库连接）
         db_pg: RuntimeDB 实例（PostgreSQL 运行库）
 
     Returns:

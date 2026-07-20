@@ -1,7 +1,23 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20T09:57+08
-> 最后更新：2026-07-20 09:57 CST
+> 文档版本：v2026-07-20T续九+08
+> 最后更新：2026-07-20 续九 CST
+
+---
+
+## v2026-07-20 续九 — W10 双 BookDB 统一（保守收口）
+
+> 消除"双 BookDB"概念混乱：主线 `kzocr.storage.db.BookDB` 是唯一系统 of record；tcm_ocr 的 `BookDB` 类是未接通的遗留死亡代码（Capitalized 表名 + 读取缺失迁移文件），真实 tcm_ocr 库是独立的 snake_case 知识抽取工作台。本次引入共享 `BookDbConn` Protocol 统一类型契约、重指 5 处注解、修复死亡类 schema 源。新增 5 例守卫测试（全量 **930 passed + 2 skipped + 2 deselected**，核心覆盖率 **88.94%**）；ruff 全过。版本号 **0.21.0 → 0.22.0**。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/tcm_ocr/database/sqlite/book_db.py` | **W10 核心**：新增 `@runtime_checkable BookDbConn` Protocol（execute/get_cursor/commit/close/cursor），作为 tcm_ocr 知识/归档层 `db_book` 参数的统一连接契约；模块 docstring 澄清"只有一个主线 BookDB，本文件类是知识抽取工作台连接封装"。`BookDB.initialize_schema()` 改用内置的真实 snake_case DDL（与 `book_pipeline._create_book_database` 一致），消除缺失迁移文件的 `FileNotFoundError`。 |
+| `kzocr/tcm_ocr/knowledge/{herb_pattern,meridian_pattern,context_pattern}/auto_discover.py` + `kzocr/tcm_ocr/knowledge/formula/extractor.py` | `from ...book_db import BookDB` → `import BookDbConn`；`db_book: BookDB` → `db_book: BookDbConn`（纯注解变更，零运行时风险）。 |
+| `kzocr/tcm_ocr/database/manager.py` | 返回/局部注解 `-> BookDB` → `-> BookDbConn`；保留 `BookDB(db_path)` 实例化（冻结栈不删）。 |
+| `docs/plans/db-layering.md` | 新增 §7「W10 双 BookDB 统一」：澄清两套"BookDB"的真实关系与最终职责分层（主线 BookDB=OCR of record；tcm_ocr snake_case 库=知识抽取工作台；Postgres=运营元数据+方剂归档；custom.db=校对包）。 |
+| `tests/test_tcm_ocr_db_unified.py`（新增 5 例） | `test_only_mainline_bookdb_in_production`（AST 扫描生产入口，凡引用 BookDB 必须解析到 `kzocr.storage.db.BookDB`，硬守卫"统一"）；`test_bookdb_conn_protocol_contract`（BookDbConn 为 runtime_checkable；保留的 BookDB 提供 get_cursor；raw sqlite3.Connection 缺 get_cursor 不满足契约——印证自动发现链路既有 latent bug，非本次范围）；`test_book_db_initialize_schema_builds_snake_tables`（修复后不抛 FileNotFoundError 且建出真实 snake_case 表）；`test_knowledge_modules_reference_protocol` + `test_manager_still_imports_bookdb_class_for_instantiation`。 |
+
+> 范围边界（明确不做）：① 指针统一（herb/meridian 改查主线 `proofread` 表）——中等风险；② schema 合并（formula/content_node 迁进主线 BookDB）——违背 db-layering 定调、高风险、非紧急；③ 删除 `book_db.py` 及其 `BookDB` 类——冻结栈"不删"，且 manager 仍实例化。已验证生产 OCR 闭环（converter → 主线 BookDB → Celery 接线）零改动、无回归。
 
 ---
 

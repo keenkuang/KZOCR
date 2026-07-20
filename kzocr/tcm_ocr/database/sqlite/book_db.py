@@ -1,11 +1,19 @@
 """
-SQLite 书籍库连接层 - BookDB 类
+tcm_ocr 书籍 SQLite 连接层
 
-每本待处理书籍对应一个独立的 SQLite 数据库。
-封装所有 SQLite 操作，使用 context manager 管理事务和连接。
-提供页面、段落、行、引擎结果、校对记录、方剂组成等完整数据访问接口。
+⚠️ 职责澄清（W10 双 BookDB 统一 / 保守收口）：
+本项目**只有一个系统 of record 的 BookDB**——`kzocr.storage.db.BookDB`
+（存 OCR 内容表 book/page/line + char_boxes + 人工终校 proofread + 跨引擎分歧）。
+本模块里的 `BookDB` 类**不是**那个系统 of record，而是 tcm_ocr 平行栈的
+"知识抽取工作台"连接封装：其 SQLite 库由 `book_pipeline._create_book_database`
+以 **snake_case** 表（book_metadata / page / content_node / proofread_record /
+line_engine_result / formula_composition / formula_ingredient / image_index）建出，
+承载方剂 / 目录 / 校对记录等知识抽取数据，最终经 `archival.py` 归档进 Postgres。
 
-所有方法均使用参数化查询防止 SQL 注入。
+tcm_ocr 知识层与归档层在 `db_book` 参数上实际只需一组最小连接契约
+（execute / get_cursor / commit / close / cursor），统一表达为 `BookDbConn` Protocol。
+运行时 `book_pipeline` 直接传入 raw `sqlite3.Connection`，本类的 `BookDB` 仅由
+`database/manager.py` 在注册/打开书籍时实例化。请勿将其与主线 BookDB 混淆。
 """
 
 from __future__ import annotations
@@ -17,9 +25,165 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# 共享连接契约（W10 统一点）
+# =============================================================================
+#
+# tcm_ocr 知识抽取 / 归档层在 `db_book` 参数上实际用到的最小接口。
+# 运行时传入的是 raw `sqlite3.Connection`（见 book_pipeline._run_auto_discovery），
+# 它天然满足本 Protocol；`BookDB` 类也满足。统一到该契约可消除"双 BookDB"概念混乱。
+@runtime_checkable
+class BookDbConn(Protocol):
+    """tcm_ocr 书籍库连接的共享契约（非系统 of record）。"""
+
+    def execute(self, sql: str, parameters: Any = ...) -> Any: ...
+
+    @contextmanager
+    def get_cursor(self) -> Iterator[sqlite3.Cursor]: ...
+
+    def commit(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def cursor(self) -> sqlite3.Cursor: ...
+
+
+# =============================================================================
+# 真实 snake_case Schema（与 book_pipeline._create_book_database 一致）
+# =============================================================================
+#
+# 此 DDL 是 tcm_ocr 书籍库的真实建表语句（snake_case）。`BookDB.initialize_schema`
+# 默认使用它，而非读取一个仓库中已不存在的迁移文件，从而消除 FileNotFoundError。
+_BOOK_SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS book_metadata (
+        book_id TEXT PRIMARY KEY,
+        title TEXT,
+        author TEXT,
+        publisher TEXT,
+        pub_year INTEGER,
+        pub_month INTEGER,
+        isbn TEXT,
+        edition TEXT,
+        price TEXT,
+        category TEXT,
+        language TEXT,
+        created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS page (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        page_number INTEGER,
+        layout_type TEXT,
+        created_at TEXT,
+        UNIQUE(book_id, page_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS content_node (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        node_id TEXT UNIQUE,
+        parent_id TEXT,
+        node_type TEXT,
+        node_level INTEGER,
+        title TEXT,
+        content TEXT,
+        page_start INTEGER,
+        page_end INTEGER,
+        node_order INTEGER,
+        metadata TEXT,
+        created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS proofread_record (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        page_number INTEGER,
+        paragraph_id TEXT,
+        line_id TEXT UNIQUE,
+        line_number INTEGER,
+        original_text TEXT,
+        corrected_text TEXT,
+        fused_text TEXT,
+        confidence REAL,
+        engine_results TEXT,
+        llm_decision TEXT,
+        llm_decision_level INTEGER,
+        disputed INTEGER DEFAULT 0,
+        dispute_reason TEXT,
+        disputed_image_path TEXT,
+        human_verified INTEGER DEFAULT 0,
+        human_final_text TEXT,
+        cer_before REAL,
+        cer_after REAL,
+        correction_type TEXT,
+        created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS line_engine_result (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        page_number INTEGER,
+        line_id TEXT,
+        engine_name TEXT,
+        raw_text TEXT,
+        confidence REAL,
+        char_confidences TEXT,
+        bbox TEXT,
+        processing_time_ms INTEGER,
+        created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS formula_composition (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        formula_id TEXT,
+        formula_name TEXT,
+        formula_sequence INTEGER,
+        page_numbers TEXT,
+        paragraph_ids TEXT,
+        source_text TEXT,
+        extracted_by TEXT,
+        verification_status TEXT DEFAULT 'pending',
+        created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS formula_ingredient (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        formula_id TEXT,
+        herb_name TEXT,
+        dosage REAL,
+        dosage_unit TEXT,
+        processing_note TEXT,
+        ingredient_order INTEGER,
+        created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS image_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id TEXT,
+        page_number INTEGER,
+        bbox TEXT,
+        caption TEXT,
+        block_id TEXT,
+        created_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_proofread_book_page
+        ON proofread_record(book_id, page_number);
+    CREATE INDEX IF NOT EXISTS idx_proofread_line_id
+        ON proofread_record(line_id);
+    CREATE INDEX IF NOT EXISTS idx_formula_book
+        ON formula_composition(book_id);
+    CREATE INDEX IF NOT EXISTS idx_content_node_book
+        ON content_node(book_id);
+"""
 
 
 # =============================================================================
@@ -201,17 +365,12 @@ class BookDB:
         初始化数据库 Schema
 
         Args:
-            schema_sql: Schema SQL 内容，如果为 None 则读取默认迁移文件
+            schema_sql: Schema SQL 内容。为 None 时使用内置的真实 snake_case DDL
+                （与 `book_pipeline._create_book_database` 一致），不再依赖仓库中
+                已缺失的迁移文件，从而消除 FileNotFoundError。
         """
         if schema_sql is None:
-            schema_path = os.path.join(
-                os.path.dirname(__file__), '..', '..', '..',
-                'migrations', '002_book_schema.sql',
-            )
-            if not os.path.exists(schema_path):
-                raise FileNotFoundError(f"Schema file not found: {schema_path}")
-            with open(schema_path, 'r', encoding='utf-8') as f:
-                schema_sql = f.read()
+            schema_sql = _BOOK_SCHEMA_SQL
 
         self.execute_script(schema_sql)
         logger.info("Database schema initialized: %s", self.db_path)
