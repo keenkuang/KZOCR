@@ -23,10 +23,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install PyMuPDF numpy pytest pillow fastapi uvicorn jinja2 httpx python-multipart shtab opencv-python-headless
+        run: pip install PyMuPDF numpy pytest pytest-cov pillow fastapi uvicorn jinja2 httpx python-multipart shtab opencv-python-headless
 
-      - name: Run tests with details
-        run: python -m pytest tests/ -v --tb=short
+      - name: Run tests with details (coverage gate)
+        run: python -m pytest tests/ --cov=kzocr --cov-report=term-missing -v --tb=short
 
       - name: Performance benchmarks
         run: python -m pytest tests/benchmarks/ -v --tb=short

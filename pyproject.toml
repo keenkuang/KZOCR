@@ -35,3 +35,11 @@ addopts = ["-m", "not benchmark"]
 markers = [
     "benchmark: 性能基准测试，依赖机器速度，CI 默认跳过，需显式 -m benchmark 运行",
 ]
+
+# 覆盖率门禁（W8）：仅统计主线核心模块，排除冻结的 tcm_ocr 平行栈与测试代码，
+# 避免其缺失的 ANN/低覆盖拉低整体；fail_under=80 作为防回归下限（当前核心 ~89%）。
+[tool.coverage.run]
+omit = ["kzocr/tcm_ocr/*", "tests/*"]
+
+[tool.coverage.report]
+fail_under = 80

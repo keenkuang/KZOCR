@@ -141,9 +141,9 @@ def _classify_para_unit(unit: List[Dict[str, Any]]) -> str:
 
     heading 启发式：短 + 无方剂标记 + 不像药材续行（避免短两药片段误判标题）。
     说明：更精确的居中/字号判定需 layout bbox 数据流入本层；当前 unit 仅含
-    共识文本（consensus_text），无版面坐标，故采用纯文本启发式。该启发式在
-    多数古籍排版下已足够稳健，bbox 增强作为后续数据接入项（需把 MinerU layout
-    块坐标带入段落单元），非阻塞。
+    共识文本（consensus_text），无版面坐标，故采用纯文本启发式（已实现，在
+    多数古籍排版下足够稳健）。bbox 增强为 deferred 数据接入项（需把 MinerU
+    layout 块坐标带入段落单元）；属冻结栈，不引入新依赖、不改主线行为，非阻塞。
     """
     consensus = _unit_consensus(unit)
     if not consensus:
@@ -202,7 +202,8 @@ def _extract_formula_name(unit: List[Dict[str, Any]]) -> Optional[str]:
 
     优先用 utils.common.extract_formula_name（匹配以汤/散/丸/丹/膏/酒/饮/
     剂/方结尾的 2-8 字词），回退到「组成/方药/处方/方剂」标记前的文本。
-    方剂名回填（前序 heading 文本）由 group_into_formula_blocks 负责。
+    方剂名回填（前序 heading 文本）由 group_into_formula_blocks 调用
+    _backfill_formula_name（:240）负责，已实现闭环，无额外 TODO。
     """
     consensus = _unit_consensus(unit)
     try:

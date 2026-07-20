@@ -176,6 +176,28 @@ def test_register_submit_empty_code(client: TestClient, dirs) -> None:
                        follow_redirects=False).status_code == 303
 
 
+def test_register_submit_with_toc(client: TestClient, dirs) -> None:
+    # toc_json 合法列表 → 正常创建并重定向到 /book/{code}（覆盖 toc_entries 非空路径）
+    resp = client.post(
+        "/register",
+        data={"book_code": "bk_toc", "title": "方", "toc_json": '[{"title": "卷一"}]'},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/book/bk_toc"
+
+
+def test_register_submit_invalid_toc(client: TestClient, dirs) -> None:
+    # toc_json 非法 → 解析失败降级为空列表，仍正常重定向不抛（覆盖 1040-1041）
+    resp = client.post(
+        "/register",
+        data={"book_code": "bk_bad", "title": "方", "toc_json": "not json at all"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/book/bk_bad"
+
+
 # ── book（空库建表 → 降级空数据，均返回 200/303）──
 def test_book_detail_empty(client: TestClient, dirs) -> None:
     assert client.get("/book/bk1").status_code == 200
