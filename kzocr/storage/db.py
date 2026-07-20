@@ -412,6 +412,14 @@ class BookDB:
         data = json.loads(raw)
         return data if data else None
 
+    def get_page_lines(self, page_num: int) -> list[dict[str, Any]]:
+        """读取某页所有行（含 para_seq, line_seq, text, char_boxes, human_final）。"""
+        rows = self._conn.execute(
+            "SELECT * FROM line WHERE page_num=? ORDER BY para_seq, line_seq",
+            (page_num,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_book_pages(self) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             "SELECT page_num, char_count, confidence FROM page ORDER BY page_num"

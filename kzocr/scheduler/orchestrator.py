@@ -40,6 +40,7 @@ from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionReche
 from kzocr.scheduler.cross_align import (
     align_boxes_to_text,
     Divergence,
+    DivergenceArbitration,
     load_confusion_set,
     run_cross_align,
 )
@@ -195,7 +196,7 @@ def _run_success_cross_check(
             page_no=page_num, divs=divs,
             engine_a=engine_a, engine_b=tier2[0].meta.name,
         )
-        high = [d for d in divs if d.priority == "high"]
+        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
         # 全书 high 占比二级判据：样本充足且越阈值时进入保守模式，
         # 该页 high 分歧全部留人工复核（见 _is_conservative / v4 扩面结论）。
         conservative = _is_conservative(tally) if tally is not None else False
@@ -310,6 +311,13 @@ def _arbitrate_high_divergences(
             db.update_cross_divergence_status(
                 page_num, d.div_type, d.a_seg, d.b_seg, arb.decision,
             )
+            # VL 确认的裁决自动回填 line.human_final（纯增强，异常静默跳过）
+            try:
+                _apply_vl_fix(db, page_num, d, arb)
+            except Exception:
+                _logger.debug(
+                    "[vl_fix] page=%d skipped (non-fatal)", page_num,
+                )
             if conservative or arb.decision == "manual":
                 # 保守模式：即便 VL 给出明确裁决，也将 high 分歧全部留人工复核，
                 # 不自动接受（high 占比高的书 VL unresolved 率高，自动接受不可靠）。
@@ -322,6 +330,57 @@ def _arbitrate_high_divergences(
             )
             unresolved.append(d)
     return {"resolved": resolved, "unresolved": unresolved}
+
+
+def _apply_vl_fix(
+    db: BookDB, page_num: int, divergence: Divergence, arb: DivergenceArbitration,
+) -> None:
+    """VL 仲裁裁决 accepted_a/accepted_b → 自动回填 line.human_final。
+
+    在 ``line`` 表中搜索包含 ``a_seg`` 的行（原始引擎侧文本），
+    找到后将 VL 确认的文本写入 ``human_final``（accepted_a → a_seg,
+    accepted_b → b_seg）。不匹配/歧义/空白时静默跳过（不阻断人工复审流程）。
+
+    Args:
+        db: BookDB 实例。
+        page_num: 页码。
+        divergence: 被仲裁的 Divergence 对象（含 a_seg/b_seg）。
+        arb: VL 仲裁裁决结果。
+    """
+    if arb.decision not in ("accepted_a", "accepted_b"):
+        return
+    confirmed = divergence.a_seg if arb.decision == "accepted_a" else divergence.b_seg
+    if not confirmed:
+        return
+
+    lines = db.get_page_lines(page_num)
+    # 用 a_seg 搜索行文本（a_seg 代表原始引擎侧输出，一定在行文本中）
+    search = divergence.a_seg
+    if not search:
+        return
+    matches = [
+        (r["para_seq"], r["line_seq"])
+        for r in lines
+        if search in (r.get("text") or "")
+    ]
+    if len(matches) == 0:
+        _logger.debug(
+            "[vl_fix] page=%d no line containing %r", page_num, confirmed,
+        )
+        return
+    if len(matches) > 1:
+        _logger.debug(
+            "[vl_fix] page=%d ambiguous %r matched %d lines, skip",
+            page_num, confirmed, len(matches),
+        )
+        return
+
+    para_seq, line_seq = matches[0]
+    db.save_line_human_final(page_num, para_seq, line_seq, confirmed)
+    _logger.info(
+        "[vl_fix] page=%d line=(%d,%d) written %r (vl=%s)",
+        page_num, para_seq, line_seq, confirmed, arb.decision,
+    )
 
 
 def _sample_consensus_error(
@@ -817,7 +876,7 @@ def orchestrate_book(
                             engine_a=t1_engine_name, engine_b=engine_name,
                         )
                         # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
-                        high = [d for d in divs if d.priority == "high"]
+                        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
                         # 全书 high 占比二级判据（与成功路径同源，见 _is_conservative）。
                         conservative = _is_conservative(tally) if tally is not None else False
                         if high:

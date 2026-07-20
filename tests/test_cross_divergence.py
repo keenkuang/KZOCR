@@ -152,7 +152,7 @@ def test_cross_align_writes_on_tier1_fail_tier3_success(tmp_path):
     rows = _read_db("bkc1", str(tmp_path))
     assert len(rows) >= 1
     # 剂量数字分歧应标 high
-    assert any(r["priority"] == "high" for r in rows)
+    assert any(r["priority"] in ("P0", "P1") for r in rows)
     # 引擎标签正确
     assert any(r["engine_a"] == "t1" and r["engine_b"] == "t3" for r in rows)
 
@@ -223,8 +223,8 @@ def test_cross_divergence_arbitrated_by_vision(tmp_path, monkeypatch):
 
     rows = _read_db("bkc4", str(tmp_path))
     assert len(rows) >= 1
-    # high 剂量分歧 20g↔二钱 经 VL 仲裁：mock 返回 real_char='二钱'==b_seg → accepted_b
-    high = [r for r in rows if r["priority"] == "high"]
+    # high(P0/P1) 剂量分歧 20g↔二钱 经 VL 仲裁：mock 返回 real_char='二钱'==b_seg → accepted_b
+    high = [r for r in rows if r["priority"] in ("P0", "P1")]
     assert high, "应有一条 high 分歧"
     assert high[0]["status"] == "accepted_b"
     assert high[0]["engine_b"] == "t3"

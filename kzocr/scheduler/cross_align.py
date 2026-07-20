@@ -376,20 +376,19 @@ class DivergenceArbitration:
     mode: str = "degraded"
 
 
-def _is_priority(a_seg: str, b_seg: str, confusion_set: Optional[dict]) -> bool:
-    """数字/剂量分歧 或 形近字黑名单命中 → 高优先级。"""
+def _is_priority(a_seg: str, b_seg: str, confusion_set: Optional[dict]) -> str:
+    """数字/剂量分歧 → P0；形近字黑名单命中 → P1；正常 → normal。"""
     seg = a_seg + b_seg
-    # 阿拉伯数字：古籍方剂剂量最易错且最危险（6↔5、9↔3、8↔3、69↔53…）
+    # P0: 阿拉伯数字或中文数字——古籍方剂剂量最易错且最危险
     if any(ch.isdigit() for ch in seg):
-        return True
-    # 中文数字：方剂剂量多用中文数字（二↔三、五↔三…），同属高风险
+        return "P0"
     if any(ch in _CN_NUM for ch in seg):
-        return True
-    # 形近字黑名单：单字替换且 A→B 在混淆表中（芩↔苓、炙↔灸、黄↔皇、麥↔麦…）
+        return "P0"
+    # P1: 形近字黑名单命中（单字替换且 A→B 在混淆表中）
     if confusion_set and len(a_seg) == 1 and len(b_seg) == 1:
         if confusion_set.get(a_seg) == b_seg:
-            return True
-    return False
+            return "P1"
+    return "normal"
 
 
 def align_engines(
@@ -435,7 +434,7 @@ def align_engines(
                 b_seg=b_seg,
                 a_context=a[ctx_l:i1] + "【" + a_seg + "】" + a[i2:ctx_r],
                 boxes=boxes,
-                priority="high" if _is_priority(a_seg, b_seg, confusion_set) else "normal",
+                priority=_is_priority(a_seg, b_seg, confusion_set),
             )
         )
     return divs

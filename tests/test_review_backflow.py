@@ -113,7 +113,7 @@ def test_feedback_apply_backflow(tmp_path: Path, monkeypatch):
     # 2) 下次路由即时生效（_is_priority 命中）
     cs = load_confusion_set(reload=True)
     assert cs.get("补") == "朴"
-    assert _is_priority("补", "朴", cs) is True
+    assert _is_priority("补", "朴", cs) == "P1"
 
     # 3) 分侧检测器也受益（一致性修复）
     split = load_confusion_keys_split(reload=True)

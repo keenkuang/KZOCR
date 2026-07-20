@@ -129,22 +129,22 @@ def test_align_engines_replace_captures_segment():
 
 
 def test_numeral_divergence_is_high_priority():
-    # 剂量数字分歧：三↔二（中文数字，方剂书最危险）
+    # 剂量数字分歧：三↔二 → P0（中文数字，方剂书最危险）
     a = "附子三钱"
     b = "附子二钱"
     divs = align_engines(a, b, confusion_set=CONFUSION)
     assert divs
-    assert all(d.priority == "high" for d in divs)
+    assert all(d.priority == "P0" for d in divs)
     assert any(d.a_seg == "三" and d.b_seg == "二" for d in divs)
 
 
 def test_confusion_blacklist_is_high_priority():
-    # 形近字：芩↔苓
+    # 形近字：芩↔苓 → P1
     a = "黄芩"
     b = "黄苓"
     divs = align_engines(a, b, confusion_set=CONFUSION)
     assert divs
-    assert divs[0].priority == "high"
+    assert divs[0].priority == "P1"
 
 
 def test_non_confusion_normal_priority():
@@ -164,7 +164,7 @@ def test_run_cross_align_fills_page_and_engine():
     assert all(d.page_no == 24 for d in divs)
     assert all(d.engine_a == "kimi" for d in divs)
     assert all(d.engine_b == "sensenova" for d in divs)
-    assert all(d.priority == "high" for d in divs)
+    assert all(d.priority == "P0" for d in divs)
 
 
 def test_write_divergences_roundtrip(tmp_path: Path):
@@ -184,7 +184,7 @@ def test_write_divergences_roundtrip(tmp_path: Path):
     conn.close()
     assert len(rows) == len(divs)
     assert rows[0][0] == 24
-    assert rows[0][4] == "high"
+    assert rows[0][4] == "P0"
     assert rows[0][5] == "kimi"
     assert rows[0][6] == "sensenova"
 
@@ -208,7 +208,7 @@ def test_real_tcm_snippet_divergence():
     divs = align_engines(a, b, confusion_set=CONFUSION)
     assert divs
     # 数字 2 仍在，含数字的分歧应 high
-    assert any(d.priority == "high" for d in divs)
+    assert any(d.priority == "P0" for d in divs)
 
 
 def test_load_confusion_keys_split(tmp_path: Path):

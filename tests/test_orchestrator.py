@@ -430,7 +430,7 @@ def _high_divergences() -> list:
         "黄芪二钱，当归三钱，白术三钱",
         confusion_set={},
     )
-    high = [d for d in divs if d.priority == "high"]
+    high = [d for d in divs if d.priority in ("P0", "P1", "high")]
     assert len(high) >= 2, f"预期 ≥2 个 high 分歧，实际 {len(high)}"
     return high
 
@@ -671,7 +671,7 @@ def test_success_cross_check_high_no_vl(monkeypatch, tmp_path):
     assert result.pages  # 成功页文本仍产出
     db = BookDB("bk_succ_novl", db_dir=str(tmp_path))
     divs = db.get_cross_divergences(page_no=0)
-    assert any(d["priority"] == "high" for d in divs)
+    assert any(d["priority"] in ("P0", "P1") for d in divs)
     anomalies = db.get_unresolved_anomalies()
     assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
 
@@ -728,9 +728,9 @@ def test_success_cross_check_high_vl_resolved(monkeypatch, tmp_path):
     assert result.pages
     db = BookDB("bk_succ_vl", db_dir=str(tmp_path))
     divs = db.get_cross_divergences(page_no=0)
-    assert any(d["priority"] == "high" for d in divs)
+    assert any(d["priority"] in ("P0", "P1") for d in divs)
     # 全部 high 分歧状态被 VL 更新为 accepted_a
-    assert all(d["status"] == "accepted_a" for d in divs if d["priority"] == "high")
+    assert all(d["status"] == "accepted_a" for d in divs if d["priority"] in ("P0", "P1"))
     # resolved 不进人工队列
     anomalies = db.get_unresolved_anomalies()
     assert not any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
@@ -755,9 +755,9 @@ def test_failure_path_high_vl_arbitrates(monkeypatch, tmp_path):
     assert 0 in result.failed_pages  # 毒性文本仍 HumanGate
     db = BookDB("bk_fail_vl", db_dir=str(tmp_path))
     divs = db.get_cross_divergences(page_no=0)
-    assert any(d["priority"] == "high" for d in divs)
+    assert any(d["priority"] in ("P0", "P1") for d in divs)
     # VL 裁决写入状态
-    assert any(d["status"] == "both_wrong" for d in divs if d["priority"] == "high")
+    assert any(d["status"] == "both_wrong" for d in divs if d["priority"] in ("P0", "P1"))
     # 失败路径对所有 high 分歧仍进人工队列
     anomalies = db.get_unresolved_anomalies()
     assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
