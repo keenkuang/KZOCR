@@ -27,6 +27,7 @@ from kzocr.engine.types import (
 )
 from kzocr.doc import push_book_to_zai, export_markdown, import_proofread_package
 from kzocr.doc.freeze import freeze_custom_db
+from kzocr.storage.db import BookDB
 
 
 def _book_with_extras(code: str = "TCM-COV-001") -> BookResult:
@@ -230,3 +231,31 @@ def test_push_bookdb_persist_failure_logged(monkeypatch) -> None:
         assert pkg.exists()  # 导出包仍成功写出
     finally:
         pkg.unlink(missing_ok=True)
+
+
+def test_export_book_markdown_missing_book_raises(tmp_path) -> None:
+    """export_book_markdown book_code 不存在时抛出 ValueError。"""
+    db = tmp_path / "empty.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE IF NOT EXISTS Book (bookCode TEXT PRIMARY KEY, title TEXT, publisher TEXT, pubYear INTEGER)")
+    conn.close()
+    import pytest
+    with pytest.raises(ValueError, match="未找到书籍"):
+        from kzocr.doc.export import export_book_markdown
+        export_book_markdown("no-such-book", db_path=str(db))
+
+
+def test_push_bookdb_persist_controlled_by_env_var(monkeypatch, tmp_path) -> None:
+    """persist_bookdb 未显式传递时由 KZOCR_PERSIST_DB=1 控制。"""
+    monkeypatch.setenv("KZOCR_PERSIST_DB", "1")
+    monkeypatch.setenv("KZOCR_DB_DIR", str(tmp_path))
+    book = _book_with_extras()
+    pkg = Path(tmp_path) / "e.db"
+    push_book_to_zai(book, db_path=pkg, skip_prisma_marker=True,
+                     register_postgres=False, persist_bookdb=None)
+    bdb = BookDB(book.book_code, db_dir=str(tmp_path))
+    try:
+        pages = bdb.get_book_pages()
+        assert len(pages) > 0
+    finally:
+        bdb.close()
