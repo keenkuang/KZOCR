@@ -18,6 +18,19 @@
 
 ---
 
+## v2026-07-20 续 — v4 扩面结论落地（脚本增强 + high 占比判据 + 覆盖率补测）
+
+> 文档/ANA/纯逻辑测试，无运行时风险；全量 **753 passed + 2 skipped**（较 v0.21.0 的 738 +15）
+
+| 模块 | 说明 |
+|------|------|
+| 扩面脚本增强 | `scripts/e2e_expand_books.py` 新增 `--body-start N`（采样跳过封面/目录区从正文起算）+ `render_page` 返回 `(img, healthy)` 对 fitz 文本层缺失且图像非空白的页标记 `healthy=False`（疑似 xref 损坏丢字），`count_book` 收集 `render_warnings`；新增 4 例回归测试 |
+| high 占比二级判据 | `orchestrator._is_conservative(tally)`：全书 high/总分歧 ≥ 0.40（样本 ≥10 页）进入保守模式；`_arbitrate_high_divergences(conservative=True)` 即便 VL 明确接受也全部留人工复核；`orchestrate_book` 维护全书分歧累计 tally 并同源回写成功/失败两路径；新增 4 例单测（保守覆盖接受/默认路由回归/阈值/tally 串流集成） |
+| 覆盖率补测 | `kzocr/engine/prompt_manager.py` 纯文件 I/O 逻辑补 7 例单测（save/load 往返、缺失返回 None、损坏文件回退、list 含加载失败项、delete、init_defaults 幂等、KZOCR_PROMPT_DIR 覆盖），覆盖率 **74% → 98%** |
+| 文档 | `docs/e2e-expand-divergence.md` §7.4 三项修订建议标注已落地并附提交号 |
+
+---
+
 ## v2026-07-19 — v0.21.0 零资源收口（卫生/注解/测试/默认跨校验）
 
 > **740 tests**（740 passed + 2 skipped；净增 8 = ratelimit 新测试 + 注册表纯逻辑测试）；ruff --select ANN 核心模块清零；覆盖率核心模块 83%、ratelimit 90%。自 v0.20.0 以来 ~30 笔提交通通无运行时变更。

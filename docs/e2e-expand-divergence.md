@@ -111,9 +111,11 @@ KZOCR v0.7 的跨引擎分歧检测（`cross_align.run_cross_align`，PaddleOCR 
 
 ### 7.4 对流水线含义的修订（补充 §6）
 
-- **high 占比作为自动仲裁可信度的二级判据**：high 占比高的书（mi-678、速查表）送 §5.5 VL 仲裁时 unresolved 比例更高、需人工兜底更多；high 占比低的书分歧多为易判差异，可更激进自动接受。
-- **采样协议修正**：扩面/抽检脚本应跳过封面目录区，从正文首页起算 N 页，否则分歧率数字偏低失真。
-- **PDF 健康度回检**：对带 MuPDF xref 告警的源文件，渲染后比对文本非空，避免损坏页静默丢字。
+> 以下三项建议均已落地（2026-07-20，见 `9b87c7e` / `f5ce35d`）。
+
+- **high 占比作为自动仲裁可信度的二级判据**：high 占比高的书（mi-678、速查表）送 §5.5 VL 仲裁时 unresolved 比例更高、需人工兜底更多；high 占比低的书分歧多为易判差异，可更激进自动接受。**→ 已落地**：`orchestrator._is_conservative(tally)` 在全书 high/总分歧 ≥ 0.40（样本 ≥10 页）时进入保守模式，`_arbitrate_high_divergences(conservative=True)` 即便 VL 明确接受也全部留人工复核。
+- **采样协议修正**：扩面/抽检脚本应跳过封面目录区，从正文首页起算 N 页，否则分歧率数字偏低失真。**→ 已落地**：`scripts/e2e_expand_books.py` 新增 `--body-start N`，采样从正文起始页起算。
+- **PDF 健康度回检**：对带 MuPDF xref 告警的源文件，渲染后比对文本非空，避免损坏页静默丢字。**→ 已落地**：`render_page` 返回 `(img, healthy)`，fitz 文本层缺失且图像非空白时标记 `healthy=False`，`count_book` 收集 `render_warnings` 供核查。
 - **耗时稳定**：9 本单页均值 ~21s，与 PaddleOCR 基准（21s/页）一致，证明扩面流程在长作业下无退化。
 
 ## 8. 复现
