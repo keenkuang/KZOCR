@@ -1,7 +1,20 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-21 续十一
+> 文档版本：v2026-07-21 续十二
 > 最后更新：2026-07-21 CST
+
+---
+
+## v2026-07-21 续十二 — 缺口②：tcm_ocr RuntimeDB 接回 book_pipeline
+
+> 闭环 db-layering.md §7.4 的**深层架构不兼容缺口（缺口②）**：让 `book_pipeline` 在受控开关下构造真正的 `RuntimeDB` 并把三个知识抽取模块接入自动发现链路，使 `knowledge/*/auto_discover.py` 从死代码复活。新增 9 例 mock 测试 + AST 硬守卫；全量 **1003 passed + 2 skipped + 2 deselected**，ruff 全过。版本号维持 **0.25.0**（增量接线，无行为变更）。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/tcm_ocr/pipeline/book_pipeline.py` | **缺口② 闭环**：`__init__` 新增 `self.db_runtime`（受控）；新增 `_init_runtime_db(pg_dsn)`（读 `KZOCR_TCM_KNOWLEDGE`，默认关闭；PG 缺失/构造失败→`None` 无害降级）；新增 `_run_knowledge_auto_discovery(book_id)`（经 `BookConnAdapter` 包装 `current_db_book` 满足 `BookDbConn`，依次调 `auto_discover_{herb,meridian,context}_patterns`，异常非致命）。`process_book` 自动发现步骤改为「`db_runtime` 已构造→知识模块；否则→原 `pipeline/auto_discovery.py` 裸 SQL 桩」——**默认路径零行为变更**。 |
+| `tests/test_tcm_ocr_runtime_db_wiring.py`（新增，9 例） | 受控构造 RuntimeDB（开/关/空 dsn/构造失败降级）、知识路径调用 `create_*_pattern`、raw sqlite 经 `BookConnAdapter` 包装、异常非致命、`db_book` 为空跳过、**AST 硬守卫**三个知识模块被 `book_pipeline` 引用。全部 MagicMock PG + 内存 SQLite，CI 无真实 PG。 |
+
+> 范围边界（呼应 db-layering §7）：不改 `archival.py` 裸 SQL，不统一 `archival` 与 `RuntimeDB.archive_*`，不删 `book_db.py`/`BookConnAdapter`，不改 `web/app.py`，不碰主线 `BookDB`，不做指针统一与 schema 合并。开关 `KZOCR_TCM_KNOWLEDGE` 默认 0，置 0 即完全回到冻结栈行为。prod 启用需 Postgres 可用且存在 `HerbOCRPattern`/`MeridianPointOCRPattern`/`FormulaContextPattern` 三表（DDL 属生产前置，不在本代码范围）。
 
 ---
 

@@ -89,6 +89,10 @@ class BookPipeline:
         # 初始化 PostgreSQL 连接
         self.db_pg = self._init_postgresql(config.get("pg_dsn", ""))
 
+        # 缺口②：受控构造 RuntimeDB（默认关闭，KZOCR_TCM_KNOWLEDGE=1 时启用），
+        # 供知识模块自动发现接回使用；未启用或构造失败时为 None，不进入知识路径。
+        self.db_runtime: object = self._init_runtime_db(config.get("pg_dsn", ""))
+
         # 初始化 OCR 引擎
         self.engines = self._init_engines(config.get("engine_configs", {}))
 
@@ -153,6 +157,64 @@ class BookPipeline:
         except Exception as e:
             logger.error("PostgreSQL 连接失败: %s", e)
             return None
+
+    def _init_runtime_db(self, pg_dsn: str) -> object:
+        """缺口②：受控构造 RuntimeDB（PostgreSQL 运行库），供知识模块自动发现接回。
+
+        由环境变量 ``KZOCR_TCM_KNOWLEDGE`` 控制（默认关闭）。以下情况返回 ``None``，
+        知识模块自动发现路径不进入（冻结栈行为不变）：
+
+        - 开关未开启；
+        - ``pg_dsn`` 为空；
+        - RuntimeDB 构造失败（psycopg2 缺失 / DSN 错误 / 连接池初始化失败）。
+        """
+        if os.environ.get("KZOCR_TCM_KNOWLEDGE", "0").strip().lower() not in (
+            "1", "true", "yes", "on",
+        ):
+            return None
+        if not pg_dsn:
+            logger.warning("KZOCR_TCM_KNOWLEDGE=1 但 pg_dsn 未配置，跳过 RuntimeDB 构造")
+            return None
+        try:
+            from kzocr.tcm_ocr.database.postgres.runtime_db import RuntimeDB
+
+            return RuntimeDB(dsn=pg_dsn)
+        except Exception as e:  # noqa: BLE001 - 构造失败无害降级，不阻断主链路
+            logger.warning("RuntimeDB 初始化失败，跳过知识模块自动发现: %s", e)
+            return None
+
+    def _run_knowledge_auto_discovery(self, book_id: str) -> None:
+        """缺口②：经 RuntimeDB 接回三个知识抽取模块（默认关闭，需 ``db_runtime`` 已构造）。
+
+        依次调用 ``auto_discover_herb_ocr_patterns`` / ``auto_discover_meridian_patterns`` /
+        ``auto_discover_context_patterns``，将 OCR 范式写入 ``HerbOCRPattern`` /
+        ``MeridianPointOCRPattern`` / ``FormulaContextPattern`` 三张表。
+
+        ``current_db_book`` 经 ``BookConnAdapter`` 包装以满足 ``BookDbConn`` 契约
+        （知识模块依赖 ``get_cursor``）。任意异常被捕获，不阻断主 OCR 闭环。
+        """
+        db_book = self.current_db_book
+        if db_book is None:
+            logger.warning("[%s] 知识模块自动发现跳过：current_db_book 为空", book_id)
+            return
+        if not isinstance(db_book, BookDbConn):
+            db_book = BookConnAdapter(db_book)
+        try:
+            from kzocr.tcm_ocr.knowledge.context_pattern.auto_discover import (
+                auto_discover_context_patterns,
+            )
+            from kzocr.tcm_ocr.knowledge.herb_pattern.auto_discover import (
+                auto_discover_herb_ocr_patterns,
+            )
+            from kzocr.tcm_ocr.knowledge.meridian_pattern.auto_discover import (
+                auto_discover_meridian_patterns,
+            )
+
+            auto_discover_herb_ocr_patterns(book_id, db_book, self.db_runtime)
+            auto_discover_meridian_patterns(book_id, db_book, self.db_runtime)
+            auto_discover_context_patterns(book_id, db_book, self.db_runtime)
+        except Exception as e:  # noqa: BLE001 - 知识模块失败非致命
+            logger.warning("[%s] 知识模块自动发现跳过（非致命）: %s", book_id, e)
 
     def _init_engines(self, engine_configs: Dict[str, Any]) -> Dict[str, Any]:
         """初始化 OCR 引擎。
@@ -586,8 +648,11 @@ class BookPipeline:
             logger.info("[%s] 阶段 CER 回填完成", book_id)
 
             # 10. 自动发现
-            if self.config.get("enable_auto_discovery", True) and self.db_pg:
-                _run_auto_discovery(book_id, self.current_db_book, self.db_pg)
+            if self.config.get("enable_auto_discovery", True):
+                if self.db_runtime is not None:
+                    self._run_knowledge_auto_discovery(book_id)
+                elif self.db_pg:
+                    _run_auto_discovery(book_id, self.current_db_book, self.db_pg)
                 logger.info("[%s] 自动发现完成", book_id)
 
             # 11. 生成最终交付物
