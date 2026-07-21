@@ -677,7 +677,7 @@ async def health() -> dict[str, Any]:
         db_ok = False
     return {
         "status": "ok" if db_ok else "degraded",
-        "version": "0.19.0",
+        "version": __version__,
         "db_dir": dbd,
         "db_accessible": db_ok,
     }

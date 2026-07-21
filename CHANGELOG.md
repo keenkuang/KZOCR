@@ -1,7 +1,25 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-21 续十三
-> 最后更新：2026-07-21 CST
+> 文档版本：v2026-07-22 版本一致性
+> 最后更新：2026-07-22 CST
+
+---
+
+## v2026-07-22 版本号一致性校验与修复（维护性，版本维持 0.25.0）
+
+> 按发版版本 bump 检查清单（记忆 `README_badge_count.md` A–F 分区）全量校验各文件版本戳，
+> 发现并订正两处陈旧版本残留；**无功能变更，版本号维持 0.25.0**；ruff 全过。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/web/app.py` | **修复 ①**：`/health` 接口 `{"version": "0.19.0"}` 硬编码陈旧值 → 改引用 `__version__`（与 FastAPI `app.version` 一致）。此前同一文件 FastAPI 实例已用 `__version__`（L29），唯独健康检查端点遗漏，现实测返回 `0.25.0`。 |
+| `kzocr/tcm_ocr/__init__.py` | **修复 ②**：`__version__` 长期停在 `"0.19.0"` → 订正为 `"0.25.0"`。依据提交 `464f68e`（版本号统一补提交）明确将 `kzocr/__init__.py`/`web/app.py`/`tcm_ocr/__init__.py` 三者一并统一至 `0.19.0`，证明 tcm_ocr 的 `__version__` 本就属主包版本线，后续 0.19.0→0.25.0 的历次 bump 只是遗漏。该值为仓库内无引用的死值，改动零功能风险。 |
+| `memory/README_badge_count.md` | 将版本一致性记忆重构为 A–F 发版 bump 检查清单；**校正旧误解**：原记忆称 tcm_ocr `__version__` 为"独立遗留版本、勿改"，已据 git 历史更正为"属主包版本线、须随主线 bump"；独立保留的 `tcm_ocr/web/app.py` 的 `API_VERSION="1.1.0"`（API 契约版本）。 |
+
+> **校验结论**：权威源 `pyproject.toml` / `kzocr/__init__.py`、手动线 `tcm_ocr/__init__.py`、文档戳
+> `README.md` 双徽章 / `CODEBUDDY.md` 两处 / `scheduler/__init__.py` docstring、派生点 `web/app.py`+`cli.py`
+> 全部 = `0.25.0`；活跃代码无残留 `0.19.0`–`0.24.0`；运行时实测 `kzocr` 与 `kzocr.tcm_ocr` 均为
+> `0.25.0`；唯一有意分离的是 `tcm_ocr` 的 `API_VERSION=1.1.0`（正确保留）。
 
 ---
 
