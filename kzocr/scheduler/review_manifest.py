@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import difflib
 import html
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal, Optional, Tuple
 
@@ -220,6 +221,38 @@ def build_review_manifest(db: BookDB) -> ReviewManifest:
         book_code=db.book_code,
         pages=page_items,
     )
+
+
+def export_review_manifest_json(
+    manifest: ReviewManifest,
+    out_path: Optional[str] = None,
+) -> str:
+    """将审核清单序列化为 JSON 文件，返回写出路径。
+
+    便于外部校对台 / CI / 数据交换消费。结构::
+
+        {"book_code": "...", "pages": [
+            {"page_num": 1, "priority": "P0",
+             "engine_results": {...}, "issues": [{...}]}
+        ]}
+
+    Args:
+        manifest: ReviewManifest（由 ``build_review_manifest`` 构建）。
+        out_path: 输出 JSON 路径；缺省为 ``<book_code>_review_manifest.json``。
+
+    Returns:
+        实际写出的 JSON 文件路径。
+    """
+    payload = {
+        "book_code": manifest.book_code,
+        "pages": [asdict(p) for p in manifest.pages],
+    }
+    path = out_path or f"{manifest.book_code}_review_manifest.json"
+    Path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
 
 
 def feedback_apply(manifest: ReviewManifest, db: BookDB) -> int:

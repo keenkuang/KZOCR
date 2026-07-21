@@ -10,6 +10,7 @@ from kzocr.config import load_config
 from kzocr.scheduler.review_manifest import (
     build_review_manifest,
     export_divergence_html,
+    export_review_manifest_json,
     feedback_apply,
     visualize_char_boxes,
 )
@@ -17,11 +18,16 @@ from kzocr.storage.db import BookDB
 
 
 def cmd_review_manifest(args: argparse.Namespace) -> int:
-    """``kzocr review manifest <book_code>`` — 生成全书审核清单。"""
+    """``kzocr review manifest <book_code> [--json] [--out PATH]`` — 生成全书审核清单。"""
     cfg = load_config()
     db = BookDB(args.book_code, db_dir=cfg.scheduler.db_dir)
     try:
         manifest = build_review_manifest(db)
+        if getattr(args, "json", False):
+            out = getattr(args, "out", None)
+            path = export_review_manifest_json(manifest, out_path=out)
+            print(f"已导出审核清单 JSON：{path}")
+            return 0
         print(f"book_code={manifest.book_code}")
         print(f"pages={len(manifest.pages)}")
         for page in manifest.pages:
@@ -92,6 +98,8 @@ def build_review_parser(sub: argparse._SubParsersAction) -> None:
     vsub = pv.add_subparsers(dest="review_cmd", required=True)
     vm = vsub.add_parser("manifest", help="生成全书审核清单")
     vm.add_argument("book_code", help="书籍编码")
+    vm.add_argument("--json", action="store_true", help="导出审核清单为 JSON 文件")
+    vm.add_argument("--out", default=None, help="JSON 输出路径（默认 <book_code>_review_manifest.json）")
     vm.set_defaults(review_func=cmd_review_manifest)
     va = vsub.add_parser("apply", help="回写审核修正到 BookDB（支持多本批量）")
     va.add_argument("book_code", nargs="+", help="书籍编码（可多个，批量回写）")

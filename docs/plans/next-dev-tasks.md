@@ -1,11 +1,11 @@
 # KZOCR 下一轮开发任务计划
 
 > 起草：2026-07-20（v0.21.0 零资源收口 A/B/C/D 完成、全量 820 passed 已推送 main）
-> 最近更新：2026-07-20 续（W10 双 BookDB 统一保守收口已闭环并推送 main，全量 930 passed；v0.22.0）
+> 最近更新：2026-07-20 续十收尾（v0.22→v0.24.0 四大切入点 + 文档重构 + 索引体系 + CI 修复全部闭环，全量 968 passed + 2 skipped + 2 deselected，覆盖率 90%；HEAD `9a13eef`）
 > 适用：下一开发会话的待办候选。按价值/风险分层，默认仍走 **main 直推 + 零资源优先** 工作流。
 
-## 当前基线（已核实，2026-07-20 续）
-- 版本 **v0.22.0**；全量 **930 passed + 2 skipped + 2 deselected**（git HEAD `974f88f`，已推送 origin/main）；ruff 默认与 `--select ANN` 三引擎文件均通过。
+## 当前基线（已核实，2026-07-20 续十收尾）
+- 版本 **v0.24.0**；全量 **968 passed + 2 skipped + 2 deselected**（972 collected，2 deselected；git HEAD `9a13eef`，已推送 origin/main）；ruff 默认与 `--select ANN` 均通过；CI 在 Python 3.10/3.11/3.12 全绿（lint ✅、覆盖率 90% fail_under=80 ✅、docker ✅）。
 - 已落地：v0.7 自适应编排层、DB 分层（BookDB 内容表 + 导出/导入校对闭环）、真实引擎（PaddleOCR/RapidOCR/GLM-4V-Flash）+ 性能基线、Celery 生产接线（已端到端验证）、25 本扩面分歧实测 v4、high 占比二级判据、§5.5 Box-Guided VL 仲裁、零资源收口 A/B/C/D、W4 VL 预算控制、W5 Celery 可观测性、W6 xref 渲染回检、W7 终校回流混淆集、W10 双 BookDB 统一（保守收口）+ 自动发现 `BookConnAdapter` 契约闭环。
 - 覆盖率：核心模块 ~89%（排除 tcm_ocr 后）、ratelimit 95%、web/app.py 89%、prompt_manager 98%、scheduler 各模块 84–100%、registration 100%。
 - 主线**无真实未完成 TODO**（仅 book 级引擎的意图性 `NotImplementedError`）。
@@ -94,12 +94,42 @@
 
 ---
 
-## 推荐下轮启动顺序（2026-07-20 续更新）
+## P4 — 已闭环（v0.22 → v0.24.0 后续工作，2026-07-20 续十）
 
-- **W1–W7 已全部闭环并推送 main**：W4/W5 早实现；W6 `3b9423e`、W7 `90f6581`；W1 web 续补测本轮再推进至 89%（+18 测试）。
-- **W8/W3 已闭环**（见上）；W9 tcm_ocr ANN 本轮专项清零（192→0，提交 `bd1f4ba`）。
-- **W10 双 BookDB 统一（保守收口）+ 自动发现 `BookConnAdapter` 契约闭环**已推送 main（提交 `974f88f`），版本 0.21.0→0.22.0。
-- **当前状态**：全量 **930 passed + 2 skipped + 2 deselected**，核心覆盖率 ~89%（排除 tcm_ocr 后），web/app.py 89%，ruff 全过。
-- **P3 已无可选项**（W9 ANN 清零 + W10 闭环）——计划内 W1–W10 全部收口。
+> 以下工作已在 v0.24.0 全部闭环并推送 origin/main，详见项目记忆 `session_v07_forthcoming.md` 与 `project_doc_refactor_v023.md`（位于 `.codebuddy/projects/home-keen-KZOCR/memory/`）。
 
-> 注：以上为候选清单，原计划内任务已耗尽。下一轮如需继续，需从新方向立项（如：校对台/导出增强、质量/性能再提升、或知识模块 `RuntimeDB` 接回 `book_pipeline` 的独立架构任务）。开始前建议与用户确认聚焦哪 1–3 项。
+### F1  分歧高亮 HTML + 批量 apply ✅（`d83fcde`）
+- `export_divergence_html` 导出分歧高亮 HTML；`kzocr review html` 命令；支持批量 apply 人工修正。
+
+### F2  字符级 bbox 可视化 ✅（`c80f090`）
+- `visualize_char_boxes` 字符级 bbox 可视化；`kzocr review boxes` 命令。
+
+### F3  VL 仲裁自动回填 + 优先级 ✅（`b645ed1`）
+- VL 仲裁结果自动回填 `human_final`；issue 优先级三级（P0/P1/normal）。
+
+### F4  页级并发基准估算 ✅（`e6a6948`）
+- 脚本 `scripts/bench_page_concurrency.py` 估算页级并发吞吐。
+
+### 文档模块重构 ✅（`53686ef`）
+- `adapter/to_zai_prisma.py`（~586 行）拆分为 `kzocr/doc/{zai,export,proofread,freeze}.py` + `__init__.py`；统一导出路径，向后兼容委托层（adapter/__init__.py、export_zai.py 改委托 + DeprecationWarning）。
+
+### 索引体系 + CI 修复 ✅（`f2b63c1..9a13eef`）
+- 历史文档归档、`scripts/README.md`、`kzocr/ARCHITECTURE.md` + 12 包级 `PACKAGE_INDEX.md` + 各 `docs/` 子目录 `INDEX.md` + 交叉引用链接。
+- Postgres mock 测试 4 例、doc 边界补测 2 例、tcm_ocr knowledge 单测 14 例。
+- CI 修复：补 celery+redis 依赖（修复 2 测试收集崩溃）、ruff import 清理；最终 **3.10/3.11/3.12 全绿、覆盖率 90%、lint ✅、docker ✅**。
+
+---
+
+## 推荐下轮启动顺序（2026-07-20 续十收尾更新）
+
+- **W1–W10 全部闭环并推送 main**（v0.22.0，`974f88f`）；**F1–F4 四大切入点 + 文档重构 + 索引体系 + CI 修复全部闭环**（v0.24.0，`9a13eef`）。
+- **当前状态**：全量 **968 passed + 2 skipped + 2 deselected**（972 collected），覆盖率 **90%**（6025 行 / 610 未覆盖），ruff 全过，CI 3.10/3.11/3.12 全绿。
+- **计划内 W1–W10 与后续 F1–F4 均已收口**，原 next-dev-tasks 清单耗尽。
+
+> **真正待决（新方向，尚未立项）**：
+> 1. **低覆盖率模块优化**（已出报告待决）：`cli_review.py` 78%、`engine/run.py` 82%、`resources/__init__.py` 79%——继续补纯逻辑单测提覆盖。
+> 2. **校对台 / 导出增强**（原新方向①）。
+> 3. **质量 / 性能再提升**（原新方向②）。
+> 4. **tcm_ocr 知识模块 `RuntimeDB` 接回 `book_pipeline`**（缺口②，独立架构任务）。
+>
+> 开始前建议与用户确认聚焦哪 1–3 项。

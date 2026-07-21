@@ -1,7 +1,24 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-20 续十+08
-> 最后更新：2026-07-20 续十 CST
+> 文档版本：v2026-07-21 续十一
+> 最后更新：2026-07-21 CST
+
+---
+
+## v2026-07-21 续十一 — 低覆盖模块补测 + 校对清单 JSON 导出
+
+> **#1 低覆盖率模块优化**：补齐 cli_review.py / engine/run.py / resources/__init__.py 三个低覆盖模块的纯逻辑测试，cli_review `78%→100%`、engine/run `82%→93%`、resources `79%→100%`。**#2 校对台/导出增强**：`review_manifest` 新增 JSON 导出、`cli_review manifest` 支持 `--json/--out`。新增 4 个测试文件共 35 例，全量 **1003 passed + 2 skipped + 2 deselected**；ruff 全过。版本号 **0.24.0 → 0.25.0**。
+
+| 模块 | 说明 |
+|------|------|
+| `tests/test_cli_review_cmd.py`（新增） | **#1** cli_review 命令处理器补测：`cmd_review_manifest` / `cmd_review_apply` 多本批量（断言「合计回写 6 条修正（2 本）」）/ `cmd_review_html` / `cmd_review_boxes` / `cmd_review_manifest_json`（#2 的 `--json` 模式）。cli_review 覆盖 `78%→100%`。 |
+| `tests/test_engine_run_extra.py`（新增，231 行） | **#1** engine/run.py 纯逻辑分支：`_read_deliverable` 各分支、`_markdown_to_pages` 空分段、`_merge_cross_page_breaks` 空页/空续行/装饰行、`_process_vlm_page` 单页+OverSize、`_init_v07_registry` 真实引擎注册、`run_engine` persist_db 两分支、`_run_vlm` max_pages 截断。engine/run 覆盖 `82%→93%`。 |
+| `tests/test_resources_coverage.py`（新增，9 例） | **#1** resources/__init__.py 缺口：空 variant map / 其他键回退 / 模块加载入口 / seed 文件缺失降级 / overlay 缺失文件·非法 JSON·非 dict·dict 合并·标量覆盖。resources 覆盖 `79%→100%`。 |
+| `kzocr/scheduler/review_manifest.py` | **#2** 新增 `export_review_manifest_json(manifest, out_path=None)`：用 `dataclasses.asdict` 将 `ReviewManifest` 序列化为 JSON（`ensure_ascii=False, indent=2`），默认文件名 `{book_code}_review_manifest.json`。 |
+| `kzocr/cli_review.py` | **#2** `cmd_review_manifest` 支持 `if getattr(args, "json", False)` 走 JSON 导出；`build_review_parser` 的 `manifest` 子命令新增 `--json`（store_true）与 `--out` 参数。 |
+| `tests/test_review_export_json.py`（新增，2 例） | **#2** JSON 结构验证（`book_code` + `pages` 列表）+ 默认文件名。 |
+
+> 范围边界：#2 仅新增 JSON 导出通道，与既有 HTML/apply 子命令互不干扰；`--json` 与默认文本清单输出互斥（json 优先）。#1 全部为纯逻辑/零资源测试，不触碰运行时行为。
 
 ---
 
