@@ -38,6 +38,22 @@
 
 > **设计说明（conf 门控方向）**：`conf ≤ gate` → 页挂起人工复核。降低 gate（0.90→0.85）使「更少」页满足 `conf ≤ gate` → **人工队列缩小**；保守模式据此对脏书（高分歧）减少边界置信度页进队，同时上调共识抽样率（0.20）捕获「两引擎同错」盲区，净效应为更小、更高质量的人工队列（与计划「降低人工复核队列」一致）。早期样本不足（`_MIN_PAGES_FOR_RATIO=10`）与干净书（分歧率<0.30）不触发，避免翻跳。
 
+### 续十三·C — e2e 优先级语义全量对齐（修复 ② 并消除同源 web bug）
+
+> 背景：core 优先级已于某次升级改为 `P0`(剂量数字)/`P1`(形近字)/`normal`（历史 `high` 语义等同），`orchestrator.py` 已用 `in ("P0","P1","high")` 归入高优先队列。但部分消费点仍停留在旧 `== "high"`，导致 P0/P1 永远不被统计/显示。
+
+| 模块 | 说明 |
+|------|------|
+| `scripts/e2e_expand_books.py` | **修复 ②**：`count_book` 中 `n_high = sum(1 for d in divs if d.priority == "high")` → `in ("P0","P1","high")`。此前 `per_page[].high` 恒为 0（记忆记录的 e2e 扩面遗留 bug）；修正后 P0/P1 正确计入。 |
+| `kzocr/web/templates/divergences.html` | **新发现同源 bug**：复核台「高优先级」红色徽章 `{% if d.priority == 'high' %}` 对 P0/P1 永不显示 → 改为 `in ('P0','P1','high')`，并显示真实标签（`high`→"高"，`P0`/`P1`→原值）。过滤栏 `?priority=high` 链接保留。 |
+| `kzocr/web/app.py` | `book_divergences` / `api_divergences` 路由把用户面 `priority="high"` 映射为分组元组 `HIGH_PRIORITY_GROUP = ("P0","P1","high")`，使「高优先级」筛选与精确 `P0/P1/normal` 筛选均正确（此前 `?priority=high` 对 P0/P1 返回空集）。 |
+| `kzocr/storage/db.py` | `get_cross_divergences(priority=...)` 扩展为接受单值或序列：序列走 `priority IN (...)`（向后兼容单值/None，既有测试不受影响）。 |
+| `kzocr/scheduler/cross_align.py` | `Divergence.priority` 字段注解与类 docstring 由误导性的 `'high' \| 'normal'` 订正为 `P0/P1/normal`（历史曾用 `high`，语义等同）；零运行时变更。 |
+| `scripts/e2e_orchestrator.py` / `scripts/e2e_cross_engine_realbook.py` | 活跃扩面脚本的 `high` 计数同样改为 `in ("P0","P1","high")`（与 core 一致）。`scripts/archive/*` 死代码未动。 |
+| `tests/test_web_routes.py`（新增 1 例） | `test_divergences_high_priority_group_filter`：写入 P0/P1/high/normal 四类分歧，断言 HTML 与 JSON 路由的 `?priority=high` 返回 P0/P1/high 且排除 normal，精确 `?priority=P0`/`normal` 各自命中。 |
+
+> **e2e 遗留 ①**：`run_e2e_batch.py` 覆盖冲掉 07-19 全量 16 本 JSON 为历史数据损失（仅 `docs/e2e-expand-divergence.md` 存叙述数，不可复算）。当前 `e2e_expand_books.py` 已用 `--merge` + 每本书检查点机制按 `pdf` 键合并，不再覆盖，**非当前活 bug**。
+
 ---
 
 ## v2026-07-21 续十二 — 缺口②：tcm_ocr RuntimeDB 接回 book_pipeline

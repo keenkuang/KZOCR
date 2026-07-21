@@ -336,7 +336,7 @@ class Divergence:
     """一个跨引擎字符级分歧点。
 
     page_no 由 `run_cross_align` / 调用方填充；纯 `align_engines` 默认 0。
-    priority='high' 表示数字/剂量分歧或命中形近字黑名单，应优先送人工/视觉仲裁。
+    priority='P0' 表示数字/剂量分歧，'P1' 表示命中形近字黑名单，二者均优先送人工/视觉仲裁（历史曾用 'high'，语义等同）。
     """
 
     page_no: int = 0
@@ -345,7 +345,7 @@ class Divergence:
     b_seg: str = ""  # 引擎 B 侧片段（delete 时为空）
     a_context: str = ""  # ±ctx 字上下文，分歧处用【】标出
     boxes: list[list[int]] = field(default_factory=list)  # 引擎 A 侧字符 box 列表（可选）
-    priority: str = "normal"  # 'high' | 'normal'
+    priority: str = "normal"  # 'P0' | 'P1' | 'normal'（历史曾用 'high'，现由 P0/P1 取代；orchestrator 将三者一并归入高优先队列）
     status: str = "pending"  # pending / arbitrated / accepted_a / accepted_b / both_wrong / skipped
     engine_a: str = ""
     engine_b: str = ""

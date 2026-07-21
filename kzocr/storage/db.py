@@ -590,17 +590,28 @@ class BookDB:
         return rows
 
     def get_cross_divergences(
-        self, page_no: int | None = None, priority: str | None = None
+        self,
+        page_no: int | None = None,
+        priority: str | list[str] | tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
-        """读取跨引擎分歧（可选按页号/优先级过滤），按 id 升序。"""
+        """读取跨引擎分歧（可选按页号/优先级过滤），按 id 升序。
+
+        priority 可为单值（精确匹配），也可为序列（IN 匹配，用于「高优先」分组
+        P0/P1/high）。None 表示不过滤。
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if page_no is not None:
             clauses.append("page_no=?")
             params.append(page_no)
         if priority is not None:
-            clauses.append("priority=?")
-            params.append(priority)
+            if isinstance(priority, (list, tuple)):
+                placeholders = ",".join("?" for _ in priority)
+                clauses.append(f"priority IN ({placeholders})")
+                params.extend(priority)
+            else:
+                clauses.append("priority=?")
+                params.append(priority)
         sql = "SELECT * FROM cross_divergence"
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)

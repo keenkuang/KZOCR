@@ -432,6 +432,44 @@ def test_api_divergences_with_data(client: TestClient, populated) -> None:
     assert len(r.json()) >= 1
 
 
+def test_divergences_high_priority_group_filter(client: TestClient, dirs) -> None:
+    """「高优先级」筛选须覆盖升级后的 P0/P1/high 分组，而非仅旧 'high'。
+
+    回归：core 优先级已改为 P0/P1/normal，旧消费点（web 模板/路由筛选）
+    若仍用 == 'high' 会漏掉 P0/P1 分歧。
+    """
+    from kzocr.scheduler.cross_align import Divergence
+
+    db = BookDB("bk_prio", db_dir=_db_dir())
+    db.write_cross_divergences(
+        1,
+        [
+            Divergence(page_no=1, div_type="replace", a_seg="三", b_seg="二", priority="P0"),
+            Divergence(page_no=1, div_type="replace", a_seg="甲", b_seg="申", priority="P1"),
+            Divergence(page_no=1, div_type="replace", a_seg="x", b_seg="y", priority="high"),
+            Divergence(page_no=1, div_type="replace", a_seg="ØNØ", b_seg="b", priority="normal"),
+        ],
+        engine_a="t1", engine_b="t2",
+    )
+    db.close()
+
+    # HTML 路由：高优先级分组含 P0/P1/high（"三"），不含 normal（独特标记 "ØNØ"）
+    r = client.get("/book/bk_prio/divergences?priority=high")
+    assert r.status_code == 200
+    assert "三" in r.text and "ØNØ" not in r.text
+
+    # JSON 路由：高优先级分组三类齐全
+    j = client.get("/api/books/bk_prio/divergences?priority=high").json()
+    assert {d["priority"] for d in j} == {"P0", "P1", "high"}
+
+    # 精确筛选：P0 仅返回 P0；normal 仅返回 normal
+    jp0 = client.get("/api/books/bk_prio/divergences?priority=P0").json()
+    assert {d["priority"] for d in jp0} == {"P0"}
+    jn = client.get("/api/books/bk_prio/divergences?priority=normal").json()
+    assert {d["priority"] for d in jn} == {"normal"}
+
+
+
 def test_api_resolve_with_data(client: TestClient, populated) -> None:
     aid = _first_anomaly_id()
     r = client.post(f"/api/books/bk1/anomalies/{aid}/resolve")

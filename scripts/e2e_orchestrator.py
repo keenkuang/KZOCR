@@ -77,7 +77,7 @@ def main() -> int:
     )
 
     print(f"[info] 编排参数: pages={args.pages} cross_check={args.cross_check} sample_rate={args.sample_rate}")
-    print(f"[info] 启动 orchestrate_book ...")
+    print("[info] 启动 orchestrate_book ...")
     import time
     t0 = time.time()
     result = orchestrate_book(args.pdf, args.book_code, cfg, reg, overrides=overrides)
@@ -96,7 +96,7 @@ def main() -> int:
     db = BookDB(args.book_code, db_dir=args.db_dir)
     divs = db.get_cross_divergences()
     if divs:
-        high = [d for d in divs if d["priority"] == "high"]
+        high = [d for d in divs if d["priority"] in ("P0", "P1", "high")]
         print(f"  跨引擎分歧: {len(divs)} (high {len(high)})")
     anomalies = db.get_anomalies()
     if anomalies:

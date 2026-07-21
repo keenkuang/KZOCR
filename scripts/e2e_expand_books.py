@@ -109,7 +109,10 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
         a = paddle.run_page(PageInput(page_num=pno, img=img)).text or ""
         b = rapid.run_page(PageInput(page_num=pno, img=img)).text or ""
         divs = run_cross_align(pno, a, b, confusion_set=confusion_set)
-        n_high = sum(1 for d in divs if d.priority == "high")
+        # 优先级语义：core 用 P0/P1/normal（见 cross_align._is_priority），
+        # orchestrator 将 P0/P1/high 一并归入「高优先」分歧队列。此处与之对齐，
+        # 否则 P0(剂量数字)/P1(形近字) 永不被统计，per_page[].high 恒为 0。
+        n_high = sum(1 for d in divs if d.priority in ("P0", "P1", "high"))
         total += len(divs)
         high += n_high
         processed_new += 1

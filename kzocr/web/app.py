@@ -19,6 +19,10 @@ from kzocr import __version__
 from kzocr.scheduler.cross_align import add_learned_confusion
 from kzocr.storage.db import BookDB
 
+# 用户面的「高优先级」筛选分组：core 优先级已升级为 P0/P1/normal，
+# 其中 P0(剂量数字)/P1(形近字) 与历史 'high' 在编排层一并归入高优先队列。
+HIGH_PRIORITY_GROUP: tuple[str, ...] = ("P0", "P1", "high")
+
 app = FastAPI(
     title="KZOCR REST API",
     description="中医古籍 OCR 编排系统 API。管理书籍、方剂、校对异常、质检结果。",
@@ -602,7 +606,8 @@ async def book_divergences(
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
     try:
-        items = db.get_cross_divergences(page_no=page, priority=priority or None)
+        prio_filter = HIGH_PRIORITY_GROUP if priority == "high" else (priority or None)
+        items = db.get_cross_divergences(page_no=page, priority=prio_filter)
     except Exception:
         items = []
     finally:
@@ -887,11 +892,15 @@ async def api_divergences(
     page: int = Query(None, description="按页号过滤"),
     priority: str = Query(None, description="按优先级过滤（high/normal）"),
 ) -> list[dict[str, Any]]:
-    """返回跨引擎分歧列表（JSON）。可选按页号/优先级过滤。"""
+    """返回跨引擎分歧列表（JSON）。可选按页号/优先级过滤。
+
+    priority="high" 映射到高优先分组（P0/P1/high）；其余按精确值匹配。
+    """
     dbd = _db_dir()
     db = BookDB(book_code, db_dir=dbd)
     try:
-        return db.get_cross_divergences(page_no=page, priority=priority)
+        prio_filter = HIGH_PRIORITY_GROUP if priority == "high" else priority
+        return db.get_cross_divergences(page_no=page, priority=prio_filter)
     finally:
         db.close()
 

@@ -158,7 +158,7 @@ def main() -> int:
             confusion_set=confusion_set,
             engine_a="PaddleOCR", engine_b="RapidOCR",
         )
-        high = [d for d in divs if d.priority == "high"]
+        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
         if divs:
             db.write_cross_divergences(i, divs, engine_a="PaddleOCR", engine_b="RapidOCR")
         if high:

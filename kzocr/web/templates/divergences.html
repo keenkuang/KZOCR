@@ -45,7 +45,7 @@
                     </td>
                     <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate" title="{{ d.a_context }}">{{ d.a_context }}</td>
                     <td class="px-4 py-3">
-                        {% if d.priority == 'high' %}<span class="badge-red">高</span>
+                        {% if d.priority in ('P0', 'P1', 'high') %}<span class="badge-red">{{ '高' if d.priority == 'high' else d.priority }}</span>
                         {% else %}<span class="badge-gray">普通</span>{% endif %}
                     </td>
                     <td class="px-4 py-3">
