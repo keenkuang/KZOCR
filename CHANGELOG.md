@@ -12,9 +12,12 @@
 > `_PageOutcome`/`_PageContext`，开启 `KZOCR_PAGE_PARALLEL` 时 `ThreadPoolExecutor` 跨页并行（每 worker
 > 独立 `fitz` 渲染隔离），**合并阶段单线程串行**写 BookDB / 引擎统计 / `tally` / 延迟 VLM 仲裁
 > （`_vl_lock` 串行视觉调用）。延迟优化（③）随并发一并交付：墙钟从 Σ(page_i) 降至 ~Σ/N。
-> 全部默认关闭，冻结栈行为不变。新增 8 例 mock 测试（`tests/test_orchestrator_parallel.py`），
-> 全量 **1020 passed + 2 skipped + 2 deselected**（较 1012 +8），ruff 全过。版本号维持 **0.25.0**。
-> 工作流 B（② 自适应共识抽样 + 旋钮 env 化）见续十三·B。
+> 全部默认关闭，冻结栈行为不变。新增 8 例 mock 测试（`tests/test_orchestrator_parallel.py`）。
+> 工作流 B（② 自适应共识抽样 + 旋钮 env 化）同段交付：保守模式 `KZOCR_CONSERVATIVE_MODE`
+> 按实时分歧率动态收紧 conf 门限（0.90→0.85，边界置信度页减少进人工队列）+ 上调共识抽样率
+> （0→0.20），对脏书自动加严、干净书不受影响；串行主循环与并行合并阶段统一采用自适应质量参数。
+> 新增 9 例 mock 测试（`tests/test_orchestrator_quality.py`），全量 **1029 passed + 2 skipped
+> + 2 deselected**（较 1020 +9），ruff 全过。版本号维持 **0.25.0**。
 
 | 模块 | 说明 |
 |------|------|
@@ -24,6 +27,16 @@
 
 > 共享状态安全清单：db（仅合并阶段单线程写）、registry/engine_usage_counter（仅合并 `record`）、`tally`（页内算 delta、合并累加后判保守模式）、`pages_text`/`pages_order`/`trace`（合并 extend）、`fitz` Document（每 worker 独立打开）、`vision_adapter`/`vl_budget`（worker/合并均经 `_vl_lock` 串行）。降级：开关默认 0，置 0 即完全回到串行冻结栈行为。
 > 范围边界：不改 `archival.py` / 主线 `BookDB` schema / `web/app.py`；不删任何代码；不引入外部依赖；并发仅用标准库 `ThreadPoolExecutor`。
+
+### 续十三·B — 工作流 B：分歧率 / 质量优化（② 自适应共识抽样 + 旋钮 env 化）
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/orchestrator.py` | **工作流 B**：② 新增模块级常量 `_CONSERVATIVE_MODE`（读 `KZOCR_CONSERVATIVE_MODE`，默认关）、`_CONSERVATIVE_DIV_RATIO_THRESHOLD=0.30`（实时分歧率阈值）、`_CONSERVATIVE_BOOST_SAMPLE_RATE=0.20`（上调抽样率）、`_CONSERVATIVE_TIGHTEN_CONF_GATE=0.85`（收紧门限）、`_MIN_PAGES_FOR_RATIO=10`（早期样本不足不翻跳）；新增 `_adaptive_quality_params(tally, processed_pages, base_sample_rate) -> (抽样率, conf门限)`，保守模式且已处理页数达阈值且实时分歧率超阈值时返回 `(max(base,0.20), min(base_gate,0.85))`，否则返回基线值（行为不变）。串行主循环（L1465-1526）与并行合并阶段（`_run_book_parallel`）均调用该函数，按累计 `tally` 逐页取自适应 `rate/gate`：低置信度 PASS 页（`conf≤gate`）挂起待人工复核（合并阶段统一判定，串行等价）；共识一致页按自适应 `rate` 抽样送视觉仲裁。**并行路径修复**：worker 不再 Bake conf 门控（改合并阶段决策，依赖跨页累计 tally）；合并阶段从 `_DeferredCrossCheck.tally_div/tally_high` 累计 `tally`（此前 `_PageOutcome.tally_div` 始终为 0，致 `tally` 恒空、保守模式与 `_is_conservative` 在并行路径失效）。 |
+| `kzocr/config.py` | `SchedulerConfig.from_env` 已读 `KZOCR_CONSENSUS_SAMPLE_RATE`（L85，默认 0.0）；`consensus_sample_rate` 经 `run.py` 注入 `EngineOverrides`，env 旋钮已生效（无需改动）。 |
+| `tests/test_orchestrator_quality.py`（新增，9 例） | `_adaptive_quality_params` 单元：默认关=基线；开启+高分歧(且页数足)=上调抽样率+收紧 gate 至 0.85；低分歧/早期页数不足=基线。串行：保守模式对高分歧书降低 conf_low 队列（gate 0.85→0.88 不再进队）、干净书不变。`KZOCR_CONSENSUS_SAMPLE_RATE` 经 `SchedulerConfig.from_env` 生效；共识抽样率 rate=0 不抽样 / rate=1.0 全抽样。并行：合并阶段同样尊重保守模式自适应门控（与串行等价，验证并行 tally 累计修复）。全程 mock 引擎 + mock 渲染，无真实 PDF/网络。 |
+
+> **设计说明（conf 门控方向）**：`conf ≤ gate` → 页挂起人工复核。降低 gate（0.90→0.85）使「更少」页满足 `conf ≤ gate` → **人工队列缩小**；保守模式据此对脏书（高分歧）减少边界置信度页进队，同时上调共识抽样率（0.20）捕获「两引擎同错」盲区，净效应为更小、更高质量的人工队列（与计划「降低人工复核队列」一致）。早期样本不足（`_MIN_PAGES_FOR_RATIO=10`）与干净书（分歧率<0.30）不触发，避免翻跳。
 
 ---
 

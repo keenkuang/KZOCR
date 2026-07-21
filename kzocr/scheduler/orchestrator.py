@@ -131,10 +131,13 @@ class _PageOutcome:
     last_engine: str = "unknown"
     last_latency: int = 0
     db_ops: list = field(default_factory=list)  # list[functools.partial[db.xxx]]
-    success_divs: list = field(default_factory=list)  # list[(divs, high)]
+    success_divs: list = field(default_factory=list)  # list[_DeferredCrossCheck]
     success_is_consensus: bool = False
+    # 共识一致页（候选送视觉抽样）；合并阶段按保守模式自适应抽样率决定实际抽样。
     consensus_sample_request: bool = False
-    tier3_divs: list = field(default_factory=list)  # list[(divs, high)]
+    tier1_passed: bool = False  # Tier1 校验通过（conf 门控判定在合并阶段最终化）
+    page_conf: float = 1.0  # Tier1 引擎置信度（合并阶段用于保守模式 conf 门控）
+    tier3_divs: list = field(default_factory=list)  # list[_DeferredCrossCheck]
     page_img: Optional["np.ndarray"] = None
     tally_div: int = 0
     tally_high: int = 0
@@ -452,6 +455,40 @@ def _run_tier3_divergence(
 HIGH_RATIO_CONSERVATIVE_THRESHOLD = 0.40
 # 全书样本不足此页数时不进入保守模式，避免早期 high 占比翻跳。
 _MIN_PAGES_FOR_RATIO = 10
+
+# ── 工作流 B：保守模式（KZOCR_CONSERVATIVE_MODE，默认关）自适应质量参数 ──
+# 实时分歧率（tally.div / 已处理页数）超阈值时，对脏书自动加严：上调共识抽样率 +
+# 收紧 conf 门限，使脏书（高分歧）自动加严、干净书不受影响。
+_CONSERVATIVE_MODE = _safe_bool(os.environ.get("KZOCR_CONSERVATIVE_MODE", ""), False)
+_CONSERVATIVE_DIV_RATIO_THRESHOLD = 0.30   # 实时分歧率超此值进入保守加严
+_CONSERVATIVE_BOOST_SAMPLE_RATE = 0.20     # 保守模式上调后的共识抽样率
+_CONSERVATIVE_TIGHTEN_CONF_GATE = 0.85     # 保守模式收紧后的 conf 门限（低于默认 0.90）
+
+
+def _adaptive_quality_params(tally: dict, processed_pages: int, base_sample_rate: float) -> tuple[float, float]:
+    """工作流 B：保守模式下按实时分歧率动态返回 (抽样率, conf门限)。
+
+    默认关（``_CONSERVATIVE_MODE=False``）时直接返回基线值，行为不变。开启后，已处理页数
+    达 ``_MIN_PAGES_FOR_RATIO`` 且实时分歧率（``tally["div"] / processed_pages``）超阈值时，
+    上调抽样率至 ``_CONSERVATIVE_BOOST_SAMPLE_RATE`` 并收紧 conf 门限至
+    ``_CONSERVATIVE_TIGHTEN_CONF_GATE``，使脏书（高分歧）自动加严、干净书不受影响。
+
+    注意：本函数读取的是「已处理页数之前」的 ``tally``（合并阶段按页序累积），故高分歧书
+    在第 ``_MIN_PAGES_FOR_RATIO`` 页之后才逐步加严，避免早期样本不足翻跳（与 ``_is_conservative``
+    同源设计）。
+    """
+    base_gate = _CONF_GATE
+    if not _CONSERVATIVE_MODE:
+        return base_sample_rate, base_gate
+    if processed_pages < _MIN_PAGES_FOR_RATIO:
+        return base_sample_rate, base_gate
+    div_ratio = tally.get("div", 0) / max(processed_pages, 1)
+    if div_ratio >= _CONSERVATIVE_DIV_RATIO_THRESHOLD:
+        return (
+            max(base_sample_rate, _CONSERVATIVE_BOOST_SAMPLE_RATE),
+            min(base_gate, _CONSERVATIVE_TIGHTEN_CONF_GATE),
+        )
+    return base_sample_rate, base_gate
 
 
 def _is_conservative(tally: dict) -> bool:
@@ -901,27 +938,10 @@ def _process_one_page(page_num: int, page_input: PageInput, ctx: _PageContext) -
                 if ctx.tier1_result and page_num < len(ctx.tier1_result.pages)
                 else 1.0
             )
-            if _page_conf <= _CONF_GATE:
-                db_ops.append(functools.partial(ctx.db.update_import, page_num, status="pending", count=1))
-                db_ops.append(functools.partial(
-                    ctx.db.record_anomaly, page_num,
-                    GlyphVerdict(
-                        status=verdict.status, confidence=_page_conf,
-                        details=(
-                            f"conf_low;engine_conf={_page_conf:.3f};"
-                            f"gate={_CONF_GATE:.2f}"
-                        ),
-                        force_review=True,
-                    ),
-                    detector_chain=["ConfGate"],
-                ))
-                return _PageOutcome(
-                    page_num=page_num, verdict=verdict, final_text=final_text,
-                    appended=True, page_trace=page_trace,
-                    registry_usage=(ctx.tier1_candidates[0], verdict, ctx.t1_elapsed_per_page),
-                    char_count=len(cur_text), last_engine=t1_engine_name, last_latency=ctx.t1_elapsed_per_page,
-                    db_ops=db_ops,
-                )
+            # 注意：conf≤gate 门控「不在此处判定」——保守模式（KZOCR_CONSERVATIVE_MODE）
+            # 的自适应门限依赖跨页累计 tally（仅合并阶段可得），故门控决策推迟到
+            # _run_book_parallel 合并阶段统一处理（与串行主循环行为等价）。此处先统一
+            # 置 imported，合并阶段对低置信度页再覆盖为 pending + 异常。
             db_ops.append(functools.partial(ctx.db.update_import, page_num, status="imported", count=1))
             # 增强路径：成功页跨引擎采样比对（defer 模式，分歧最终化在合并阶段）
             success_divs: list = []
@@ -940,7 +960,8 @@ def _process_one_page(page_num: int, page_input: PageInput, ctx: _PageContext) -
                 if isinstance(r, _DeferredCrossCheck):
                     success_divs = [r]
                     success_is_consensus = r.is_consensus
-            consensus_sample_request = bool(success_is_consensus and getattr(ctx.overrides, "consensus_sample_rate", 0.0) > 0)
+            # 共识一致页（候选）；合并阶段按保守模式自适应抽样率决定是否实际抽样。
+            consensus_sample_request = success_is_consensus
             return _PageOutcome(
                 page_num=page_num, verdict=verdict, final_text=final_text,
                 appended=True, page_trace=page_trace,
@@ -949,6 +970,7 @@ def _process_one_page(page_num: int, page_input: PageInput, ctx: _PageContext) -
                 db_ops=db_ops, success_divs=success_divs,
                 success_is_consensus=success_is_consensus,
                 consensus_sample_request=consensus_sample_request,
+                tier1_passed=True, page_conf=_page_conf,
                 page_img=page_input.img,
             )
 
@@ -1089,34 +1111,64 @@ def _run_book_parallel(
         outcomes = list(ex.map(_work, page_nums))
 
     # ── 合并阶段：按页序串行落地全部共享状态（规避 sqlite/registry 竞态）──
-    for outcome in outcomes:
-        # 1) 页局部 db 写（按页序应用；各 op 以 page_num 为键，顺序无关）
+    base_rate = getattr(overrides, "consensus_sample_rate", 0.0)
+    for i, outcome in enumerate(outcomes):
+        # 工作流 B：基于「已合并页」累计 tally 的「自适应质量参数」（保守模式生效时）。
+        # 合并阶段才持有跨页 tally，故 conf 门控 / 共识抽样率统一在此判定，与串行主循环等价。
+        rate, gate = _adaptive_quality_params(tally, i, base_rate)
+        is_conf_low = outcome.tier1_passed and outcome.page_conf <= gate
+        # 1) 页局部 db 写（init/ocr/verify/imported 顺序应用；各 op 以 page_num 为键）
         for op in outcome.db_ops:
             op()
-        # 2) tally 累加（合并后才能判定保守模式，供后续页分歧最终化）
-        tally["div"] += outcome.tally_div
-        tally["high"] += outcome.tally_high
-        conservative = _is_conservative(tally)
-        # 3) 分歧最终化（含延迟 VLM 仲裁，_vl_lock 串行）
-        for dcc in outcome.success_divs:
-            _finalize_divergences_success(
-                outcome.page_num, dcc, outcome.page_img, db,
-                get_vision_adapter, get_vision_bucket, confusion_set, vl_budget, conservative,
+        if is_conf_low:
+            # 低置信度 PASS 页：覆盖为待人工复核 + 记录异常（与串行 early-return 等价），
+            # 并跳过跨引擎比对分歧最终化（串行对低置信度页亦不进入跨引擎比对路径）。
+            db.update_import(outcome.page_num, status="pending", count=1)
+            db.record_anomaly(
+                outcome.page_num,
+                GlyphVerdict(
+                    status=outcome.verdict.status,
+                    confidence=outcome.page_conf,
+                    details=(
+                        f"conf_low;engine_conf={outcome.page_conf:.3f};"
+                        f"gate={gate:.2f}"
+                    ),
+                    force_review=True,
+                ),
+                detector_chain=["ConfGate"],
             )
-        for dcc in outcome.tier3_divs:
-            _finalize_divergences_tier3(
-                outcome.page_num, dcc, outcome.page_img, db,
-                get_vision_adapter, get_vision_bucket, confusion_set, vl_budget, conservative,
-            )
-        # 4) 共识一致页抽样送视觉仲裁（合并阶段、_vl_lock 串行）
-        if outcome.consensus_sample_request and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
-            with _vl_lock:
-                _sample_consensus_error(
-                    outcome.page_num, outcome.final_text, outcome.page_img,
-                    get_vision_adapter(), db,
-                    getattr(overrides, "consensus_sample_rate", 0.0),
-                    get_vision_bucket(), vl_budget=vl_budget,
+        else:
+            # 2) 分歧最终化（含延迟 VLM 仲裁，_vl_lock 串行）；conservative 取累计本页前 tally
+            conservative = _is_conservative(tally)
+            for dcc in outcome.success_divs:
+                _finalize_divergences_success(
+                    outcome.page_num, dcc, outcome.page_img, db,
+                    get_vision_adapter, get_vision_bucket, confusion_set, vl_budget, conservative,
                 )
+            for dcc in outcome.tier3_divs:
+                _finalize_divergences_tier3(
+                    outcome.page_num, dcc, outcome.page_img, db,
+                    get_vision_adapter, get_vision_bucket, confusion_set, vl_budget, conservative,
+                )
+            # 2b) tally 累加（仅最终化的分歧计入；低置信度页跳过跨引擎比对，不计入）。
+            # 注意：tally 必须取自 _DeferredCrossCheck 的 tally_div/tally_high（worker 不写
+            # outcome.tally_div），否则并行路径 tally 恒为 0，保守模式判定失效。
+            for dcc in outcome.success_divs:
+                tally["div"] += dcc.tally_div
+                tally["high"] += dcc.tally_high
+            for dcc in outcome.tier3_divs:
+                tally["div"] += dcc.tally_div
+                tally["high"] += dcc.tally_high
+            # 3) 共识一致页抽样送视觉仲裁（合并阶段、_vl_lock 串行；使用自适应 rate）
+            if outcome.consensus_sample_request and rate > 0:
+                with _vl_lock:
+                    _sample_consensus_error(
+                        outcome.page_num, outcome.final_text, outcome.page_img,
+                        get_vision_adapter(), db,
+                        rate,
+                        get_vision_bucket(), vl_budget=vl_budget,
+                    )
+        # 4) tally 已在 else 分支（分歧最终化后）按最终化分歧累加，供后续页保守模式判定
         # 5) 引擎使用统计（主线程串行 record）
         if outcome.registry_usage is not None:
             _record_engine_usage(
@@ -1423,6 +1475,13 @@ def orchestrate_book(
                 db.update_ocr(page_num, status="success", char_count=len(cur_text), latency_ms=t1_elapsed_per_page)
                 db.update_verify(page_num, verdict=verdict.status, details=verdict.details or "")
 
+                # ── 工作流 B：保守模式自适应质量参数 ──
+                # 基于跨页累计 tally 与已处理页数动态返回 (抽样率, conf门限)；
+                # 默认关（_CONSERVATIVE_MODE=False）时回落基线值，行为不变。
+                rate, gate = _adaptive_quality_params(
+                    tally, page_num, getattr(overrides, "consensus_sample_rate", 0.0)
+                )
+
                 # ── conf≤gate 门控：低置信度 PASS 页挂起待人工复核 ──
                 # 门控必须在 PASS 分支的 continue 之前判定：兜底门控（本循环末尾）
                 # 对 PASS 页不可达（已提前 continue），否则低置信度页会被直接 imported。
@@ -1431,7 +1490,7 @@ def orchestrate_book(
                     if tier1_result and page_num < len(tier1_result.pages)
                     else 1.0
                 )
-                if _page_conf <= _CONF_GATE:
+                if _page_conf <= gate:
                     db.update_import(page_num, status="pending", count=1)
                     db.record_anomaly(
                         page_num,
@@ -1440,7 +1499,7 @@ def orchestrate_book(
                             confidence=_page_conf,
                             details=(
                                 f"conf_low;engine_conf={_page_conf:.3f};"
-                                f"gate={_CONF_GATE:.2f}"
+                                f"gate={gate:.2f}"
                             ),
                             force_review=True,
                         ),
@@ -1467,13 +1526,14 @@ def orchestrate_book(
                         tally=tally,
                         vl_budget=vl_budget,
                     )
-                    # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）
-                    if is_consensus and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
+                    # 共识一致页抽样送视觉仲裁（覆盖「两引擎同错」盲区）；
+                    # 抽样率取保守模式自适应值（rate）。
+                    if is_consensus and rate > 0:
                         _sample_consensus_error(
                             page_num, cur_text,
                             page_input.img if page_input.img is not None else None,
                             _get_vision_adapter(), db,
-                            overrides.consensus_sample_rate,
+                            rate,
                             _get_vision_bucket(),
                             vl_budget=vl_budget,
                         )
