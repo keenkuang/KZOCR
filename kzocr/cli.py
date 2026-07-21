@@ -143,6 +143,13 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_proofread(args: argparse.Namespace) -> int:
+    """启动交付式校对工作台（独立前端，方案 B / Route 1）。"""
+    from kzocr.proofread.app import main as proofread_main
+    return proofread_main(["--db", args.db, "--host", args.host,
+                           "--port", str(args.port)])
+
+
 def cmd_import(args: argparse.Namespace) -> int:
     """把校对后的 custom.db 导入回 BookDB（系统 of record）。"""
     from kzocr.doc import import_proofread_package, freeze_custom_db, validate_proofread_package
@@ -337,6 +344,13 @@ def build_parser() -> argparse.ArgumentParser:
     pw.add_argument("--host", default="127.0.0.1")
     pw.add_argument("--port", type=int, default=8080)
     pw.set_defaults(func=cmd_web)
+
+    # proofread 子命令（阶段 1：交付式校对前端）
+    ppf = sub.add_parser("proofread", help="启动交付式校对工作台（独立前端，面向校对人员）")
+    ppf.add_argument("--db", required=True, help="校对包路径（custom.db）")
+    ppf.add_argument("--host", default="127.0.0.1")
+    ppf.add_argument("--port", type=int, default=9090)
+    ppf.set_defaults(func=cmd_proofread)
 
     # quality 子命令
     pq = sub.add_parser("quality", help="方剂质量质检")

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}KZOCR 校对工作台{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            tcm: {
+              primary: 'oklch(0.42 0.11 158)',
+              'primary-light': 'oklch(0.72 0.14 65)',
+              sidebar: 'oklch(0.2 0.02 155)',
+              'sidebar-hover': 'oklch(0.26 0.03 155)',
+              bg: 'oklch(0.985 0.008 85)',
+              card: 'oklch(0.995 0.005 85)',
+              destructive: 'oklch(0.55 0.20 28)',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .line-edit:focus { outline: 2px solid oklch(0.42 0.11 158); outline-offset: 2px; }
+    .diff-removed { background: #fee2e2; text-decoration: line-through; color: #991b1b; }
+    .diff-added   { background: #dcfce7; color: #166534; }
+    .status-pending { color: #b45309; }
+    .status-done    { color: #166534; }
+  </style>
+</head>
+<body class="bg-tcm-bg text-gray-800 font-sans">
+  <nav class="bg-tcm-sidebar text-white px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <a href="/" class="text-lg font-bold hover:opacity-80">KZOCR 校对</a>
+      {% block nav_extra %}{% endblock %}
+    </div>
+  </nav>
+  <main class="p-4">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

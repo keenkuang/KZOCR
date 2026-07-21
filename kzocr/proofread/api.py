@@ -1,0 +1,251 @@
+"""交付式校对包 API — 直接读写 custom.db 供校对人员编辑 humanFinal。
+
+所有操作绕过 kzocr/web/ 和 BookDB，直接对 custom.db（zai schema）做 CRUD。
+导回系统走 ``import_proofread_package``（kzocr/doc/proofread.py）。
+"""
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BookBrief:
+    """书籍列表摘要。"""
+    book_code: str
+    title: str
+    page_count: int
+    line_count: int
+    proofread_count: int  # 已有 humanFinal 的行数
+    is_mock: bool
+
+
+@dataclass
+class LineItem:
+    """单行校对的完整信息。"""
+    id: str
+    page_num: int
+    para_seq: int
+    seq_in_para: int
+    engine_texts: str    # 各引擎原文 JSON
+    consensus: str       # 共识文本
+    human_final: str     # 人工终校（可编辑）
+    final: str           # 最终结果
+    confidence: float
+    heading_level: int
+    audit_source: str
+    disputed_sub: int
+    char_level_json: str
+    heading: str = ""     # 所属标题/段落上下文
+    proofread_status: str = "pending"  # pending / done
+
+
+@dataclass
+class PageGroup:
+    """按页分组的行集合。"""
+    page_num: int
+    lines: list[LineItem] = field(default_factory=list)
+
+
+def _read_line(conn: sqlite3.Connection, row: sqlite3.Row) -> LineItem:
+    return LineItem(
+        id=row["id"],
+        page_num=row["pageNum"],
+        para_seq=row["paraSeq"],
+        seq_in_para=row["seqInPara"],
+        engine_texts=row["engineTexts"] or "",
+        consensus=row["consensus"] or "",
+        human_final=row["humanFinal"] or "",
+        final=row["final"] or "",
+        confidence=row["confidence"] or 0.0,
+        heading_level=row["headingLevel"] or 0,
+        audit_source=row["auditSource"] or "",
+        disputed_sub=row["disputed"] or 0,
+        char_level_json=row["charLevelJson"] or "",
+        proofread_status="done" if (row["humanFinal"] and row["humanFinal"].strip()) else "pending",
+    )
+
+
+class CustomDbProofread:
+    """校对包（custom.db）的读取/写入接口。
+
+    所有方法都是无状态工具函数，不持有连接。
+    """
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._path = Path(db_path).resolve()
+        if not self._path.exists():
+            raise FileNotFoundError(f"校对包不存在：{self._path}")
+
+    # ── 连接管理 ──────────────────────────────────────────────
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self._path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")  # 并发友好
+        return conn
+
+    # ── 书籍 ──────────────────────────────────────────────────
+
+    def list_books(self) -> list[BookBrief]:
+        """列出校对包中所有书籍。"""
+        conn = self._connect()
+        try:
+            books = conn.execute(
+                "SELECT bookCode, title, isMock FROM Book ORDER BY bookCode"
+            ).fetchall()
+            result: list[BookBrief] = []
+            for b in books:
+                pages = conn.execute(
+                    "SELECT COUNT(DISTINCT pageNum) FROM Line WHERE bookCode=?",
+                    (b["bookCode"],),
+                ).fetchone()[0]
+                lines = conn.execute(
+                    "SELECT COUNT(*) FROM Line WHERE bookCode=?",
+                    (b["bookCode"],),
+                ).fetchone()[0]
+                done = conn.execute(
+                    "SELECT COUNT(*) FROM Line WHERE bookCode=? AND humanFinal IS NOT NULL AND humanFinal!=''",
+                    (b["bookCode"],),
+                ).fetchone()[0]
+                result.append(BookBrief(
+                    book_code=b["bookCode"],
+                    title=b["title"] or b["bookCode"],
+                    page_count=pages,
+                    line_count=lines,
+                    proofread_count=done,
+                    is_mock=bool(b["isMock"]),
+                ))
+            return result
+        finally:
+            conn.close()
+
+    # ── 行 ────────────────────────────────────────────────────
+
+    def list_lines(self, book_code: str, *,
+                   page: Optional[int] = None,
+                   status: Optional[str] = None,
+                   limit: int = 50, offset: int = 0) -> list[LineItem]:
+        """列出某书行列表，支持按页/状态过滤。"""
+        conn = self._connect()
+        try:
+            where = ["bookCode=?"]
+            params: list = [book_code]
+            if page is not None:
+                where.append("pageNum=?")
+                params.append(page)
+            if status == "done":
+                where.append("humanFinal IS NOT NULL AND humanFinal!=''")
+            elif status == "pending":
+                where.append("(humanFinal IS NULL OR humanFinal='')")
+            sql = (
+                "SELECT * FROM Line WHERE "
+                + " AND ".join(where)
+                + " ORDER BY pageNum, paraSeq, seqInPara"
+                + f" LIMIT {int(limit)} OFFSET {int(offset)}"
+            )
+            return [_read_line(conn, r) for r in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
+    def get_line(self, book_code: str, line_id: str) -> Optional[LineItem]:
+        """获取指定行详细信息。"""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM Line WHERE bookCode=? AND id=?",
+                (book_code, line_id),
+            ).fetchone()
+            if not row:
+                return None
+            return _read_line(conn, row)
+        finally:
+            conn.close()
+
+    def count_lines(self, book_code: str, *,
+                    page: Optional[int] = None,
+                    status: Optional[str] = None) -> int:
+        """行数统计（分页用）。"""
+        conn = self._connect()
+        try:
+            where = ["bookCode=?"]
+            params: list = [book_code]
+            if page is not None:
+                where.append("pageNum=?")
+                params.append(page)
+            if status == "done":
+                where.append("humanFinal IS NOT NULL AND humanFinal!=''")
+            elif status == "pending":
+                where.append("(humanFinal IS NULL OR humanFinal='')")
+            return conn.execute(
+                "SELECT COUNT(*) FROM Line WHERE " + " AND ".join(where), params
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+    def save_human_final(self, book_code: str, line_id: str,
+                         human_final: str) -> bool:
+        """保存人工终校文本。"""
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "UPDATE Line SET humanFinal=? WHERE bookCode=? AND id=?",
+                (human_final, book_code, line_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_pages(self, book_code: str) -> list[int]:
+        """获取某书所有页码（排序）。"""
+        conn = self._connect()
+        try:
+            return [
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT pageNum FROM Line WHERE bookCode=? ORDER BY pageNum",
+                    (book_code,),
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+    def get_page_line_count(self, book_code: str, page_num: int,
+                            status: Optional[str] = None) -> int:
+        """某页行数（含可选状态过滤）。"""
+        return self.count_lines(book_code, page=page_num, status=status)
+
+    def export_import(self, book_code: str, *,
+                      db_dir: str = "",
+                      register_postgres: bool = False) -> dict:
+        """调用 import_proofread_package 将当前 humanFinal 回写 BookDB。
+
+        返回 {"book_code", "imported_lines", "imported_proofreads"}。
+        """
+        from kzocr.doc import import_proofread_package as _import
+        # 先冻结再导入（保护旧包不被重复修改）
+        from kzocr.doc import freeze_custom_db
+        try:
+            freeze_custom_db(str(self._path))
+        except Exception as exc:
+            logger.warning("冻结失败（非阻断）: %s", exc)
+        result = _import(
+            db_path=self._path,
+            book_code=book_code,
+            db_dir=db_dir or os.environ.get("KZOCR_DB_DIR", ""),
+            register_postgres=register_postgres,
+        )
+        return result
+
+    def get_book_info(self, book_code: str) -> Optional[BookBrief]:
+        """获取单书摘要。"""
+        for b in self.list_books():
+            if b.book_code == book_code:
+                return b
+        return None

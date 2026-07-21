@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}校对 - {{ book_title }}{% endblock %}
+{% block nav_extra %}
+<a href="/" class="text-sm text-gray-300 hover:text-white">&larr; 返回</a>
+<span class="text-sm text-gray-400 ml-4">{{ book_title }}</span>
+{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto">
+  <!-- 进度条 -->
+  <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+    <div class="flex items-center justify-between mb-2">
+      <div>
+        <span class="font-bold">进度</span>
+        <span class="ml-2 text-sm text-gray-500">{{ proofread_lines }}/{{ total_lines }} 行</span>
+      </div>
+      <div class="flex gap-2">
+        <a href="/book/{{ book_code }}?status=pending"
+           class="px-3 py-1 text-sm rounded {% if status == 'pending' %}bg-tcm-primary text-white{% else %}bg-gray-200 text-gray-700{% endif %}">
+          待校对 ({{ total_pending }})
+        </a>
+        <a href="/book/{{ book_code }}?status=done"
+           class="px-3 py-1 text-sm rounded {% if status == 'done' %}bg-tcm-primary text-white{% else %}bg-gray-200 text-gray-700{% endif %}">
+          已完成 ({{ total_done }})
+        </a>
+        <a href="/book/{{ book_code }}?status=all"
+           class="px-3 py-1 text-sm rounded {% if status == 'all' %}bg-tcm-primary text-white{% else %}bg-gray-200 text-gray-700{% endif %}">
+          全部
+        </a>
+      </div>
+      <button onclick="exportBook()"
+              class="px-4 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+        回导 BookDB
+      </button>
+    </div>
+
+    <!-- 页导航 -->
+    <div class="flex flex-wrap gap-1 mt-3">
+      {% for p in pages %}
+      <a href="/book/{{ book_code }}?page={{ p }}&status={{ status }}"
+         class="px-3 py-1 text-sm border rounded
+                {% if p == current_page %}bg-tcm-primary text-white border-tcm-primary
+                {% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-100{% endif %}">
+        {{ p }}
+      </a>
+      {% endfor %}
+    </div>
+    <div class="text-xs text-gray-500 mt-2">
+      第 {{ current_page }} 页：待校 {{ page_pending }} · 已校 {{ page_done }}
+    </div>
+  </div>
+
+  <!-- 行编辑区 -->
+  <div class="space-y-3">
+    {% for line in lines %}
+    <div class="bg-white rounded-lg shadow-sm p-4 border-l-4
+                {% if line.proofread_status == 'done' %}border-l-green-500{% else %}border-l-amber-400{% endif %}"
+         id="line-{{ line.id }}">
+      <div class="flex items-start justify-between">
+        <div class="text-xs text-gray-400 font-mono mb-1">
+          P{{ line.page_num }} · ¶{{ line.para_seq }} · L{{ line.seq_in_para }}
+          {% if line.heading_level > 0 %}<span class="ml-2 font-bold text-gray-600">标题 Lv{{ line.heading_level }}</span>{% endif %}
+          {% if line.disputed_sub %}<span class="ml-2 text-red-500">争议</span>{% endif %}
+        </div>
+        <div class="text-xs text-gray-400">
+          conf: {{ "%.2f"|format(line.confidence) }}
+          <span class="ml-2 status-{{ line.proofread_status }}">
+            {{ '已校' if line.proofread_status == 'done' else '待校' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- 共识文本（参考） -->
+      {% if line.consensus %}
+      <div class="mt-1 p-2 bg-gray-50 rounded text-sm text-gray-600">
+        <span class="text-xs text-gray-400">共识参考：</span>{{ line.consensus }}
+      </div>
+      {% endif %}
+
+      <!-- 引擎原文（差异背景） -->
+      {% if line.engine_texts %}
+      <details class="mt-1">
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">各引擎原文</summary>
+        <pre class="mt-1 p-2 bg-gray-50 rounded text-xs text-gray-500 overflow-x-auto">{{ line.engine_texts }}</pre>
+      </details>
+      {% endif %}
+
+      <!-- 人工终校编辑框 -->
+      <div class="mt-2">
+        <textarea id="input-{{ line.id }}"
+                  class="line-edit w-full p-2 border border-gray-300 rounded text-sm resize-y min-h-[3em]"
+                  rows="2">{{ line.human_final or line.consensus or '' }}</textarea>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="mt-2 flex gap-2 justify-end">
+        <button onclick="resetLine('{{ line.id }}')"
+                class="px-3 py-1 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300">
+          重置
+        </button>
+        <button onclick="saveLine('{{ book_code }}', '{{ line.id }}')"
+                class="px-4 py-1 text-xs bg-tcm-primary text-white rounded hover:opacity-90
+                       save-btn" id="btn-{{ line.id }}">
+          保存
+        </button>
+        <span id="status-{{ line.id }}" class="text-xs self-center"></span>
+      </div>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg shadow-md p-8 text-center text-gray-400">
+      {% if status == 'pending' %}所有行已校对完毕，干得漂亮！
+      {% elif status == 'done' %}尚无已校对的行
+      {% else %}此页无内容{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- 底部页导航 -->
+  {% if pages|length > 1 %}
+  <div class="mt-4 flex justify-center gap-1 flex-wrap">
+    {% for p in pages %}
+    <a href="/book/{{ book_code }}?page={{ p }}&status={{ status }}"
+       class="px-3 py-1 text-sm border rounded
+              {% if p == current_page %}bg-tcm-primary text-white border-tcm-primary{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-100{% endif %}">
+      {{ p }}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+async function saveLine(bookCode, lineId) {
+  const textarea = document.getElementById('input-' + lineId);
+  const btn = document.getElementById('btn-' + lineId);
+  const status = document.getElementById('status-' + lineId);
+  const value = textarea.value;
+
+  btn.disabled = true;
+  btn.textContent = '保存中…';
+  status.textContent = '';
+
+  try {
+    const form = new FormData();
+    form.append('human_final', value);
+    const resp = await fetch(`/book/${bookCode}/line/${lineId}/save`, {
+      method: 'POST', body: form
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      status.textContent = '✓ 已保存';
+      status.className = 'text-xs self-center text-green-600';
+      // 更新边框
+      const card = document.getElementById('line-' + lineId);
+      card.className = card.className.replace('border-l-amber-400', 'border-l-green-500');
+    } else {
+      status.textContent = '✗ 保存失败';
+      status.className = 'text-xs self-center text-red-600';
+    }
+  } catch (e) {
+    status.textContent = '✗ 网络错误';
+    status.className = 'text-xs self-center text-red-600';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
+  }
+}
+
+function resetLine(lineId) {
+  const textarea = document.getElementById('input-' + lineId);
+  textarea.value = '';
+  const status = document.getElementById('status-' + lineId);
+  status.textContent = '';
+}
+
+async function exportBook() {
+  if (!confirm('确认将当前校对结果回写 BookDB？（此操作不可撤销）')) return;
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '回导中…';
+  try {
+    const resp = await fetch('/book/{{ book_code }}/export', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      alert(`回导成功！已导入 ${data.imported_lines} 行人工终校 + ${data.imported_proofreads} 条校对记录`);
+    } else {
+      alert('回导失败：' + (data.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('网络错误：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '回导 BookDB';
+  }
+}
+</script>
+{% endblock %}

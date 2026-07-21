@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}KZOCR 校对 - 书籍列表{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto">
+  <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+    <h2 class="text-lg font-bold">概览</h2>
+    <div class="grid grid-cols-3 gap-4 mt-2 text-center">
+      <div class="bg-tcm-bg rounded p-2">
+        <div class="text-2xl font-bold text-tcm-primary">{{ total_books }}</div>
+        <div class="text-xs text-gray-500">书籍</div>
+      </div>
+      <div class="bg-tcm-bg rounded p-2">
+        <div class="text-2xl font-bold text-gray-700">{{ total_lines }}</div>
+        <div class="text-xs text-gray-500">总行数</div>
+      </div>
+      <div class="bg-tcm-bg rounded p-2">
+        <div class="text-2xl font-bold text-green-600">{{ proofread_lines }}</div>
+        <div class="text-xs text-gray-500">已校对</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow-md">
+    <div class="p-4 border-b">
+      <h2 class="text-lg font-bold">书籍列表</h2>
+    </div>
+    {% if books %}
+    <div class="divide-y">
+      {% for b in books %}
+      <a href="/book/{{ b.book_code }}" class="block px-4 py-3 hover:bg-gray-50 transition">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-medium text-tcm-primary">{{ b.title }}</div>
+            <div class="text-xs text-gray-500 mt-1">{{ b.book_code }}</div>
+          </div>
+          <div class="text-right text-sm">
+            <div>{{ b.page_count }} 页 · {{ b.line_count }} 行</div>
+            <div class="mt-1">
+              {% set pct = (b.proofread_count / b.line_count * 100) | round if b.line_count else 0 %}
+              <div class="w-24 h-2 bg-gray-200 rounded inline-block align-middle">
+                <div class="h-full bg-tcm-primary rounded" style="width: {{ pct }}%"></div>
+              </div>
+              <span class="ml-1 {% if pct == 100 %}text-green-600{% else %}text-amber-600{% endif %}">
+                {{ b.proofread_count }}/{{ b.line_count }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="p-8 text-center text-gray-400">校对包中没有书籍</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
