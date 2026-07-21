@@ -34,6 +34,7 @@ ROOTS = [
     "/home/keen/Documents/OCR0625",
     "/home/keen/Documents",
     "/home/keen/文档/xwechat_files",
+    "/media/keen/data/4Share/传递",
 ]
 
 # 中医/古籍正向白名单（文件名命中任一即视为可扩面古籍）
