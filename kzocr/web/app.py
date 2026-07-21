@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ from fastapi.templating import Jinja2Templates
 from kzocr import __version__
 from kzocr.scheduler.cross_align import add_learned_confusion
 from kzocr.storage.db import BookDB
+
+logger = logging.getLogger("kzocr.web")
 
 # 用户面的「高优先级」筛选分组：core 优先级已升级为 P0/P1/normal，
 # 其中 P0(剂量数字)/P1(形近字) 与历史 'high' 在编排层一并归入高优先队列。
@@ -1026,6 +1029,75 @@ async def workspace(request: Request, book_code: str, resolved: str = "no") -> R
 
 
 app.include_router(api)
+
+
+# =============================================================================
+# 交付式校对台 — 回导入口（阶段 0）
+# =============================================================================
+
+
+@app.post("/import", response_class=HTMLResponse)
+async def import_proofread(request: Request) -> Response:
+    """上传校对后的 custom.db 并导入 BookDB。
+
+    安全措施：
+    - 调用 ``validate_proofread_package`` 做只读 schema + 行数上限校验
+    - 强制 ``register_postgres=False``（交付模式）
+    - 导入前 ``freeze_custom_db`` 旧包保护
+    - Jinja2 默认 autoescape 已开启（确认），防 XSS
+    """
+    from kzocr.doc import import_proofread_package as _do_import
+    from kzocr.doc import validate_proofread_package, freeze_custom_db
+    import tempfile
+    import shutil
+
+    form = await request.form()
+    uploaded = form.get("file")
+    if not uploaded or not hasattr(uploaded, "filename") or not uploaded.filename:
+        return templates.TemplateResponse(request, "import_result.html", {
+            "error": "请选择要上传的校对包文件",
+        })
+
+    # 保存上传文件到临时路径
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    try:
+        shutil.copyfileobj(uploaded.file, tmp)
+        tmp.flush()
+        tmp.close()
+        db_path = Path(tmp.name)
+
+        # 前置安全校验
+        try:
+            validate_proofread_package(db_path)
+        except (ValueError, Exception) as exc:
+            return templates.TemplateResponse(request, "import_result.html", {
+                "error": f"校对包校验失败：{exc}",
+            })
+
+        # 冻结旧包保护
+        try:
+            freeze_custom_db(str(db_path))
+        except Exception as exc_freezing:
+            logger.warning("旧包冻结失败（非阻断）：%s", exc_freezing)
+
+        # 导入（强制关闭 postgres 归档）
+        result = _do_import(
+            db_path=db_path,
+            register_postgres=False,
+        )
+    except Exception as exc:
+        logger.error("导入失败：%s", exc)
+        return templates.TemplateResponse(request, "import_result.html", {
+            "error": f"导入失败：{exc}",
+        })
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+    return templates.TemplateResponse(request, "import_result.html", {
+        "book_code": result["book_code"],
+        "imported_lines": result["imported_lines"],
+        "imported_proofreads": result["imported_proofreads"],
+    })
 
 
 @app.get("/register", response_class=HTMLResponse)

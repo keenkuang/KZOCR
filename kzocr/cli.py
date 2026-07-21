@@ -143,6 +143,64 @@ def cmd_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import(args: argparse.Namespace) -> int:
+    """把校对后的 custom.db 导入回 BookDB（系统 of record）。"""
+    from kzocr.doc import import_proofread_package, freeze_custom_db, validate_proofread_package
+    from pathlib import Path
+
+    db_path = Path(args.db)
+    if not db_path.is_file():
+        log.error("校对包文件不存在：%s", db_path)
+        return 1
+
+    # 路径安全：限制在 KZOCR_DB_DIR 内
+    db_dir = os.environ.get("KZOCR_DB_DIR", "")
+    if db_dir:
+        allowed = Path(db_dir).resolve()
+        resolved = db_path.resolve()
+        try:
+            resolved.relative_to(allowed)
+        except ValueError:
+            log.error("校对包路径不在允许的 KZOCR_DB_DIR=%s 内：%s", allowed, resolved)
+            return 1
+
+    try:
+        # 前置安全校验
+        info = validate_proofread_package(db_path)
+        log.info(
+            "校对包校验通过：%d 行 Line + %d 条 Proofread",
+            info["line_count"], info["proofread_count"],
+        )
+    except (ValueError, Exception) as exc:
+        log.error("校对包校验失败：%s", exc)
+        return 1
+
+    # 冻结旧包保护
+    try:
+        freeze_custom_db(str(db_path))
+    except Exception as exc_freezing:
+        log.warning("旧包冻结失败（非阻断）：%s", exc_freezing)
+
+    try:
+        result = import_proofread_package(
+            db_path=db_path,
+            book_code=args.book_code,
+            register_postgres=False,  # 交付模式强制关闭
+        )
+    except Exception as exc:
+        log.error("导入失败：%s", exc)
+        return 1
+
+    log.info(
+        "导入完成：book_code=%s 已导入 %d 行人工终校 + %d 条校对记录",
+        result["book_code"], result["imported_lines"], result["imported_proofreads"],
+    )
+    print(f"BOOK_CODE={result['book_code']}")
+    print(f"IMPORTED_LINES={result['imported_lines']}")
+    print(f"IMPORTED_PROOFREADS={result['imported_proofreads']}")
+    return 0
+
+
 def cmd_quality_check(args: argparse.Namespace) -> int:
     """运行质检并写入 DB。"""
     from kzocr.analysis.quality import QualityChecker
@@ -268,6 +326,12 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("pdf_dir", help="PDF 目录路径")
     pb.add_argument("--db")
     pb.set_defaults(func=cmd_batch)
+
+    # import 子命令（交付式校对台阶段 0：回导入口）
+    pi = sub.add_parser("import", help="把校对后的 custom.db 导入回 BookDB")
+    pi.add_argument("db", help="校对包路径（custom.db）")
+    pi.add_argument("--book-code", help="显式书籍编码（缺省时从包内推断）")
+    pi.set_defaults(func=cmd_import)
 
     pw = sub.add_parser("web", help="启动 Web 管理面板")
     pw.add_argument("--host", default="127.0.0.1")

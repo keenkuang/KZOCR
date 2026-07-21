@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}导入校对包{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto mt-8">
+  <div class="bg-white rounded-lg shadow-md p-6">
+    <h2 class="text-xl font-bold mb-4">导入校对包</h2>
+
+    {% if error %}
+    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+      <strong class="font-bold text-sm">&#10060; 导入失败</strong>
+      <p class="mt-1">{{ error }}</p>
+    </div>
+    <div class="mt-4">
+      <a href="/" class="text-tcm-primary hover:underline">&larr; 返回首页</a>
+    </div>
+
+    {% elif book_code %}
+    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
+      <strong class="font-bold text-sm">&#9989; 导入成功</strong>
+    </div>
+    <div class="space-y-3">
+      <div class="flex justify-between py-2 border-b">
+        <span class="text-gray-600">书籍编码</span>
+        <span class="font-mono">{{ book_code }}</span>
+      </div>
+      <div class="flex justify-between py-2 border-b">
+        <span class="text-gray-600">已导入人工终校行数</span>
+        <span class="font-mono font-bold text-tcm-primary">{{ imported_lines }}</span>
+      </div>
+      <div class="flex justify-between py-2 border-b">
+        <span class="text-gray-600">已导入校对记录</span>
+        <span class="font-mono font-bold text-tcm-primary">{{ imported_proofreads }}</span>
+      </div>
+    </div>
+    <div class="mt-6 flex gap-4">
+      <a href="/book/{{ book_code }}" class="inline-block bg-tcm-primary text-white px-4 py-2 rounded hover:opacity-90">
+        查看书籍详情
+      </a>
+      <a href="/" class="inline-block bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">
+        返回首页
+      </a>
+    </div>
+
+    {% else %}
+    <form method="POST" enctype="multipart/form-data" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">选择校对包文件（custom.db）</label>
+        <input type="file" name="file" accept=".db"
+               class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4
+                      file:rounded file:border-0 file:text-sm file:font-semibold
+                      file:bg-tcm-primary file:text-white hover:file:opacity-90">
+      </div>
+      <p class="text-xs text-gray-500">
+        上传校对人员返回的 custom.db 文件。导入后将覆盖 BookDB 中同层级键的 humanFinal 值。
+      </p>
+      <button type="submit"
+              class="bg-tcm-primary text-white px-6 py-2 rounded hover:opacity-90">
+        上传并导入
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

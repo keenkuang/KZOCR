@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from kzocr.doc.zai import push_book_to_zai
 from kzocr.doc.export import export_markdown, export_book_markdown, export_json
-from kzocr.doc.proofread import import_proofread_package
+from kzocr.doc.proofread import import_proofread_package, validate_proofread_package
 from kzocr.doc.freeze import freeze_custom_db
 
 __all__ = [
@@ -15,5 +15,6 @@ __all__ = [
     "export_book_markdown",
     "export_json",
     "import_proofread_package",
+    "validate_proofread_package",
     "freeze_custom_db",
 ]

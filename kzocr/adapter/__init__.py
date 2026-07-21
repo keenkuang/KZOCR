@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from kzocr.doc.zai import push_book_to_zai
 from kzocr.doc.export import export_markdown
-from kzocr.doc.proofread import import_proofread_package
+from kzocr.doc.proofread import import_proofread_package, validate_proofread_package
 from kzocr.doc.freeze import freeze_custom_db
 
 __all__ = [
     "push_book_to_zai",
     "export_markdown",
     "import_proofread_package",
+    "validate_proofread_package",
     "freeze_custom_db",
 ]
