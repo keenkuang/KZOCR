@@ -20,10 +20,13 @@ import logging
 import os
 import json
 import threading
-from typing import Optional
+import functools
+from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Callable
 from collections.abc import Iterator
 
-from kzocr.config import Config
+from kzocr.config import Config, _safe_bool
 
 from kzocr.engine.types import (
     AdapterPageResult,
@@ -57,6 +60,90 @@ _CONF_GATE = float(os.environ.get("KZOCR_CONF_GATE", "0.90"))
 
 _logger = logging.getLogger(__name__)
 
+# 视觉调用串行锁：VLM 适配器（verify_with_vision / arbitrate_divergence / recheck）
+# 与 vl_budget 计数在页级并发模式下被多线程共享，统一经此锁串行化，避免 ratelimit 竞争。
+_vl_lock = threading.Lock()
+
+
+@dataclass
+class _DeferredCrossCheck:
+    """跨引擎分歧比对结果（延迟模式）。
+
+    ``_run_success_cross_check`` / ``_run_tier3_divergence`` 在 ``defer=True`` 时
+    不写库、不仲裁、不更新全局 ``tally``，仅返回本页分歧数据交由合并阶段按页序处理
+    （保守模式依赖跨页累计 tally，必须串行合并后才能判定）。
+    """
+
+    is_consensus: bool
+    divs: list
+    high: list
+    engine_a: str = ""
+    engine_b: str = ""
+    tally_div: int = 0
+    tally_high: int = 0
+
+
+@dataclass
+class _PageContext:
+    """传给 ``_process_one_page`` 的只读上下文（页级并发工作线程使用）。
+
+    仅含只读引用；可变共享状态（db / registry / tally / vl_budget）不在此，
+    由合并阶段在主线程串行处理。
+    """
+
+    config: "Config"
+    pdf_path: str
+    tier1_result: Optional["BookResult"]
+    tier1_candidates: list
+    t1_elapsed_per_page: int
+    overrides: Optional["EngineOverrides"]
+    confusion_set: dict
+    scheduler: "EngineScheduler"
+    registry: "EngineRegistry"
+    db: BookDB
+    budget: "Budget"
+    verifier: "GlyphVerifier"
+    book_type: str
+    pub_era: str
+    concurrency_ctrl: "AdaptiveController"
+    max_time_per_page_ms: int
+    get_vision_adapter: Callable[[], Optional["VisionRecheckAdapter"]]
+    get_vision_bucket: Callable[[], Optional["MultiTokenRateLimiter"]]
+    vl_budget: Optional["VLBudgetTracker"]
+
+
+@dataclass
+class _PageOutcome:
+    """单页处理的计算结果（线程本地产出，无副作用）。
+
+    合并阶段按页序把这些数据落地：``db_ops``（页局部 db 写）+ ``tally`` 累加 +
+    ``success_divs`` / ``tier3_divs``（分歧最终化，含延迟 VLM 仲裁）+ 引擎使用统计 +
+    ``pages_text`` / ``pages_order`` / ``trace`` / HumanGate 字典。
+    """
+
+    page_num: int
+    verdict: "GlyphVerdict"
+    final_text: str
+    appended: bool
+    page_trace: list = field(default_factory=list)
+    registry_usage: Optional[tuple] = None  # (engine, verdict, latency_ms)
+    char_count: int = 0
+    last_engine: str = "unknown"
+    last_latency: int = 0
+    db_ops: list = field(default_factory=list)  # list[functools.partial[db.xxx]]
+    success_divs: list = field(default_factory=list)  # list[(divs, high)]
+    success_is_consensus: bool = False
+    consensus_sample_request: bool = False
+    tier3_divs: list = field(default_factory=list)  # list[(divs, high)]
+    page_img: Optional["np.ndarray"] = None
+    tally_div: int = 0
+    tally_high: int = 0
+    failed: bool = False
+    failed_reason: str = ""
+    uncertain: bool = False
+    uncertain_verdict: Optional["GlyphVerdict"] = None
+
+
 
 def render_pages(pdf_path: str, config: Config | None = None, dpi: int = 150) -> Iterator[PageInput]:
     """流式生成逐页 PageInput（N2）。真实渲染复用 engine/run.py:_pdf_page_to_numpy。
@@ -84,6 +171,35 @@ def render_pages(pdf_path: str, config: Config | None = None, dpi: int = 150) ->
                 pil = pil.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
                 img = np.array(pil)
             yield PageInput(page_num=i, img=img)
+    finally:
+        doc.close()
+
+
+def _render_one_page(pdf_path: str, page_num: int, config: "Config | None" = None) -> Optional["np.ndarray"]:
+    """渲染单页为 numpy 数组（页级并发隔离用）。
+
+    每 worker 调用本函数**独立打开**自己的 ``fitz`` 文档渲染目标页，不共享主循环文档，
+    规避 PyMuPDF ``Document`` 非线程安全。复用与 ``render_pages`` 相同的版心裁剪 + 缩放管线，
+    保证页级并发路径与串行渲染路径产出完全一致的 ``img``。
+    """
+    import fitz  # 懒加载，避免无 PDF 场景下强制依赖
+    from kzocr.engine.run import _pdf_page_to_numpy, _crop_to_body
+
+    max_pixels = getattr(config, "max_image_pixels", 2048) if config else 2048
+    doc = fitz.open(pdf_path)
+    try:
+        if page_num < 0 or page_num >= doc.page_count:
+            return None
+        img = _pdf_page_to_numpy(doc[page_num], dpi=150)
+        img = _crop_to_body(img, page_num=page_num)
+        h, w = img.shape[:2]
+        scale = min(max_pixels / max(h, w), 1.0)
+        if scale < 1.0:
+            from PIL import Image as PILImage
+            pil = PILImage.fromarray(img)
+            pil = pil.resize((int(w * scale), int(h * scale)), PILImage.LANCZOS)
+            img = np.array(pil)
+        return img
     finally:
         doc.close()
 
@@ -158,16 +274,23 @@ def _run_success_cross_check(
     char_boxes: Optional[list[list[list[int]]]] = None,
     tally: Optional[dict] = None,
     vl_budget: Optional[VLBudgetTracker] = None,
-) -> bool:
+    defer: bool = False,
+) -> "bool | _DeferredCrossCheck":
     """成功页跨引擎采样比对：Tier1 成功页追加 Tier2 引擎交叉验证。
 
     纯增强（try/except 不阻断主流程）；无 Tier2 候选时静默跳过（本机无 GPU/密钥时正常行为）。
     High 优先分歧经 record_anomaly 入 M4 队列；``vision_adapter`` 非空时对 high 分歧执行
     Box-Guided VL 仲裁（``_arbitrate_high_divergences``），仅 VL 未裁决（manual）的分歧进人工队列。
 
+    Args:
+        defer: 页级并发模式下为 ``True``。此时本函数**不写库 / 不仲裁 / 不更新全局
+            ``tally``**，仅返回 ``_DeferredCrossCheck``（含本页分歧与 tally delta），
+            交由合并阶段按页序最终化（保守模式依赖跨页累计 tally，须串行判定）。
+
     Returns:
-        True  = 成功运行且无分歧（共识一致页），供调用方做共识错误抽样
-        False = 未运行 / 无 Tier2 / 文本为空 / 有分歧
+        ``defer=False``: ``True`` = 成功运行且无分歧（共识一致页）；``False`` = 未运行 /
+            无 Tier2 / 文本为空 / 有分歧。
+        ``defer=True``: ``_DeferredCrossCheck``（``is_consensus`` 字段等价上述布尔）。
     """
     try:
         tier2 = _safe_select_candidates(
@@ -192,11 +315,20 @@ def _run_success_cross_check(
         if not divs:
             return True  # 无分歧 → 共识一致页
 
+        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
+        # 延迟模式：不写库 / 不仲裁 / 不更新 tally，仅返回本页分歧数据，
+        # 交由合并阶段按页序最终化（保守模式依赖跨页累计 tally）。
+        if defer:
+            return _DeferredCrossCheck(
+                is_consensus=False, divs=divs, high=high,
+                engine_a=engine_a, engine_b=tier2[0].meta.name,
+                tally_div=len(divs), tally_high=len(high),
+            )
+
         db.write_cross_divergences(
             page_no=page_num, divs=divs,
             engine_a=engine_a, engine_b=tier2[0].meta.name,
         )
-        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
         # 全书 high 占比二级判据：样本充足且越阈值时进入保守模式，
         # 该页 high 分歧全部留人工复核（见 _is_conservative / v4 扩面结论）。
         conservative = _is_conservative(tally) if tally is not None else False
@@ -231,6 +363,87 @@ def _run_success_cross_check(
     except Exception as exc:
         _logger.warning("[orchestrator] success cross-check failed page=%d: %s", page_num, exc)
         return False
+
+
+def _run_tier3_divergence(
+    page_num: int,
+    cur_text: str,
+    result_text: str,
+    page_input: PageInput,
+    confusion_set: dict,
+    engine_a: str,
+    engine_b: str,
+    char_boxes: Optional[list[list[list[int]]]],
+    db: BookDB,
+    tally: Optional[dict],
+    get_vision_adapter: Callable[[], Optional[VisionRecheckAdapter]],
+    get_vision_bucket: Callable[[], Optional[MultiTokenRateLimiter]],
+    vl_budget: Optional[VLBudgetTracker] = None,
+    defer: bool = False,
+) -> Optional["_DeferredCrossCheck"]:
+    """Tier3 失败路径跨引擎分歧对齐（Tier1 文本 vs Tier3 文本）。
+
+    与成功路径同源：写入交叉分歧 → high 分歧 100% 进人工复核队列 → 视觉仲裁更新状态。
+    纯函数无网络（``run_cross_align``），失败页量小，直接落库。
+
+    ``defer=True`` 时仅返回 ``_DeferredCrossCheck``（含 tally delta），不写库 / 不仲裁 /
+    不更新全局 ``tally``，交由合并阶段按页序最终化（保守模式依赖跨页累计 tally）。
+    """
+    if not cur_text or not result_text:
+        return None
+    try:
+        divs = run_cross_align(
+            page_num, cur_text, result_text,
+            confusion_set=confusion_set,
+            boxes_a=align_boxes_to_text(cur_text, char_boxes),
+            engine_a=engine_a, engine_b=engine_b,
+        )
+        if not divs:
+            return None
+        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
+        # 延迟模式：不写库 / 不仲裁 / 不更新 tally，仅返回本页分歧数据。
+        if defer:
+            return _DeferredCrossCheck(
+                is_consensus=False, divs=divs, high=high,
+                engine_a=engine_a, engine_b=engine_b,
+                tally_div=len(divs), tally_high=len(high),
+            )
+        db.write_cross_divergences(
+            page_no=page_num, divs=divs,
+            engine_a=engine_a, engine_b=engine_b,
+        )
+        # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
+        conservative = _is_conservative(tally) if tally is not None else False
+        if high:
+            db.record_anomaly(
+                page_num,
+                GlyphVerdict(
+                    status="UNKNOWN",
+                    confidence=0.4,
+                    details=(
+                        f"cross_divergence;high={len(high)};"
+                        f"sample={high[0].a_seg}↔{high[0].b_seg}"
+                    ),
+                ),
+                detector_chain=["CrossAlign"],
+            )
+            # 4.3 分歧级视觉仲裁（Box-Guided VL，退化模式）：失败路径 high 分歧经 VL 仲裁后更新状态。
+            va = get_vision_adapter()
+            if va is not None and page_input.img is not None:
+                _arbitrate_high_divergences(
+                    page_num, high, page_input.img, va,
+                    get_vision_bucket(), db, confusion_set,
+                    conservative=conservative,
+                    vl_budget=vl_budget,
+                )
+        # 回写全书累计（当前页计入后续页的保守判定）
+        if tally is not None:
+            tally["div"] = tally.get("div", 0) + len(divs)
+            tally["high"] = tally.get("high", 0) + len(high)
+        return None
+    except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
+        _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
+        return None
 
 
 # v4 扩面结论落地的二级判据：全书 high 占比 ≥ 此阈值进入「保守仲裁」（多留人工），
@@ -531,6 +744,398 @@ def _log_engine_report(
     )
 
 
+def _finalize_divergences_success(
+    page_num: int,
+    dcc: _DeferredCrossCheck,
+    page_img: Optional["np.ndarray"],
+    db: BookDB,
+    get_vision_adapter: Callable[[], Optional[VisionRecheckAdapter]],
+    get_vision_bucket: Callable[[], Optional[MultiTokenRateLimiter]],
+    confusion_set: dict,
+    vl_budget: Optional[VLBudgetTracker],
+    conservative: bool,
+) -> None:
+    """成功路径分歧最终化（合并阶段串行执行）。
+
+    镜像 ``_run_success_cross_check`` 的非延迟分支：写交叉分歧 → VL 仲裁（保守模式依赖
+    跨页累计 tally，故必须合并阶段判定）→ 未裁决（manual）分歧进人工复核队列。
+    """
+    db.write_cross_divergences(
+        page_no=page_num, divs=dcc.divs,
+        engine_a=dcc.engine_a, engine_b=dcc.engine_b,
+    )
+    high = dcc.high
+    if high:
+        va = get_vision_adapter()
+        with _vl_lock:
+            arb_result = _arbitrate_high_divergences(
+                page_num, high, page_img, va,
+                get_vision_bucket(), db, confusion_set,
+                conservative=conservative, vl_budget=vl_budget,
+            )
+        unresolved = arb_result["unresolved"]
+        if unresolved:
+            db.record_anomaly(
+                page_num,
+                GlyphVerdict(
+                    status="UNKNOWN", confidence=0.4,
+                    details=(
+                        f"cross_divergence;high={len(high)};"
+                        f"arbitrated={len(arb_result['resolved'])};"
+                        f"sample={unresolved[0].a_seg}↔{unresolved[0].b_seg}"
+                    ),
+                ),
+                detector_chain=["CrossAlign"],
+            )
+
+
+def _finalize_divergences_tier3(
+    page_num: int,
+    dcc: _DeferredCrossCheck,
+    page_img: Optional["np.ndarray"],
+    db: BookDB,
+    get_vision_adapter: Callable[[], Optional[VisionRecheckAdapter]],
+    get_vision_bucket: Callable[[], Optional[MultiTokenRateLimiter]],
+    confusion_set: dict,
+    vl_budget: Optional[VLBudgetTracker],
+    conservative: bool,
+) -> None:
+    """Tier3 失败路径分歧最终化（合并阶段串行执行）。
+
+    镜像 ``_run_tier3_divergence`` 的非延迟分支：写交叉分歧 → high 分歧 100% 进人工复核队列 →
+    VL 仲裁更新状态。
+    """
+    db.write_cross_divergences(
+        page_no=page_num, divs=dcc.divs,
+        engine_a=dcc.engine_a, engine_b=dcc.engine_b,
+    )
+    high = dcc.high
+    if high:
+        db.record_anomaly(
+            page_num,
+            GlyphVerdict(
+                status="UNKNOWN", confidence=0.4,
+                details=(
+                    f"cross_divergence;high={len(high)};"
+                    f"sample={high[0].a_seg}↔{high[0].b_seg}"
+                ),
+            ),
+            detector_chain=["CrossAlign"],
+        )
+        va = get_vision_adapter()
+        if va is not None and page_img is not None:
+            with _vl_lock:
+                _arbitrate_high_divergences(
+                    page_num, high, page_img, va,
+                    get_vision_bucket(), db, confusion_set,
+                    conservative=conservative, vl_budget=vl_budget,
+                )
+
+
+def _process_one_page(page_num: int, page_input: PageInput, ctx: _PageContext) -> _PageOutcome:
+    """单页处理（线程本地计算，无共享状态副作用）。
+
+    镜像 ``orchestrate_book`` 主循环页体（L760–960 主体）的逻辑：Tier1 校验 / Tier3 识别 /
+    跨引擎分歧对齐 / VLM 仲裁。所有副作用（db 写 / 引擎统计 / tally 累加 / VLM 仲裁）收集进
+    ``_PageOutcome``，由合并阶段按页序落地；VLM 调用经 ``_vl_lock`` 串行。
+
+    页图像：若 ``page_input.img`` 为 None（页级并发隔离模式），本函数自行渲染该页
+    （每 worker 独立 ``fitz`` 文档，见 ``_render_one_page``）。
+    """
+    verdict = GlyphVerdict(status="FAIL", confidence=0.0)
+    page_trace: list = []
+    registry_usage: Optional[tuple] = None
+    page_layout = page_input.layout or PageLayout(page_num=page_num)
+    final_text = ""
+    t1_engine_name = ctx.tier1_candidates[0].meta.name if ctx.tier1_candidates else "unknown"
+
+    # 渲染隔离：并发模式下 page_input.img 为 None，自行渲染本页（每 worker 独立文档）。
+    if page_input.img is None:
+        rendered = _render_one_page(ctx.pdf_path, page_num, ctx.config)
+        page_input = PageInput(page_num=page_num, img=rendered)
+
+    neighbor_texts: list[str] = []
+    next_text = ""
+    cur_char_boxes = None
+    if ctx.tier1_result and page_num < len(ctx.tier1_result.pages):
+        cur_p = ctx.tier1_result.pages[page_num]
+        cur_text = cur_p.text or _join_paragraphs(cur_p)
+        cur_char_boxes = cur_p.char_boxes
+        if page_num + 1 < len(ctx.tier1_result.pages):
+            nxt = ctx.tier1_result.pages[page_num + 1]
+            next_text = nxt.text or _join_paragraphs(nxt)
+        if page_num > 0:
+            prev = ctx.tier1_result.pages[page_num - 1]
+            neighbor_texts.append(prev.text or _join_paragraphs(prev))
+        if next_text:
+            neighbor_texts.append(next_text)
+    else:
+        cur_text = ""
+
+    db_ops: list = []
+
+    if cur_text and not page_layout.is_vertical:
+        context = DetectorContext(
+            page_num=page_num, engine_label=t1_engine_name,
+            book_type=ctx.book_type, pub_era=ctx.pub_era,
+            resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
+        )
+        with _vl_lock:
+            verdict = ctx.verifier.verify_with_vision(
+                cur_text, context,
+                page_img=page_input.img if page_input.img is not None else None,
+                vision_adapter=ctx.get_vision_adapter(),
+            )
+        page_trace.append(EngineCallRecord(
+            page=page_num, tier=1, engine=t1_engine_name,
+            latency_ms=ctx.t1_elapsed_per_page, glyph_status=verdict.status,
+            detector_chain=list(ctx.verifier.last_detector_chain),
+        ))
+        if verdict.status in ("PASS", "RARE"):
+            final_text = cur_text
+            db_ops.append(functools.partial(ctx.db.init_page, page_num, char_count=len(cur_text), engine_label=t1_engine_name))
+            db_ops.append(functools.partial(ctx.db.update_ocr, page_num, status="success", char_count=len(cur_text), latency_ms=ctx.t1_elapsed_per_page))
+            db_ops.append(functools.partial(ctx.db.update_verify, page_num, verdict=verdict.status, details=verdict.details or ""))
+            _page_conf = (
+                ctx.tier1_result.pages[page_num].confidence
+                if ctx.tier1_result and page_num < len(ctx.tier1_result.pages)
+                else 1.0
+            )
+            if _page_conf <= _CONF_GATE:
+                db_ops.append(functools.partial(ctx.db.update_import, page_num, status="pending", count=1))
+                db_ops.append(functools.partial(
+                    ctx.db.record_anomaly, page_num,
+                    GlyphVerdict(
+                        status=verdict.status, confidence=_page_conf,
+                        details=(
+                            f"conf_low;engine_conf={_page_conf:.3f};"
+                            f"gate={_CONF_GATE:.2f}"
+                        ),
+                        force_review=True,
+                    ),
+                    detector_chain=["ConfGate"],
+                ))
+                return _PageOutcome(
+                    page_num=page_num, verdict=verdict, final_text=final_text,
+                    appended=True, page_trace=page_trace,
+                    registry_usage=(ctx.tier1_candidates[0], verdict, ctx.t1_elapsed_per_page),
+                    char_count=len(cur_text), last_engine=t1_engine_name, last_latency=ctx.t1_elapsed_per_page,
+                    db_ops=db_ops,
+                )
+            db_ops.append(functools.partial(ctx.db.update_import, page_num, status="imported", count=1))
+            # 增强路径：成功页跨引擎采样比对（defer 模式，分歧最终化在合并阶段）
+            success_divs: list = []
+            success_is_consensus = False
+            if getattr(ctx.overrides, "enable_cross_check", False) and not ctx.budget.exhausted:
+                r = _run_success_cross_check(
+                    page_num, cur_text, page_input,
+                    ctx.scheduler, ctx.registry, ctx.db,
+                    ctx.confusion_set, ctx.budget, ctx.overrides, page_layout,
+                    ctx.max_time_per_page_ms,
+                    vision_adapter=ctx.get_vision_adapter(),
+                    bucket=ctx.get_vision_bucket(),
+                    engine_a=t1_engine_name, char_boxes=cur_char_boxes,
+                    tally=None, vl_budget=ctx.vl_budget, defer=True,
+                )
+                if isinstance(r, _DeferredCrossCheck):
+                    success_divs = [r]
+                    success_is_consensus = r.is_consensus
+            consensus_sample_request = bool(success_is_consensus and getattr(ctx.overrides, "consensus_sample_rate", 0.0) > 0)
+            return _PageOutcome(
+                page_num=page_num, verdict=verdict, final_text=final_text,
+                appended=True, page_trace=page_trace,
+                registry_usage=(ctx.tier1_candidates[0], verdict, ctx.t1_elapsed_per_page),
+                char_count=len(cur_text), last_engine=t1_engine_name, last_latency=ctx.t1_elapsed_per_page,
+                db_ops=db_ops, success_divs=success_divs,
+                success_is_consensus=success_is_consensus,
+                consensus_sample_request=consensus_sample_request,
+                page_img=page_input.img,
+            )
+
+    # ── Tier3（失败 / 竖排 / 缺文本）──
+    result = None
+    engine_name = None
+    if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") and not ctx.budget.exhausted:
+        tier3 = _safe_select_candidates(ctx.scheduler, ctx.registry, 3, page_input, ctx.budget, page_layout, ctx.overrides)
+        timeout_t3 = getattr(ctx.config, "max_time_per_page_ms", 120000) / 1000
+        result, engine_name = run_engines_concurrent(tier3, page_input, timeout_s=timeout_t3, max_workers=ctx.concurrency_ctrl.workers)
+    if result is not None and engine_name is not None:
+        t_elapsed = 500  # placeholder
+        tier3_divs: list = []
+        if cur_text and result.text:
+            dcc = _run_tier3_divergence(
+                page_num, cur_text, result.text, page_input,
+                ctx.confusion_set, t1_engine_name, engine_name, cur_char_boxes,
+                ctx.db, None, ctx.get_vision_adapter, ctx.get_vision_bucket, ctx.vl_budget, defer=True,
+            )
+            if isinstance(dcc, _DeferredCrossCheck):
+                tier3_divs = [dcc]
+        vctx = DetectorContext(
+            page_num=page_num, engine_label=engine_name,
+            book_type=ctx.book_type, pub_era=ctx.pub_era,
+            resources={"neighbor_texts": neighbor_texts, "next_page_text": next_text},
+        )
+        with _vl_lock:
+            verdict = ctx.verifier.verify_with_vision(
+                result.text, vctx,
+                page_img=page_input.img if page_input.img is not None else None,
+                vision_adapter=ctx.get_vision_adapter(),
+            )
+        _eng = next((e for e in tier3 if e.meta.name == engine_name), None)
+        if _eng:
+            page_trace.append(EngineCallRecord(
+                page=page_num, tier=3, engine=engine_name,
+                latency_ms=t_elapsed, glyph_status=verdict.status,
+                detector_chain=list(ctx.verifier.last_detector_chain),
+            ))
+            registry_usage = (_eng, verdict, t_elapsed)
+        if verdict.status in ("PASS", "RARE"):
+            final_text = result.text
+
+    # ── HumanGate + 逐页进度写（页局部，合并阶段落地）──
+    last_engine = page_trace[-1].engine if page_trace else "unknown"
+    last_latency = page_trace[-1].latency_ms if page_trace else 0
+    char_count = len(final_text) if final_text else 0
+    db_ops.append(functools.partial(ctx.db.init_page, page_num, char_count=char_count, engine_label=last_engine))
+    ocr_ok = verdict.status in ("PASS", "RARE", "FAIL", "UNKNOWN", "UNCERTAIN")
+    db_ops.append(functools.partial(ctx.db.update_ocr, page_num, status="success" if ocr_ok else "failed", char_count=char_count, latency_ms=last_latency))
+    db_ops.append(functools.partial(ctx.db.update_verify, page_num, verdict=verdict.status, details=verdict.details or ""))
+    _page_conf = (
+        ctx.tier1_result.pages[page_num].confidence
+        if ctx.tier1_result and page_num < len(ctx.tier1_result.pages) else _CONF_GATE
+    )
+    if verdict.status in ("FAIL", "UNKNOWN", "UNCERTAIN") or getattr(verdict, "force_review", False) or _page_conf <= _CONF_GATE:
+        db_ops.append(functools.partial(ctx.db.record_anomaly, page_num, verdict=verdict, detector_chain=ctx.verifier.last_detector_chain))
+    db_ops.append(functools.partial(ctx.db.update_import, page_num, status="imported" if verdict.status in ("PASS", "RARE") else "pending", count=1))
+
+    outcome = _PageOutcome(
+        page_num=page_num, verdict=verdict, final_text=final_text,
+        appended=bool(final_text), page_trace=page_trace,
+        registry_usage=registry_usage,
+        char_count=char_count, last_engine=last_engine, last_latency=last_latency,
+        db_ops=db_ops, tier3_divs=tier3_divs, page_img=page_input.img,
+    )
+    if verdict.status in ("FAIL", "UNKNOWN"):
+        outcome.failed = True
+        outcome.failed_reason = f"All tiers failed. Last: {verdict.details}"
+    elif verdict.status == "UNCERTAIN":
+        outcome.uncertain = True
+        outcome.uncertain_verdict = verdict
+    return outcome
+
+
+def _run_book_parallel(
+    pdf_path: str,
+    config: "Config",
+    budget: "Budget",
+    overrides: Optional["EngineOverrides"],
+    scheduler: "EngineScheduler",
+    registry: "EngineRegistry",
+    db: BookDB,
+    confusion_set: dict,
+    verifier: "GlyphVerifier",
+    tier1_result: Optional["BookResult"],
+    tier1_candidates: list,
+    t1_elapsed_per_page: int,
+    concurrency_ctrl: "AdaptiveController",
+    vl_budget: Optional["VLBudgetTracker"],
+    get_vision_adapter: Callable[[], Optional[VisionRecheckAdapter]],
+    get_vision_bucket: Callable[[], Optional[MultiTokenRateLimiter]],
+    book_type: str,
+    pub_era: str,
+    skip_pages: set[int],
+    max_time_per_page_ms: int,
+    max_workers: int,
+) -> tuple[list[str], list[int], dict[int, str], dict[int, "GlyphVerdict"], list, dict[str, int], dict]:
+    """页级并发编排（KZOCR_PAGE_PARALLEL=1）：多线程处理各页，合并阶段串行写共享状态。
+
+    返回 ``(pages_text, pages_order, failed_pages, uncertain_pages, trace, engine_usage_counter, tally)``，
+    与串行主循环产出等价。页闸（max_pages）在提交任务前切片；时间闸为软约束（提交时已过则不再提交）。
+    """
+    import fitz
+
+    if os.path.exists(pdf_path):
+        page_count = fitz.open(pdf_path).page_count
+    else:
+        page_count = len(tier1_result.pages) if tier1_result else 0
+    # 切片到 max_pages 并跳过已处理页（等价于串行页闸）
+    page_nums = [p for p in range(page_count) if p < budget.max_pages and p not in skip_pages]
+
+    ctx = _PageContext(
+        config=config, pdf_path=pdf_path, tier1_result=tier1_result,
+        tier1_candidates=tier1_candidates, t1_elapsed_per_page=t1_elapsed_per_page,
+        overrides=overrides, confusion_set=confusion_set, scheduler=scheduler,
+        registry=registry, db=db, budget=budget, verifier=verifier, book_type=book_type,
+        pub_era=pub_era, concurrency_ctrl=concurrency_ctrl, max_time_per_page_ms=max_time_per_page_ms,
+        get_vision_adapter=get_vision_adapter, get_vision_bucket=get_vision_bucket, vl_budget=vl_budget,
+    )
+
+    pages_text: list[str] = []
+    pages_order: list[int] = []
+    failed_pages: dict[int, str] = {}
+    uncertain_pages: dict[int, "GlyphVerdict"] = {}
+    trace: list = []
+    engine_usage_counter: dict[str, int] = {}
+    tally: dict = {"div": 0, "high": 0}
+
+    if not page_nums:
+        return pages_text, pages_order, failed_pages, uncertain_pages, trace, engine_usage_counter, tally
+
+    def _work(pn: int) -> _PageOutcome:
+        return _process_one_page(pn, PageInput(page_num=pn, img=None), ctx)
+
+    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
+        # executor.map 按提交顺序返回，天然按页序；worker 内部各自渲染、互不共享状态。
+        outcomes = list(ex.map(_work, page_nums))
+
+    # ── 合并阶段：按页序串行落地全部共享状态（规避 sqlite/registry 竞态）──
+    for outcome in outcomes:
+        # 1) 页局部 db 写（按页序应用；各 op 以 page_num 为键，顺序无关）
+        for op in outcome.db_ops:
+            op()
+        # 2) tally 累加（合并后才能判定保守模式，供后续页分歧最终化）
+        tally["div"] += outcome.tally_div
+        tally["high"] += outcome.tally_high
+        conservative = _is_conservative(tally)
+        # 3) 分歧最终化（含延迟 VLM 仲裁，_vl_lock 串行）
+        for dcc in outcome.success_divs:
+            _finalize_divergences_success(
+                outcome.page_num, dcc, outcome.page_img, db,
+                get_vision_adapter, get_vision_bucket, confusion_set, vl_budget, conservative,
+            )
+        for dcc in outcome.tier3_divs:
+            _finalize_divergences_tier3(
+                outcome.page_num, dcc, outcome.page_img, db,
+                get_vision_adapter, get_vision_bucket, confusion_set, vl_budget, conservative,
+            )
+        # 4) 共识一致页抽样送视觉仲裁（合并阶段、_vl_lock 串行）
+        if outcome.consensus_sample_request and getattr(overrides, "consensus_sample_rate", 0.0) > 0:
+            with _vl_lock:
+                _sample_consensus_error(
+                    outcome.page_num, outcome.final_text, outcome.page_img,
+                    get_vision_adapter(), db,
+                    getattr(overrides, "consensus_sample_rate", 0.0),
+                    get_vision_bucket(), vl_budget=vl_budget,
+                )
+        # 5) 引擎使用统计（主线程串行 record）
+        if outcome.registry_usage is not None:
+            _record_engine_usage(
+                registry, outcome.registry_usage[0], outcome.registry_usage[1],
+                outcome.registry_usage[2], engine_usage_counter,
+            )
+        # 6) 文本 / 轨迹 / HumanGate 字典
+        trace.extend(outcome.page_trace)
+        if outcome.appended:
+            pages_text.append(outcome.final_text)
+            pages_order.append(outcome.page_num)
+        if outcome.failed:
+            failed_pages[outcome.page_num] = outcome.failed_reason
+        elif outcome.uncertain:
+            uncertain_pages[outcome.page_num] = outcome.uncertain_verdict
+
+    return pages_text, pages_order, failed_pages, uncertain_pages, trace, engine_usage_counter, tally
+
+
 def orchestrate_book(
     pdf_path: str,
     book_code: str | None,
@@ -704,6 +1309,35 @@ def orchestrate_book(
     # 全书跨引擎分歧累计（供 high 占比二级判据；见 _is_conservative / v4 扩面结论）
     tally: dict = {"div": 0, "high": 0}
 
+    # ── 页级并发编排（默认关；KZOCR_PAGE_PARALLEL=1 开启）──
+    # 开启时多线程处理各页、合并阶段串行写共享状态（规避 sqlite/registry 竞态），
+    # 其余逻辑与串行路径完全等价。默认关闭，冻结栈行为不变。
+    page_parallel = getattr(config, "page_parallel", False) or _safe_bool(
+        os.environ.get("KZOCR_PAGE_PARALLEL", ""), False
+    )
+    max_time_per_page_ms = budget.max_time_per_page_ms
+    if page_parallel:
+        max_workers = getattr(config, "page_workers", 0) or 0
+        if max_workers <= 0:
+            max_workers = min(os.cpu_count() or 4, 4)
+        (
+            pages_text, pages_order, failed_pages, uncertain_pages, trace,
+            engine_usage_counter, tally,
+        ) = _run_book_parallel(
+            pdf_path, config, budget, overrides, scheduler, registry, db,
+            confusion_set, verifier, tier1_result, tier1_candidates,
+            t1_elapsed_per_page, concurrency_ctrl, vl_budget,
+            _get_vision_adapter, _get_vision_bucket,
+            book_type, pub_era, skip_pages, max_time_per_page_ms, max_workers,
+        )
+        return _finalize_book(
+            book_code=book_code, config=config, db=db, registry=registry, trace=trace,
+            pages_text=pages_text, pages_order=pages_order,
+            failed_pages=failed_pages, uncertain_pages=uncertain_pages,
+            tier1_result=tier1_result, engine_usage_counter=engine_usage_counter,
+            start_time=start_time, vl_budget=vl_budget, title=title,
+        )
+
     for page_num, page_input in enumerate(render_pages(pdf_path, config)):
         # F3: 跳过已处理页
         if page_num in skip_pages:
@@ -863,51 +1497,11 @@ def orchestrate_book(
             # 失败路径上两引擎文本共存，比对提取分歧（数字/剂量+形近黑名单 high 优先），
             # 供 HumanGate / 视觉仲裁。纯函数无网络，失败页量小，直接落库。
             if cur_text and result.text:
-                try:
-                    divs = run_cross_align(
-                        page_num, cur_text, result.text,
-                        confusion_set=confusion_set,
-                        boxes_a=align_boxes_to_text(cur_text, cur_char_boxes),
-                        engine_a=t1_engine_name, engine_b=engine_name,
-                    )
-                    if divs:
-                        db.write_cross_divergences(
-                            page_no=page_num, divs=divs,
-                            engine_a=t1_engine_name, engine_b=engine_name,
-                        )
-                        # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
-                        high = [d for d in divs if d.priority in ("P0", "P1", "high")]
-                        # 全书 high 占比二级判据（与成功路径同源，见 _is_conservative）。
-                        conservative = _is_conservative(tally) if tally is not None else False
-                        if high:
-                            db.record_anomaly(
-                                page_num,
-                                GlyphVerdict(
-                                    status="UNKNOWN",
-                                    confidence=0.4,
-                                    details=(
-                                        f"cross_divergence;high={len(high)};"
-                                        f"sample={high[0].a_seg}↔{high[0].b_seg}"
-                                    ),
-                                ),
-                                detector_chain=["CrossAlign"],
-                            )
-                            # 4.3 分歧级视觉仲裁（Box-Guided VL，退化模式）：
-                            # 失败路径 high 分歧经 VL 仲裁后更新状态（行为不变，去重为共享 helper）。
-                            va = _get_vision_adapter()
-                            if va is not None and page_input.img is not None:
-                                _arbitrate_high_divergences(
-                                    page_num, high, page_input.img, va,
-                                    _get_vision_bucket(), db, confusion_set,
-                                    conservative=conservative,
-                                    vl_budget=vl_budget,
-                                )
-                        # 回写全书累计（当前页计入后续页的保守判定）
-                        if tally is not None:
-                            tally["div"] = tally.get("div", 0) + len(divs)
-                            tally["high"] = tally.get("high", 0) + len(high)
-                except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
-                    _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
+                _run_tier3_divergence(
+                    page_num, cur_text, result.text, page_input,
+                    confusion_set, t1_engine_name, engine_name, cur_char_boxes,
+                    db, tally, _get_vision_adapter, _get_vision_bucket, vl_budget,
+                )
             vctx = DetectorContext(
                     page_num=page_num, engine_label=engine_name,
                     book_type=book_type, pub_era=pub_era,
@@ -965,7 +1559,39 @@ def orchestrate_book(
             page_num, status="imported" if verdict.status in ("PASS", "RARE") else "pending", count=1,
         )
 
-    # ── 书完成后处理 ──
+    # ── 书完成后处理（串行路径）──
+    return _finalize_book(
+        book_code=book_code, config=config, db=db, registry=registry, trace=trace,
+        pages_text=pages_text, pages_order=pages_order,
+        failed_pages=failed_pages, uncertain_pages=uncertain_pages,
+        tier1_result=tier1_result, engine_usage_counter=engine_usage_counter,
+        start_time=start_time, vl_budget=vl_budget, title=title,
+    )
+
+
+def _finalize_book(
+    *,
+    book_code: str | None,
+    config: "Config",
+    db: BookDB,
+    registry: "EngineRegistry",
+    trace: list,
+    pages_text: list[str],
+    pages_order: list[int],
+    failed_pages: dict[int, str],
+    uncertain_pages: dict[int, "GlyphVerdict"],
+    tier1_result: Optional["BookResult"],
+    engine_usage_counter: dict[str, int],
+    start_time: float,
+    vl_budget: Optional["VLBudgetTracker"],
+    title: str,
+) -> "BookResult":
+    """书完成后处理（串行 / 并行路径共用）。
+
+    持久化引擎基准 + 写 trace + 引擎报告 + VL 预算对账 + 失败率告警 + benchmark 汇总 +
+    关闭 DB + 合并 Tier1 字符框 + 返回 ``BookResult``。串行与页级并发两种路径产出的最终
+    ``BookResult`` 经此函数统一收口，保证行为一致。
+    """
     registry.persist_benchmarks()
 
     trace_dir = getattr(config, "trace_dir", None) or os.path.join(

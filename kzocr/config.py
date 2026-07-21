@@ -46,6 +46,12 @@ class SchedulerConfig:
     benchmark_dir: str = ""
     trace_dir: str = ""
     engine_parallel: bool = False
+    # 页级并发编排（默认关；KZOCR_PAGE_PARALLEL=1 开启）。
+    # 开启后主循环用 ThreadPoolExecutor 跨页并行（每 worker 独立渲染），
+    # 合并阶段串行写共享状态（db/registry/tally），彻底规避 sqlite/registry 竞态。
+    page_parallel: bool = False
+    # 页级并发 worker 数（0=自动 min(CPU,4)，仅 page_parallel 生效）。
+    page_workers: int = 0
     allow_cloud_vision: bool = False
     tier_limit: int = 3
     cross_check: bool = True  # 自 v0.7 稳定后默认开；设 KZOCR_ENABLE_CROSS_CHECK=0 关闭
@@ -71,6 +77,8 @@ class SchedulerConfig:
             benchmark_dir=os.environ.get("KZOCR_BENCHMARK_DIR", ""),
             trace_dir=os.environ.get("KZOCR_TRACE_DIR", ""),
             engine_parallel=_safe_bool(os.environ.get("KZOCR_ENGINE_PARALLEL", ""), False),
+            page_parallel=_safe_bool(os.environ.get("KZOCR_PAGE_PARALLEL", ""), False),
+            page_workers=_safe_int(os.environ.get("KZOCR_PAGE_WORKERS", "0"), 0, "KZOCR_PAGE_WORKERS"),
             allow_cloud_vision=_safe_bool(os.environ.get("KZOCR_ALLOW_CLOUD_VISION", ""), False),
             tier_limit=_safe_int(os.environ.get("KZOCR_TIER_LIMIT", "3"), 3, "KZOCR_TIER_LIMIT"),
             cross_check=_safe_bool(os.environ.get("KZOCR_ENABLE_CROSS_CHECK", ""), True),

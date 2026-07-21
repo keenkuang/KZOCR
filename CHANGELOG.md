@@ -1,7 +1,29 @@
 # KZOCR 变更日志
 
-> 文档版本：v2026-07-21 续十二
+> 文档版本：v2026-07-21 续十三
 > 最后更新：2026-07-21 CST
+
+---
+
+## v2026-07-21 续十三 — #3 质量/性能再提升（工作流 A：页级并发 + 渲染隔离）
+
+> **#3 用户决策三个子方向全做**（页级并发编排① / 分歧率·质量优化② / 编排延迟优化③），不三选一。
+> 本段交付**工作流 A（①+③合并）**：将主循环页处理主体提取为纯函数 `_process_one_page` + 数据类
+> `_PageOutcome`/`_PageContext`，开启 `KZOCR_PAGE_PARALLEL` 时 `ThreadPoolExecutor` 跨页并行（每 worker
+> 独立 `fitz` 渲染隔离），**合并阶段单线程串行**写 BookDB / 引擎统计 / `tally` / 延迟 VLM 仲裁
+> （`_vl_lock` 串行视觉调用）。延迟优化（③）随并发一并交付：墙钟从 Σ(page_i) 降至 ~Σ/N。
+> 全部默认关闭，冻结栈行为不变。新增 8 例 mock 测试（`tests/test_orchestrator_parallel.py`），
+> 全量 **1020 passed + 2 skipped + 2 deselected**（较 1012 +8），ruff 全过。版本号维持 **0.25.0**。
+> 工作流 B（② 自适应共识抽样 + 旋钮 env 化）见续十三·B。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/orchestrator.py` | **工作流 A**：① 提取 `_process_one_page(page_num, page_input, ctx) -> _PageOutcome`（线程本地计算，无共享状态副作用，VLM 调用经 `_vl_lock`）；`Tier3` 分歧块抽为 `_run_tier3_divergence(..., defer=)`，成功路径 `_run_success_cross_check(..., defer=)` 新增延迟模式（不写库/不仲裁/不更新全局 tally，仅返回 `_DeferredCrossCheck` 含引擎名与 tally delta）；新增 `_finalize_divergences_{success,tier3}`（合并阶段按页序最终化分歧 + 延迟 VLM 仲裁）、`_render_one_page`（每 worker 独立渲染单页）、`_run_book_parallel`（并发 map + 串行合并）、`_finalize_book`（串行/并行共用书后处理收口）、`_PageOutcome`/`_PageContext`/`_DeferredCrossCheck` 数据类、`_vl_lock`。② 主循环 `KZOCR_PAGE_PARALLEL` 分支（默认关）：切片到 `budget.max_pages` + 跳过 `skip_pages`，提交 worker，合并阶段按页序落地全部共享状态。 |
+| `kzocr/config.py` | `SchedulerConfig` 新增 `page_parallel: bool`（默认关，读 `KZOCR_PAGE_PARALLEL`）、`page_workers: int`（默认 0=自动 min(CPU,4)，读 `KZOCR_PAGE_WORKERS`）。 |
+| `tests/test_orchestrator_parallel.py`（新增，8 例） | 默认关=串行路径不变；并行多页成功 / Tier1 失败→Tier3 成功 / 全失败 HumanGate；**等价性**测试（并行 vs 串行 `pages_text`/`failed_pages`/`uncertain_pages` 一致）；并行 + VL 交叉校验 high 分歧被仲裁且不进人工队列；**渲染隔离**（每 worker 独立渲染、调用次数=页数）；大书 + 受限 worker 全部页处理完。全程 mock 引擎 + mock 渲染，无真实 PDF/网络。 |
+
+> 共享状态安全清单：db（仅合并阶段单线程写）、registry/engine_usage_counter（仅合并 `record`）、`tally`（页内算 delta、合并累加后判保守模式）、`pages_text`/`pages_order`/`trace`（合并 extend）、`fitz` Document（每 worker 独立打开）、`vision_adapter`/`vl_budget`（worker/合并均经 `_vl_lock` 串行）。降级：开关默认 0，置 0 即完全回到串行冻结栈行为。
+> 范围边界：不改 `archival.py` / 主线 `BookDB` schema / `web/app.py`；不删任何代码；不引入外部依赖；并发仅用标准库 `ThreadPoolExecutor`。
 
 ---
 
