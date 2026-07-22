@@ -26,7 +26,7 @@ python -m pytest tests/ -v                        # 全量
 python -m pytest tests/test_errors.py -v          # 单个测试文件
 python -m pytest tests/test_errors.py::test_xxx -v   # 单个用例
 ```
-仓库无 `requirements.txt`，CI 仅 `pip install PyMuPDF numpy pytest`。真实引擎依赖（MinerU/PaddleOCR/torch/LLM）运行环境另行安装。CI 未设覆盖率门禁；`.coverage` 与 `coverage_report/` 为历史产物，不要误以为是必需配置。
+仓库无 `requirements.txt`，CI 仅 `pip install PyMuPDF numpy pytest`。真实引擎依赖（MinerU/PaddleOCR/torch/LLM）运行环境另行安装。CI 设覆盖率门禁 `fail_under=80`（`pyproject.toml` 的 `[tool.coverage.report]`，仅统计主线核心模块、排除冻结的 `tcm_ocr` 与测试）；`test.yml` 的 test job 以 `pytest tests/ --cov=kzocr --cov-report=term-missing` 运行，覆盖率不达标则 CI 失败。`coverage_report/` 为历史产物，不要误以为是必需配置。
 
 ### 静态检查（强制）
 ```bash
@@ -87,7 +87,7 @@ run_engine()
 - 目标 Python 3.10+，每个文件开头 `from __future__ import annotations`。
 - 函数参数与返回值**必须**包含完整类型注解。
 - 提交信息用 Conventional Commits：`feat:` / `fix:` / `docs:` / `test:` / `refactor:` / `ci:`（中文描述）。
-- 分支：`main` 受保护不可直推；并行开发线 `m1`；日常功能分支 `feat/xxx`、`fix/xxx`。
+- 分支：并行开发线 `m1`；日常功能分支 `feat/xxx`、`fix/xxx`。**`main` 受保护不可直推为历史约定，但用户已明确确认接受重大改动直推 main（见 memory `feedback_main_push_acceptance`：与 CODEBUDDY.md 表面冲突时以用户确认为准）。** 如用户未另行要求，仍优先走功能分支。
 - 测试：pytest，文件放 `tests/`，命名 `test_<module>.py`；网络/文件系统等外部依赖**必须 mock**；新功能须带测试，bugfix 须带回归测试。
 
 ## 已知跨文件不一致（2026-07-10，影响实现时需注意）
