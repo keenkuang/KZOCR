@@ -4,7 +4,7 @@ This file provides guidance to CodeBuddy Code when working with code in this rep
 
 ## 项目概述
 
-KZOCR 是**中医古籍 OCR 编排工具**：将 kimi OCR（BookPipeline）对 PDF 的识别结果写入 zai 人工校对台（SQLite），导出经人工终校的 Markdown 后推送 kHUB，形成「扫描 → OCR → 校对 → 发布」闭环。当前 main 版本 **v0.25.0**，**v0.7 自适应引擎编排层已全部实现并合入 main**（EngineRegistry / EngineScheduler / GlyphVerifier / Orchestrator + review_manifest 校对反馈闭环 + Celery 生产接线 + §5.5 Box-Guided VL 视觉仲裁）。
+KZOCR 是**中医古籍 OCR 编排工具**：将 kimi OCR（BookPipeline）对 PDF 的识别结果写入 zai 人工校对台（SQLite），导出经人工终校的 Markdown 后推送 kHUB，形成「扫描 → OCR → 校对 → 发布」闭环。当前 main 版本 **v0.26.0**，**v0.7 自适应引擎编排层已全部实现并合入 main**（EngineRegistry / EngineScheduler / GlyphVerifier / Orchestrator + review_manifest 校对反馈闭环 + Celery 生产接线 + §5.5 Box-Guided VL 视觉仲裁）。
 
 ## 会话上下文恢复（失忆防护，必须遵守）
 每个新会话开始处理任何任务前，**必须**先读取跨会话记忆以恢复上下文，不要问用户"我们现在要做什么"：
@@ -98,5 +98,5 @@ run_engine()
 
 ## 设计文档索引
 - 方案：`docs/plans/ocr-engine-unification.{v0.3-FREEZE, v0.4-AMEND, v0.5-AMEND, v0.7, v0.7-DETAILED}.md`
-- 评审报告：`docs/reviews/<日期>-round<N>-v0.7/`（多角色）。v0.7 历经多轮评审（round1→round9）后已进入编码并实现、合入 main（当前 v0.25.0）；设计稿中的「待实现」标记已过期，以 `kzocr/scheduler/` 实际代码为准。
+- 评审报告：`docs/reviews/<日期>-round<N>-v0.7/`（多角色）。v0.7 历经多轮评审（round1→round9）后已进入编码并实现、合入 main（当前 v0.26.0）；设计稿中的「待实现」标记已过期，以 `kzocr/scheduler/` 实际代码为准。
 - 变更记录：`CHANGELOG.md`、`docs/TEST_REPORT.md`。

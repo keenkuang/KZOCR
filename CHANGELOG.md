@@ -5,6 +5,23 @@
 
 ---
 
+## v0.26.0 B7 行级裁剪图路径存储（persist 时按 char_boxes 切片落盘）
+
+> 提交：`22b5e9e`（feat(storage): B7 行级裁剪图路径存储）。全量 **1117 passed + 2 skipped + 2 deselected**，ruff 全过，CI 在 3.10/3.11/3.12 全 ✅。
+> 设计计划 `electric-nebula-curie-R5VASMaA.md`。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/storage/crop_images.py` | 新增：复用 zai.py 烘焙管线（`_pdf_page_to_numpy(dpi=150)` + `_crop_to_body`，**不缩放**），保证与 ingest 的 char_boxes 坐标严格对齐；按页缓存 doc/版心图，best-effort 失败仅告警。 |
+| `kzocr/storage/db.py` | `line.crop_img_path` + `book.source_pdf` 两列（旧库自动 ALTER 补列）；`save_book_result` 落库时按整页版心图包围盒切 PNG 落 `<db_dir>/<book_code>_crops/P{page}_L{para}_{seq}.png`，受 `KZOCR_CROP_IMG` 开关控制（默认开）。 |
+| `kzocr/engine/types.py` | `BookResult.source_pdf` 字段。 |
+| `kzocr/scheduler/orchestrator.py` / `kzocr/engine/run.py` | 三处 `BookResult` 构造点填充 `source_pdf`（串行/并行路径经 `_finalize_book` 透传）。 |
+| `tests/test_bookdb_crop_image.py` | 新增 4 例：切图落盘相对路径 / 开关关闭 / 无 source_pdf / 旧库迁移补列。 |
+
+> 坐标不变量：char_boxes 是 `_crop_to_body` 后版心图（dpi=150，**不缩放**）像素坐标；绝不用 orchestrator 的 VL 缩放坐标，否则错位。模块 A 烘焙 custom.db 的 `crop_img` BLOB 不变（离线自包含）。
+
+---
+
 ## v2026-07-22 交付式校对台增强（A–H）+ e2e 分歧明细落库
 
 > 闭环计划 `electric-nebula-curie-R5VASMaA.md`（方向 2 三功能 + 方向 3 回导加固 B.1–B.5 + 识别率衔接 H）。
