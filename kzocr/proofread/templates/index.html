@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}KZOCR 校对 - 书籍列表{% endblock %}
 {% block content %}
-<div class="max-w-4xl mx-auto">
+<div class="max-w-4xl mx-auto animate-fade-in-up">
   <div class="bg-white rounded-lg shadow-md p-4 mb-4">
-    <h2 class="text-lg font-bold">概览</h2>
+    <h2 class="section-title-deco text-lg font-bold">概览</h2>
     <div class="grid grid-cols-3 gap-4 mt-2 text-center">
       <div class="bg-tcm-bg rounded p-2">
         <div class="text-2xl font-bold text-tcm-primary">{{ total_books }}</div>
@@ -22,7 +22,7 @@
 
   <div class="bg-white rounded-lg shadow-md">
     <div class="p-4 border-b">
-      <h2 class="text-lg font-bold">书籍列表</h2>
+      <h2 class="section-title-deco text-lg font-bold">书籍列表</h2>
     </div>
     {% if books %}
     <div class="divide-y">

@@ -6,9 +6,10 @@
 {% endblock %}
 {% block content %}
 <style>
-  .d-ins { background:#d1fae5; color:#065f46; }
-  .d-del { background:#fee2e2; color:#991b1b; text-decoration:line-through; }
-  .d-rep { background:#ffedd5; color:#9a3412; }
+  /* 差异高亮：对齐 zai 校对工作台（ins=墨绿 primary / del=朱砂 destructive / replace=琥珀 primary-light） */
+  .d-ins { background: color-mix(in oklch, var(--tcm-primary) 18%, transparent); color: var(--tcm-primary); }
+  .d-del { background: color-mix(in oklch, var(--tcm-destructive) 18%, transparent); color: var(--tcm-destructive); text-decoration: line-through; }
+  .d-rep { background: color-mix(in oklch, var(--tcm-primary-light) 22%, transparent); color: var(--tcm-primary-light); }
   /* VL 字符级标注（Part B）：黄=程序/VL 已修正待核；红=纯人工待校 */
   .d-vl { background:#fef08a; border-radius:2px; }
   .d-human { background:#fecaca; border-radius:2px; }
@@ -29,6 +30,10 @@
                       border:1px dashed #d1d5db; border-radius:6px; font-size:13px; }
 </style>
 <div class="max-w-5xl mx-auto">
+  <div class="mb-4 animate-fade-in-up">
+    <h1 class="section-title-deco text-xl font-bold text-tcm-primary">人工校对工作台</h1>
+    <p class="text-xs text-gray-500 mt-1">逐行修正 OCR 结果 · 君臣佐使配色与 zai 一致</p>
+  </div>
   <!-- 进度条 -->
   <div class="bg-white rounded-lg shadow-md p-4 mb-4">
     <div class="flex items-center justify-between mb-2">
@@ -94,7 +99,7 @@
         </div>
         <div class="text-xs text-gray-400">
           conf: {{ "%.2f"|format(line.confidence) }}
-          <span class="ml-2 status-{{ line.proofread_status }}">
+          <span class="ml-2 seal-stamp status-{{ line.proofread_status }}">
             {{ '已校' if line.proofread_status == 'done' else '待校' }}
           </span>
         </div>

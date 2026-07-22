@@ -25,22 +25,115 @@
     }
   </script>
   <style>
-    .line-edit:focus { outline: 2px solid oklch(0.42 0.11 158); outline-offset: 2px; }
-    .diff-removed { background: #fee2e2; text-decoration: line-through; color: #991b1b; }
-    .diff-added   { background: #dcfce7; color: #166534; }
-    .status-pending { color: #b45309; }
-    .status-done    { color: #166534; }
+    /* 设计令牌：与 zai 君臣佐使配色体系对齐（docs 04-前端UI设计文档 §2） */
+    :root {
+      --tcm-primary: oklch(0.42 0.11 158);
+      --tcm-primary-light: oklch(0.72 0.14 65);
+      --tcm-destructive: oklch(0.55 0.20 28);
+      --tcm-sidebar: oklch(0.2 0.02 155);
+      --tcm-bg: oklch(0.985 0.008 85);
+      --tcm-card: oklch(0.995 0.005 85);
+      --tcm-fg: oklch(0.22 0.02 50);
+      --tcm-muted: oklch(0.52 0.02 60);
+      --tcm-border: oklch(0.88 0.02 80);
+      --radius: 0.625rem;
+    }
+    /* 暗色主题（zai 同款 .dark，可选明暗切换） */
+    .dark {
+      --tcm-bg: oklch(0.16 0.015 155);
+      --tcm-card: oklch(0.21 0.02 155);
+      --tcm-fg: oklch(0.93 0.012 85);
+      --tcm-muted: oklch(0.72 0.02 85);
+      --tcm-border: oklch(0.30 0.02 155);
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+
+    .line-edit:focus { outline: 2px solid var(--tcm-primary); outline-offset: 2px; }
+    /* 状态色：对齐 zai 令牌（done=primary 墨绿，pending=primary-light 琥珀） */
+    .status-pending { color: var(--tcm-primary-light); }
+    .status-done    { color: var(--tcm-primary); }
+
+    /* 差异高亮：与 zai 校对工作台一致（del=朱砂 destructive / ins=墨绿 primary / replace=琥珀） */
+    .diff-removed { background: color-mix(in oklch, var(--tcm-destructive) 18%, transparent); color: var(--tcm-destructive); text-decoration: line-through; }
+    .diff-added   { background: color-mix(in oklch, var(--tcm-primary) 18%, transparent); color: var(--tcm-primary); }
+
+    /* 宣纸纹理背景（zai .tcm-texture） */
+    .tcm-texture {
+      background-image:
+        radial-gradient(circle at 20% 30%, color-mix(in oklch, var(--tcm-primary) 5%, transparent) 0%, transparent 50%),
+        radial-gradient(circle at 80% 70%, color-mix(in oklch, var(--tcm-primary-light) 5%, transparent) 0%, transparent 50%);
+    }
+    /* 章节标题装饰线（zai .section-title-deco） */
+    .section-title-deco::before {
+      content: "";
+      display: inline-block;
+      width: 4px;
+      height: 1em;
+      background: var(--tcm-primary);
+      margin-right: 8px;
+      vertical-align: middle;
+      border-radius: 2px;
+    }
+    /* 印章风格（zai .seal-stamp，边框取当前状态色） */
+    .seal-stamp {
+      font-family: "Songti SC", "Noto Serif SC", "STSong", serif;
+      border: 2px solid currentColor;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      display: inline-block;
+    }
+    /* 渐入动画（zai fadeInUp） */
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in-up { animation: fadeInUp 0.3s ease-out; }
+
+    /* 暗色主题：主表面与文字覆盖（仅覆盖常用工具类，保证开关可用） */
+    .dark body { background-color: var(--tcm-bg); color: var(--tcm-fg); }
+    .dark .bg-white, .dark .bg-tcm-bg { background-color: var(--tcm-card); }
+    .dark .bg-gray-50 { background-color: oklch(0.24 0.02 155); }
+    .dark .bg-gray-100 { background-color: oklch(0.27 0.02 155); }
+    .dark .bg-gray-200 { background-color: oklch(0.30 0.02 155); }
+    .dark .text-gray-400, .dark .text-gray-500 { color: var(--tcm-muted); }
+    .dark .text-gray-600, .dark .text-gray-700, .dark .text-gray-800 { color: var(--tcm-fg); }
+    .dark .text-gray-300 { color: oklch(0.8 0.02 85); }
+    .dark .border-gray-200, .dark .border-gray-300, .dark .border-b { border-color: var(--tcm-border); }
+    .dark .hover\:bg-gray-50:hover { background-color: oklch(0.26 0.02 155); }
+    .dark .hover\:bg-gray-100:hover { background-color: oklch(0.29 0.02 155); }
+    .dark .hover\:bg-gray-300:hover { background-color: oklch(0.33 0.02 155); }
+    .dark .hover\:text-gray-600:hover { color: var(--tcm-fg); }
   </style>
 </head>
-<body class="bg-tcm-bg text-gray-800 font-sans">
+<body class="bg-tcm-bg text-gray-800 font-sans tcm-texture">
   <nav class="bg-tcm-sidebar text-white px-4 py-3 flex items-center justify-between">
     <div class="flex items-center gap-4">
       <a href="/" class="text-lg font-bold hover:opacity-80">KZOCR 校对</a>
       {% block nav_extra %}{% endblock %}
+      <button id="theme-toggle" onclick="window.__toggleTheme()"
+              class="ml-2 px-2 py-1 text-xs rounded bg-tcm-sidebar-hover hover:bg-tcm-primary-light text-white"
+              title="切换明暗主题">暗</button>
     </div>
   </nav>
   <main class="p-4">
     {% block content %}{% endblock %}
   </main>
+  <script>
+    (function () {
+      var KEY = 'kzocr-proofread-theme';
+      var root = document.documentElement;
+      var btn = document.getElementById('theme-toggle');
+      function sync() {
+        if (!btn) return;
+        btn.textContent = root.classList.contains('dark') ? '亮' : '暗';
+      }
+      try { if (localStorage.getItem(KEY) === 'dark') root.classList.add('dark'); } catch (e) {}
+      sync();
+      window.__toggleTheme = function () {
+        var d = root.classList.toggle('dark');
+        try { localStorage.setItem(KEY, d ? 'dark' : 'light'); } catch (e) {}
+        sync();
+      };
+    })();
+  </script>
 </body>
 </html>
