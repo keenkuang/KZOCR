@@ -143,8 +143,10 @@ CREATE TABLE IF NOT EXISTS line (
 
 -- proofread：人工校对记录（从 custom.db 导入回写）。
 -- UNIQUE(line_id, corrected_text)：同一行同一改正重导入时不重复（导入回路幂等）。
+-- book_code：按书隔离多回导版本（B.5）；imported_at/import_version：回导版本化审计。
 CREATE TABLE IF NOT EXISTS proofread (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_code       TEXT DEFAULT '',
     page_num        INTEGER NOT NULL,
     para_seq        INTEGER NOT NULL DEFAULT 0,
     line_seq        INTEGER NOT NULL DEFAULT 0,
@@ -156,6 +158,8 @@ CREATE TABLE IF NOT EXISTS proofread (
     notes           TEXT DEFAULT '',
     triggered_pattern TEXT DEFAULT '',
     created_at      TEXT DEFAULT (datetime('now')),
+    imported_at     TEXT DEFAULT '',
+    import_version  INTEGER DEFAULT 0,
     UNIQUE (line_id, corrected_text)
 );
 
@@ -175,6 +179,18 @@ CREATE TABLE IF NOT EXISTS e2e_expansion (
     render_warnings_json TEXT DEFAULT '[]',
     run_at              TEXT DEFAULT (datetime('now')),
     batch               TEXT DEFAULT ''
+);
+
+-- 导入审计（B.2）：每次校对包回导落一行，记录来源/操作人/版本，供回溯。
+CREATE TABLE IF NOT EXISTS import_audit (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_code    TEXT NOT NULL,
+    imported_at  TEXT DEFAULT (datetime('now')),
+    imported_by  TEXT DEFAULT '',
+    package_hash TEXT DEFAULT '',
+    lines        INTEGER DEFAULT 0,
+    proofreads   INTEGER DEFAULT 0,
+    import_version INTEGER DEFAULT 1
 );
 """
 
@@ -227,6 +243,16 @@ class BookDB:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_proofread_line_correction "
             "ON proofread(line_id, corrected_text)"
         )
+        # 迁移：proofread 表补 book_code / imported_at / import_version 列（B.5 多回导版本化）。
+        # 旧库 proofread 无这些列 → ALTER 补列；新建库已在 _SCHEMA_SQL 含这些列，跳过。
+        pcur = self._conn.execute("PRAGMA table_info(proofread)")
+        pcols = [r[1] for r in pcur.fetchall()]
+        if "book_code" not in pcols:
+            self._conn.execute("ALTER TABLE proofread ADD COLUMN book_code TEXT DEFAULT ''")
+        if "imported_at" not in pcols:
+            self._conn.execute("ALTER TABLE proofread ADD COLUMN imported_at TEXT DEFAULT ''")
+        if "import_version" not in pcols:
+            self._conn.execute("ALTER TABLE proofread ADD COLUMN import_version INTEGER DEFAULT 0")
         self._conn.commit()
 
     # ── page_progress ──
@@ -462,30 +488,37 @@ class BookDB:
             )
         self._conn.commit()
 
-    def save_proofreads(self, rows: list[dict]) -> int:
+    def save_proofreads(self, rows: list[dict], *, commit: bool = True) -> int:
         """批量写入人工校对记录（从 custom.db 导入）。返回实际写入条数。
 
         使用 INSERT OR IGNORE + UNIQUE(line_id, corrected_text)，同一行同一改正重导入时
-        幂等（不重复，W3）。
+        幂等（不重复，W3）。写入 imported_at（datetime('now')）与 import_version（取
+        proof dict 的 import_version，默认 0，由 save_import_batch 统一注入，B.5）。
+
+        commit=False 时仅执行语句、不提交（供 save_import_batch 同一事务使用）。
         """
         n = 0
         for r in rows:
             cur = self._conn.execute(
                 """INSERT OR IGNORE INTO proofread
                    (page_num, para_seq, line_seq, line_id, original_text,
-                    corrected_text, change_type, severity, notes, triggered_pattern)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    corrected_text, change_type, severity, notes, triggered_pattern,
+                    book_code, imported_at, import_version)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)""",
                 (
                     r.get("page_num") or 0, r.get("para_seq") or 0, r.get("line_seq") or 0,
                     r.get("line_id", ""), r.get("original_text", ""),
                     r.get("corrected_text", ""), r.get("change_type", ""),
                     r.get("severity", ""), r.get("notes", ""),
                     r.get("triggered_pattern", ""),
+                    r.get("book_code", ""),
+                    r.get("import_version", 0),
                 ),
             )
             if cur.rowcount:
                 n += 1
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
         return n
 
     def get_line_human_final(
@@ -511,10 +544,13 @@ class BookDB:
             for r in rows
         }
 
-    def save_line_human_finals(self, rows: list[tuple[int, int, int, str]]) -> int:
+    def save_line_human_finals(
+        self, rows: list[tuple[int, int, int, str]], *, commit: bool = True
+    ) -> int:
         """批量写回人工终校（导入回路用），单次提交。返回命中写入条数。
 
         rows: [(page_num, para_seq, line_seq, human_final), ...]
+        commit=False 时仅执行语句、不提交（供 save_import_batch 同一事务使用）。
         """
         n = 0
         for page_num, para_seq, line_seq, human_final in rows:
@@ -524,8 +560,54 @@ class BookDB:
             )
             if cur.rowcount:
                 n += 1
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
         return n
+
+    def get_line_char_boxes(
+        self, page_num: int, para_seq: int, line_seq: int
+    ) -> Optional[list[list[int]]]:
+        """读取某行的字符级 bbox（解析 JSON）。无此行则返回 None。"""
+        row = self._conn.execute(
+            "SELECT char_boxes FROM line WHERE page_num=? AND para_seq=? AND line_seq=?",
+            (page_num, para_seq, line_seq),
+        ).fetchone()
+        if not row:
+            return None
+        return json.loads(row["char_boxes"] or "[]")
+
+    def save_import_batch(
+        self, hf_rows, proof_list, *, import_version: int = 0
+    ) -> tuple[int, int]:
+        """在同一事务内写回人工终校 + 校对记录（B.3 事务幂等）。
+
+        调用 save_line_human_finals / save_proofreads（均 commit=False），全部成功后
+        本次提交，返回 (n_lines, n_proofs)；任一异常则回滚并 re-raise（无 partial 写入）。
+        proof_list 中每条 dict 可能含 import_version（忽略，由本方法统一设为 import_version）。
+        """
+        try:
+            for r in proof_list:
+                r["import_version"] = import_version
+            n_lines = self.save_line_human_finals(hf_rows, commit=False)
+            n_proofs = self.save_proofreads(proof_list, commit=False)
+            self._conn.commit()
+            return (n_lines, n_proofs)
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def record_import_audit(
+        self, book_code, imported_by, package_hash, lines, proofreads, import_version
+    ) -> int:
+        """向 import_audit 表 INSERT 一行（B.2 审计），返回新行 id。"""
+        cur = self._conn.execute(
+            """INSERT INTO import_audit
+               (book_code, imported_by, package_hash, lines, proofreads, import_version)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (book_code, imported_by, package_hash, lines, proofreads, import_version),
+        )
+        self._conn.commit()
+        return cur.lastrowid
 
     def get_proofreads(self, page_num: Optional[int] = None) -> list[dict[str, Any]]:
         if page_num is not None:

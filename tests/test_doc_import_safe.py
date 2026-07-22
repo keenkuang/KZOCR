@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from kzocr.doc import validate_proofread_package, import_proofread_package
+from kzocr.doc.proofread import _compute_source_hash
 from kzocr.engine.mock import mock_book_result
 
 
@@ -28,11 +29,15 @@ def _create_minimal_custom_db(path: Path, book_code: str = "TCM-SAFE-001",
         CREATE TABLE IF NOT EXISTS Paragraph (id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, seqInPage INTEGER);
         CREATE TABLE IF NOT EXISTS Line (
             id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER,
-            seqInPara INTEGER, humanFinal TEXT, consensus TEXT);
+            seqInPara INTEGER, humanFinal TEXT, consensus TEXT, engineTexts TEXT);
         CREATE TABLE IF NOT EXISTS Proofread (
             id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER,
             seqInPara INTEGER, lineId TEXT, originalText TEXT, correctedText TEXT,
             changeType TEXT, severity TEXT);
+        CREATE TABLE IF NOT EXISTS ExportMeta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tool_version TEXT, book_code TEXT,
+            source_hash TEXT, signature TEXT);
     """)
     conn.execute("INSERT INTO Book (bookCode, title) VALUES (?, ?)", (book_code, "测试"))
     conn.execute("INSERT INTO Page (pageNum, bookCode) VALUES (1, ?)", (book_code,))
@@ -41,8 +46,8 @@ def _create_minimal_custom_db(path: Path, book_code: str = "TCM-SAFE-001",
                  (f"{book_code}-P1", book_code))
     for i in range(line_count):
         conn.execute(
-            "INSERT INTO Line (id, pageNum, bookCode, paraSeq, seqInPara, humanFinal, consensus) "
-            "VALUES (?, 1, ?, 1, ?, '终校文本', '引擎文本')",
+            "INSERT INTO Line (id, pageNum, bookCode, paraSeq, seqInPara, humanFinal, consensus, engineTexts) "
+            "VALUES (?, 1, ?, 1, ?, '终校文本', '引擎文本', '引擎文本')",
             (f"{book_code}-L{i}", book_code, i + 1),
         )
     for i in range(proofread_count):
@@ -52,6 +57,14 @@ def _create_minimal_custom_db(path: Path, book_code: str = "TCM-SAFE-001",
             "VALUES (?, 1, ?, 1, ?, ?, '原文本', '修正文本', 'herb', 'low')",
             (f"{book_code}-PR{i}", book_code, i + 1, f"{book_code}-L{i}"),
         )
+    # B.1 来源校验：写入与生产 push_book_to_zai 一致的 source_hash（仅哈希不可变源内容）
+    conn.row_factory = sqlite3.Row
+    src_hash = _compute_source_hash(conn)
+    conn.execute(
+        "INSERT INTO ExportMeta (tool_version, book_code, source_hash, signature) "
+        "VALUES (?,?,?,?)",
+        ("test", book_code, src_hash, src_hash),
+    )
     conn.commit()
     conn.close()
 

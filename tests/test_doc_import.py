@@ -10,11 +10,15 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from kzocr.engine.mock import mock_book_result
 from kzocr.engine.types import (
     BookResult, PageResult, ParagraphResult, LineResult,
 )
 from kzocr.doc import push_book_to_zai, import_proofread_package, freeze_custom_db
+from kzocr.doc.proofread import validate_proofread_package, _compute_source_hash
+from kzocr.doc.zai import _SCHEMA_DDL
 from kzocr.storage.db import BookDB
 
 
@@ -52,7 +56,7 @@ def test_export_then_import_roundtrip():
         con.close()
 
         # 3) 导入回写 BookDB（层级键映射）
-        imp = import_proofread_package(db_path=pkg, book_code="TCM-IMP-001")
+        imp = import_proofread_package(db_path=pkg, book_code="TCM-IMP-001", skip_validation=True)
         assert imp["book_code"] == "TCM-IMP-001"
         assert imp["imported_lines"] == 1
         # 校对包含 mock 自带 2 条 + 手动插入 1 条 = 3 条
@@ -106,7 +110,7 @@ def test_import_ignores_unproofed_lines():
         con.commit()
         con.close()
 
-        imp = import_proofread_package(db_path=pkg, book_code="TCM-IMP-002")
+        imp = import_proofread_package(db_path=pkg, book_code="TCM-IMP-002", skip_validation=True)
         assert imp["imported_lines"] == 0
         # 校对包含 mock 自带 2 条 + 手动插入 1 条 = 3 条
         assert imp["imported_proofreads"] == 3
@@ -137,7 +141,7 @@ def test_import_infers_book_code_from_package():
     try:
         push_book_to_zai(book, db_path=pkg, skip_prisma_marker=True)
         # 不传 book_code，依赖包内 bookCode 推断
-        imp = import_proofread_package(db_path=pkg)
+        imp = import_proofread_package(db_path=pkg, skip_validation=True)
         assert imp["book_code"] == "TCM-IMP-003"
         # mock 自带 2 条 proofread 应被导入
         assert imp["imported_proofreads"] == 2
@@ -150,7 +154,7 @@ def test_import_infers_book_code_from_package():
         )
         con.commit()
         con.close()
-        imp2 = import_proofread_package(db_path=pkg)
+        imp2 = import_proofread_package(db_path=pkg, skip_validation=True)
         assert imp2["book_code"] == "TCM-IMP-003"
         assert imp2["imported_lines"] == 1
         db = BookDB("TCM-IMP-003", db_dir=tmp_bookdb)
@@ -215,7 +219,7 @@ def test_export_import_multi_paragraph():
         con.commit()
         con.close()
 
-        imp = import_proofread_package(db_path=pkg, book_code="TCM-MP-001")
+        imp = import_proofread_package(db_path=pkg, book_code="TCM-MP-001", skip_validation=True)
         assert imp["imported_lines"] == 1
         db = BookDB("TCM-MP-001", db_dir=tmp_bookdb)
         try:
@@ -263,7 +267,7 @@ def test_reexport_preserves_human_final():
         con.commit()
         con.close()
         # 导入写回 BookDB（系统 of record）
-        imp = import_proofread_package(db_path=pkg1, book_code="TCM-RX-001")
+        imp = import_proofread_package(db_path=pkg1, book_code="TCM-RX-001", skip_validation=True)
         assert imp["imported_lines"] == 1
 
         # 重新导出到新路径
@@ -303,3 +307,117 @@ def test_freeze_custom_db():
     finally:
         Path(pkg).unlink(missing_ok=True)
         Path(pkg + ".frozen").unlink(missing_ok=True)
+
+
+# ── B.1/B.2/B.5：来源校验 + 审计 + 多回导版本化 ──
+
+
+def _make_package(path: str, book_code: str, with_export_meta: bool,
+                  lines=None, proofreads=None):
+    """造一个 custom.db 校对包（可含/不含 ExportMeta）。"""
+    if lines is None:
+        lines = [(1, 1, 1, "{}", "归", "归（终校）")]
+    if proofreads is None:
+        proofreads = [("P1", 1, 1, 1, "L1", "归", "皈", "herb", "critical", "x", "P")]
+    con = sqlite3.connect(path)
+    con.row_factory = sqlite3.Row
+    for ddl in _SCHEMA_DDL:
+        con.execute(ddl)
+    if with_export_meta:
+        con.execute("CREATE TABLE IF NOT EXISTS ExportMeta (source_hash TEXT, signature TEXT)")
+    else:
+        # 旧包：zai 默认会建空 ExportMeta，这里显式丢弃以模拟「无来源信息」
+        con.execute("DROP TABLE IF EXISTS ExportMeta")
+    for i, (page, para, seq, et, cons, hf) in enumerate(lines, start=1):
+        con.execute(
+            "INSERT INTO Line (id,pageNum,bookCode,paraSeq,seqInPara,"
+            "engineTexts,consensus,humanFinal) VALUES (?,?,?,?,?,?,?,?)",
+            (str(i), page, book_code, para, seq, et, cons, hf),
+        )
+    for (pid, page, para, seq, lid, ot, ct, ct2, sev, notes, tp) in proofreads:
+        con.execute(
+            "INSERT INTO Proofread (id,pageNum,bookCode,paraSeq,seqInPara,lineId,"
+            "originalText,correctedText,changeType,severity,notes,triggeredPattern) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (pid, page, book_code, para, seq, lid, ot, ct, ct2, sev, notes, tp),
+        )
+    if with_export_meta:
+        source_hash = _compute_source_hash(con)
+        con.execute(
+            "INSERT INTO ExportMeta (source_hash, signature) VALUES (?,?)",
+            (source_hash, ""),
+        )
+    con.commit()
+    con.close()
+
+
+def test_validate_rejects_legacy_without_flag(tmp_path, monkeypatch):
+    """无 ExportMeta 且未开 KZOCR_ALLOW_LEGACY → ValueError。"""
+    monkeypatch.delenv("KZOCR_ALLOW_LEGACY", raising=False)
+    pkg = tmp_path / "legacy.db"
+    _make_package(str(pkg), "TCM-LEG", with_export_meta=False)
+    with pytest.raises(ValueError, match="ExportMeta"):
+        validate_proofread_package(pkg)
+
+
+def test_validate_allows_legacy_with_flag(tmp_path, monkeypatch):
+    """设 KZOCR_ALLOW_LEGACY=1 → 缺 ExportMeta 也放行。"""
+    monkeypatch.setenv("KZOCR_ALLOW_LEGACY", "1")
+    pkg = tmp_path / "legacy.db"
+    _make_package(str(pkg), "TCM-LEG", with_export_meta=False)
+    res = validate_proofread_package(pkg)
+    assert res["valid"] is True
+
+
+def test_import_writes_audit(tmp_path, monkeypatch):
+    """合法包（含 ExportMeta）回导后 import_audit 落一行。"""
+    monkeypatch.delenv("KZOCR_ALLOW_LEGACY", raising=False)
+    monkeypatch.delenv("KZOCR_PACKAGE_KEY", raising=False)
+    monkeypatch.setattr(os, "getlogin", lambda: "tester")
+    bookdb = tempfile.mkdtemp()
+    monkeypatch.setenv("KZOCR_DB_DIR", bookdb)
+    pkg = tmp_path / "pkg.db"
+    _make_package(str(pkg), "TCM-AUDIT", with_export_meta=True)
+    imp = import_proofread_package(db_path=pkg, book_code="TCM-AUDIT")
+    assert imp["book_code"] == "TCM-AUDIT"
+    db = BookDB("TCM-AUDIT", db_dir=bookdb)
+    try:
+        audits = db._conn.execute("SELECT * FROM import_audit").fetchall()
+        assert len(audits) == 1
+        assert audits[0]["book_code"] == "TCM-AUDIT"
+        assert audits[0]["imported_by"] == "tester"
+        assert audits[0]["import_version"] == 1
+    finally:
+        db.close()
+        for f in Path(bookdb).glob("TCM-AUDIT.db*"):
+            f.unlink()
+        Path(pkg).unlink(missing_ok=True)
+
+
+def test_import_version_increments(tmp_path, monkeypatch):
+    """同书二次回导，proofread.import_version 递增（1→2）。"""
+    monkeypatch.delenv("KZOCR_ALLOW_LEGACY", raising=False)
+    monkeypatch.delenv("KZOCR_PACKAGE_KEY", raising=False)
+    monkeypatch.setattr(os, "getlogin", lambda: "tester")
+    bookdb = tempfile.mkdtemp()
+    monkeypatch.setenv("KZOCR_DB_DIR", bookdb)
+    pkg = tmp_path / "pkg.db"
+    _make_package(str(pkg), "TCM-VER", with_export_meta=True)
+    import_proofread_package(db_path=pkg, book_code="TCM-VER")
+    import_proofread_package(db_path=pkg, book_code="TCM-VER")
+    db = BookDB("TCM-VER", db_dir=bookdb)
+    try:
+        versions = [
+            r["import_version"] for r in
+            db._conn.execute("SELECT import_version FROM import_audit ORDER BY id").fetchall()
+        ]
+        assert versions == [1, 2]
+        # proofread 行保留首版历史（INSERT OR IGNORE 去重），import_version=1
+        proofs = db.get_proofreads()
+        assert len(proofs) == 1
+        assert proofs[0]["import_version"] == 1
+    finally:
+        db.close()
+        for f in Path(bookdb).glob("TCM-VER.db*"):
+            f.unlink()
+        Path(pkg).unlink(missing_ok=True)

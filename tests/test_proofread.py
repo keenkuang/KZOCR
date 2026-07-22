@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from kzocr.doc.proofread import _compute_source_hash
 from kzocr.proofread.api import CustomDbProofread, LineItem
 
 
@@ -62,6 +63,19 @@ def _make_custom_db(path: Path, book_code: str = "TCM-PF-001",
                  f"共识文本 P{p} L{i}",
                  human_final),
             )
+    # Module D 来源校验：补建 ExportMeta + 重算 source_hash，使包成为“有效来源包”，
+    # 否则 app_factory 启动时的 validate_proofread_package 会因缺 ExportMeta 而拒绝。
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ExportMeta("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, tool_version TEXT, exported_at TEXT, "
+        "book_code TEXT, source_hash TEXT, signature TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO ExportMeta (tool_version, exported_at, book_code, source_hash, signature) "
+        "VALUES (?,?,?,?,?)",
+        ("0.25.0", "", book_code, _compute_source_hash(conn), ""),
+    )
     conn.commit()
     conn.close()
 

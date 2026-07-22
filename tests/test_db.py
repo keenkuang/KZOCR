@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
@@ -313,3 +315,82 @@ def test_save_and_get_e2e_expansion(tmp_db):
         pages_processed=80, total_divergences=50, high_divergences=10,
     )
     assert len(tmp_db.get_e2e_expansions("test_book")) == 2
+
+
+def test_get_line_char_boxes(tmp_db):
+    """get_line_char_boxes 返回解析后的逐字 bbox；无此行返回 None。"""
+    tmp_db._conn.execute(
+        "INSERT INTO line (page_num, para_seq, line_seq, text, char_boxes, human_final) "
+        "VALUES (?,?,?,?,?,?)",
+        (3, 1, 2, "归", "[[10,20,30,40],[11,21,31,41]]", ""),
+    )
+    tmp_db._conn.commit()
+    boxes = tmp_db.get_line_char_boxes(3, 1, 2)
+    assert boxes == [[10, 20, 30, 40], [11, 21, 31, 41]]
+    # 无此行 → None
+    assert tmp_db.get_line_char_boxes(99, 99, 99) is None
+
+
+def test_import_audit_table_created(tmp_db):
+    """新库应包含 import_audit 表。"""
+    names = [
+        r[0] for r in tmp_db._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    ]
+    assert "import_audit" in names
+
+
+def test_proofread_columns_migrated(tmp_db):
+    """旧 proofread 表缺 book_code/imported_at/import_version 时，迁移补列。"""
+    td = os.path.dirname(tmp_db._conn.execute("PRAGMA database_list").fetchone()[2])
+    bc = tmp_db.book_code
+    tmp_db.close()
+    # 删除已建库，手写一个「旧」proofread 表（无 book_code/imported_at/import_version）
+    for f in os.listdir(td):
+        if f.startswith(f"{bc}.db"):
+            os.remove(os.path.join(td, f))
+    path = os.path.join(td, f"{bc}.db")
+    con = sqlite3.connect(path)
+    con.execute(
+        "CREATE TABLE proofread ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, page_num INTEGER NOT NULL, "
+        "para_seq INTEGER NOT NULL DEFAULT 0, line_seq INTEGER NOT NULL DEFAULT 0, "
+        "line_id TEXT DEFAULT '', original_text TEXT DEFAULT '', corrected_text TEXT DEFAULT '', "
+        "change_type TEXT DEFAULT '', severity TEXT DEFAULT '', notes TEXT DEFAULT '', "
+        "triggered_pattern TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')), "
+        "UNIQUE (line_id, corrected_text))"
+    )
+    con.commit()
+    con.close()
+    # 重新打开 → create_schema 迁移补列
+    db = BookDB(bc, db_dir=td)
+    try:
+        cols = [r[1] for r in db._conn.execute("PRAGMA table_info(proofread)").fetchall()]
+        assert "book_code" in cols
+        assert "imported_at" in cols
+        assert "import_version" in cols
+    finally:
+        db.close()
+
+
+def test_save_import_batch_rollback(tmp_db):
+    """save_import_batch 中第二次写入抛异常时，事务回滚、无 partial 写入。"""
+    tmp_db._conn.execute(
+        "INSERT INTO line (page_num, para_seq, line_seq, text, char_boxes, human_final) "
+        "VALUES (?,?,?,?,?,?)",
+        (1, 1, 1, "orig", "[]", ""),
+    )
+    tmp_db._conn.commit()
+    hf_rows = [(1, 1, 1, "NEW")]
+    proof_list = [{"page_num": 1, "para_seq": 1, "line_seq": 1,
+                   "line_id": "L1", "corrected_text": "x"}]
+    with patch.object(tmp_db, "save_proofreads", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            tmp_db.save_import_batch(hf_rows, proof_list, import_version=1)
+    # 事务已回滚（无打开的写事务）
+    assert tmp_db._conn.in_transaction is False
+    # 行 UPDATE 被回滚（human_final 仍是原值）
+    assert tmp_db.get_line_human_final(1, 1, 1) == ""
+    # proofread 表无 partial 写入
+    assert tmp_db.get_proofreads() == []

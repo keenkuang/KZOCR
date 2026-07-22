@@ -185,17 +185,24 @@ def test_push_overwrite_frozen_db() -> None:
         pkg.unlink(missing_ok=True)
 
 
-def test_import_no_line_rows_returns_none_book_code() -> None:
-    """custom.db 无 Line 行且不传 book_code → 返回 book_code=None（448）。"""
+def test_import_no_line_rows_returns_none_book_code(monkeypatch) -> None:
+    """custom.db 无 Line 行且不传 book_code → 返回 book_code=None（448）。
+
+    退化包（无 Line 行，来源 hash 已不可信）→ 按 KZOCR_ALLOW_LEGACY=1 放行旧包，
+    导入仍无法推断 book_code。
+    """
     book = _book_with_extras()
     pkg = Path(tempfile.mktemp(suffix=".db"))
     try:
         push_book_to_zai(book, db_path=pkg, skip_prisma_marker=True, register_postgres=False)
-        # 清空 Line 行，使导入无法从包内推断 book_code
+        # 清空 Line 行，使导入无法从包内推断 book_code；同时移除来源校验信息
+        # （无 Line 行的包来源 hash 已不匹配），模拟不可信旧包走 legacy 放行。
         con = sqlite3.connect(pkg)
         con.execute("DELETE FROM Line")
+        con.execute("DROP TABLE IF EXISTS ExportMeta")
         con.commit()
         con.close()
+        monkeypatch.setenv("KZOCR_ALLOW_LEGACY", "1")
         imp = import_proofread_package(db_path=pkg)
         assert imp["book_code"] is None
         assert imp["imported_lines"] == 0
