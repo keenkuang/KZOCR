@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import sqlite3
+import datetime
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -56,6 +58,20 @@ class PageGroup:
     """按页分组的行集合。"""
     page_num: int
     lines: list[LineItem] = field(default_factory=list)
+
+
+def _ensure_proofread_audit_columns(conn: sqlite3.Connection) -> None:
+    """Safe migration: ensure Proofread has a created_at column for edit audit trail.
+
+    Older packages lack the column; ALTER is additive and idempotent.
+    """
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "Proofread" not in tables:
+        return
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(Proofread)").fetchall()}
+    if "created_at" not in cols:
+        conn.execute("ALTER TABLE Proofread ADD COLUMN created_at TEXT")
 
 
 def _read_line(conn: sqlite3.Connection, row: sqlite3.Row) -> LineItem:
@@ -114,7 +130,8 @@ class CustomDbProofread:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._path), timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")  # 并发友好
+        conn.execute("PRAGMA journal_mode=WAL")
+        _ensure_proofread_audit_columns(conn)  # 并发友好
         return conn
 
     # ── 书籍 ──────────────────────────────────────────────────
@@ -220,14 +237,77 @@ class CustomDbProofread:
         """保存人工终校文本。"""
         conn = self._connect()
         try:
-            cur = conn.execute(
+            row = conn.execute(
+                "SELECT pageNum, bookCode, paraSeq, seqInPara, humanFinal "
+                "FROM Line WHERE bookCode=? AND id=?",
+                (book_code, line_id),
+            ).fetchone()
+            if not row:
+                return False
+            prev = row["humanFinal"] or ""
+            new_val = human_final or ""
+            if new_val == prev:
+                return True  # no-op: content unchanged, skip audit noise
+            conn.execute(
                 "UPDATE Line SET humanFinal=? WHERE bookCode=? AND id=?",
                 (human_final, book_code, line_id),
             )
+            conn.execute(
+                "INSERT INTO Proofread (id, pageNum, bookCode, paraSeq, seqInPara, "
+                "lineId, originalText, correctedText, changeType, severity, notes, "
+                "triggeredPattern, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("c" + uuid.uuid4().hex, row["pageNum"], row["bookCode"],
+                 row["paraSeq"], row["seqInPara"], line_id, prev, new_val,
+                 "human_edit", "", "", "",
+                 datetime.datetime.now().isoformat(timespec="seconds")),
+            )
             conn.commit()
-            return cur.rowcount > 0
+            return True
         finally:
             conn.close()
+
+    def get_line_proofreads(self, book_code: str, line_id: str) -> list[dict]:
+        """Read edit-audit rows (Proofread) for one line, oldest first."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, originalText, correctedText, changeType, severity, "
+                "notes, triggeredPattern, created_at FROM Proofread "
+                "WHERE bookCode=? AND lineId=? ORDER BY created_at, id",
+                (book_code, line_id),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_import_audit(self, book_code: str, db_dir: str = "") -> list[dict]:
+        """Read BookDB import_audit (re-import version history), best-effort.
+
+        Returns [] when the BookDB file is absent (offline) or on any error, so the
+        proofread station never creates a spurious BookDB just to show history.
+        """
+        target = db_dir or os.environ.get("KZOCR_DB_DIR", "")
+        path = os.path.join(target, f"{book_code}.db")
+        if not os.path.isfile(path):
+            return []
+        try:
+            from kzocr.storage.db import BookDB
+            bdb = BookDB(book_code, db_dir=target)
+        except Exception:
+            return []
+        try:
+            rows = bdb._conn.execute(
+                "SELECT id, imported_at, imported_by, package_hash, lines, "
+                "proofreads, import_version FROM import_audit "
+                "WHERE book_code=? ORDER BY id",
+                (book_code,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+        finally:
+            bdb.close()
 
     def get_pages(self, book_code: str) -> list[int]:
         """获取某书所有页码（排序）。"""

@@ -353,3 +353,50 @@ def test_get_line_missing_vl_marks_column_defaults_empty(tmp_path):
     db = CustomDbProofread(pkg)
     line = db.get_line("B1", "B1-L1-1")
     assert line.vl_marks == []
+
+
+# =============================================================================
+# Audit: save writes Proofread row + best-effort import_audit
+# =============================================================================
+
+def test_save_writes_proofread_audit(tmp_path):
+    pkg = Path(tmp_path) / "audit1.db"
+    _make_custom_db(pkg, "TCM-PF-AUDIT")
+    db = CustomDbProofread(pkg)
+    # line L1-1 initially has humanFinal "终校文本 P1 L1"
+    db.save_human_final("TCM-PF-AUDIT", "TCM-PF-AUDIT-L1-1", "EDITED_VALUE_X")
+    rows = db.get_line_proofreads("TCM-PF-AUDIT", "TCM-PF-AUDIT-L1-1")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["originalText"] == "终校文本 P1 L1"
+    assert r["correctedText"] == "EDITED_VALUE_X"
+    assert r["changeType"] == "human_edit"
+    assert r["created_at"]
+
+
+def test_save_no_change_no_audit(tmp_path):
+    pkg = Path(tmp_path) / "audit2.db"
+    _make_custom_db(pkg, "TCM-PF-AUDIT2")
+    db = CustomDbProofread(pkg)
+    # saving the same value as current -> no audit row written
+    db.save_human_final("TCM-PF-AUDIT2", "TCM-PF-AUDIT2-L1-1", "终校文本 P1 L1")
+    rows = db.get_line_proofreads("TCM-PF-AUDIT2", "TCM-PF-AUDIT2-L1-1")
+    assert rows == []
+
+
+def test_get_import_audit_best_effort(tmp_path):
+    pkg = Path(tmp_path) / "audit3.db"
+    _make_custom_db(pkg, "TCM-PF-AUDIT3")
+    db = CustomDbProofread(pkg)
+    old = os.environ.get("KZOCR_DB_DIR")
+    os.environ["KZOCR_DB_DIR"] = str(tmp_path / "no_such_db_dir")
+    try:
+        rows = db.get_import_audit("TCM-PF-AUDIT3")
+        assert rows == []  # no BookDB file -> best-effort empty
+        # must NOT create a spurious BookDB just to show history
+        assert not (tmp_path / "no_such_db_dir" / "TCM-PF-AUDIT3.db").exists()
+    finally:
+        if old is None:
+            os.environ.pop("KZOCR_DB_DIR", None)
+        else:
+            os.environ["KZOCR_DB_DIR"] = old

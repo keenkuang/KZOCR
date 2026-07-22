@@ -135,6 +135,18 @@ def app_factory(db_path: str | Path) -> FastAPI:
             logger.error("回导失败：%s", exc)
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
+    # ── 行级编辑审计（本包 Proofread 表） ──
+    @app.get("/book/{book_code}/line/{line_id}/audit")
+    async def line_audit(book_code: str, line_id: str) -> JSONResponse:
+        rows = _get_db().get_line_proofreads(book_code, line_id)
+        return JSONResponse({"ok": True, "rows": rows})
+
+    # ── 回导历史（BookDB import_audit，best-effort） ──
+    @app.get("/book/{book_code}/import-audit")
+    async def import_audit(book_code: str) -> JSONResponse:
+        rows = _get_db().get_import_audit(book_code)
+        return JSONResponse({"ok": True, "rows": rows})
+
     return app
 
 

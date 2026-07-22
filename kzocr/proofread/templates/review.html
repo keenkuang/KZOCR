@@ -53,7 +53,11 @@
       <button onclick="exportBook()"
               class="px-4 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
         回导 BookDB
+      </button>      <button onclick="loadImportAudit()"
+              class="px-4 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700">
+        回导历史
       </button>
+      <div id="import-audit-box" class="hidden mt-2 p-2 bg-gray-50 rounded text-xs"></div>
     </div>
 
     <!-- 页导航 -->
@@ -151,6 +155,12 @@
       </details>
       {% endif %}
 
+      <!-- 修改审计（本包编辑轨迹，展开加载） -->
+      <details class="mt-2 audit-panel" data-line-id="{{ line.id }}">
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">修改审计（本包编辑轨迹）</summary>
+        <div class="mt-1 p-2 bg-gray-50 rounded text-xs overflow-x-auto" id="audit-{{ line.id }}"></div>
+      </details>
+
       <!-- 人工终校编辑框 -->
       <div class="mt-2">
         <textarea id="input-{{ line.id }}"
@@ -196,6 +206,7 @@
 </div>
 
 <script>
+const BOOK_CODE = "{{ book_code }}";
 async function saveLine(bookCode, lineId) {
   const textarea = document.getElementById('input-' + lineId);
   const btn = document.getElementById('btn-' + lineId);
@@ -479,5 +490,51 @@ window.addEventListener('resize', () => {
     if (id) layoutBoxes(id);
   });
 });
+
+// ── 行级编辑审计（本包 Proofread） ──
+document.querySelectorAll('.audit-panel').forEach(p => {
+  p.addEventListener('toggle', () => { if (p.open) fillAudit(p.dataset.lineId); });
+});
+async function fillAudit(lineId) {
+  const container = document.getElementById('audit-' + lineId);
+  if (!container) return;
+  container.textContent = '加载中…';
+  try {
+    const resp = await fetch(`/book/${BOOK_CODE}/line/${lineId}/audit`);
+    const data = await resp.json();
+    if (!data.ok || !data.rows.length) { container.textContent = '（本包暂无编辑审计）'; return; }
+    container.innerHTML = data.rows.map(r => {
+      const t = escapeHtml(r.created_at || '');
+      const ch = escapeHtml(r.changeType || '');
+      const old = escapeHtml(r.originalText || '');
+      const neu = escapeHtml(r.correctedText || '');
+      return `<div class="mb-1"><span class="text-gray-400">${t}</span> · <span class="text-blue-600">${ch}</span><br>${old} → ${neu}</div>`;
+    }).join('');
+  } catch (e) { container.textContent = '加载失败'; }
+}
+
+// ── 回导历史（BookDB import_audit，best-effort） ──
+async function loadImportAudit() {
+  const box = document.getElementById('import-audit-box');
+  if (!box) return;
+  box.classList.remove('hidden');
+  box.textContent = '加载中…';
+  try {
+    const resp = await fetch(`/book/${BOOK_CODE}/import-audit`);
+    const data = await resp.json();
+    if (!data.ok || !data.rows.length) {
+      box.textContent = '（暂无可追溯的回导记录：可能离线或尚未回导）';
+      return;
+    }
+    box.innerHTML = data.rows.map(r => {
+      const v = r.import_version ?? '';
+      const at = escapeHtml(r.imported_at || '');
+      const by = escapeHtml(r.imported_by || '');
+      const ln = r.lines ?? 0;
+      const pr = r.proofreads ?? 0;
+      return `<div class="mb-1">v${v} · ${at} · ${by} · 行${ln}/审计${pr}</div>`;
+    }).join('');
+  } catch (e) { box.textContent = '加载失败'; }
+}
 </script>
 {% endblock %}
