@@ -1,42 +1,41 @@
 # 跨引擎校验默认开启（KZOCR_ENABLE_CROSS_CHECK）
 
+## 状态
+
+**已实现（2026-07-22）**。注意：原计划描述的代码事实已过期——自 v0.7 稳定后，`SchedulerConfig.cross_check` 就**默认 `True`**（见 `kzocr/config.py:57`，注释明写「自 v0.7 稳定后默认开」），且 `kzocr/engine/run.py:117` 在构造 `EngineOverrides` 时用 `sc.cross_check` 覆盖其默认值。因此经 `run_engine` / CLI / 生产路径，跨引擎校验**早已默认开启**。
+
+本次实际改动：把 `EngineOverrides.enable_cross_check` 的「被覆盖的默认值 `False`」翻为 `True`，使「直接调用 `orchestrate_book` 不带 overrides」的内部默认路径也与运行时一致，并同步修正本计划文件的过期描述。
+
 ## 背景
 
-v0.7 跨引擎校验（cross-check）由环境变量 `KZOCR_ENABLE_CROSS_CHECK` 控制，当前默认关闭（`config.py` 中 `enable_cross_check: bool = False`）。用户需显式设 `KZOCR_ENABLE_CROSS_CHECK=1` 才能启用跨引擎分歧检测 + 视觉仲裁闭环。
-
-v0.7 调度器已稳定运行（主线上经过多轮 e2e、16 本古籍扩面测试），跨引擎校验的开销经验证可接受（双引擎并行，最坏情况为两倍页级延迟而不是页×引擎数的乘法级复杂度，因 `run_engines_concurrent` 取最快返回即停止）。建议默认开启，使所有 kzocr 用户自动获得分歧检测能力。
+- v0.7 跨引擎校验由 `KZOCR_ENABLE_CROSS_CHECK` 控制，`SchedulerConfig.cross_check` 默认 `True`（设 `0` 可关），经 `run.py:117` 注入 `EngineOverrides.enable_cross_check`。
+- `EngineOverrides.enable_cross_check`（原默认 `False`）仅在「不经由 `run_engine`、直接调 `orchestrate_book(overrides=None)`」时生效，是有意保留的「无 overrides 安全默认」。
+- 此前有回归测试 `test_cross_check_disabled_by_default` 守护「默认不触发」，本次改为守护「默认触发 + 显式 `False` 仍可关闭」（`test_cross_check_enabled_by_default` / `test_cross_check_can_be_disabled`）。
 
 ## 改动点
 
-### 1. 配置默认值 — kzocr/config.py
+### 1. kzocr/scheduler/scheduler.py:83
 
-```python
-@dataclass
-class EngineConfig:
-    ...
-    enable_cross_check: bool = True   # False → True
-```
+`EngineOverrides.enable_cross_check: bool = False` → `True`（注释同步「默认开」）。
 
-### 2. 环境变量文档注释 — kzocr/config.py
+### 2. 测试同步 — tests/test_cross_divergence.py
 
-更新 `enable_cross_check` 的 docstring 或旁边注释，标注「自 v0.7 稳定后默认开；设 0 可关闭」。
+- 原 `test_cross_check_disabled_by_default`（断言默认不触发）已不适用，改为：
+  - `test_cross_check_enabled_by_default`：默认 `overrides=None` → 有 Tier2 时触发 cross-check、分歧落库。
+  - `test_cross_check_can_be_disabled`：显式 `EngineOverrides(enable_cross_check=False)` → 仍可不触发，守护关闭能力。
 
-### 3. CLI 默认值对齐 — kzocr/cli.py（如有）
+### 3. 计划文档自修正
 
-检查 CLI 是否覆盖默认值。当前 `cli.py:38` 设 `KZOCR_ENABLE_CROSS_CHECK=1`，维持不变（显式开启的 CLI 入口仍保持）。
-
-### 4. 测试
-
-- 确认 `test_orchestrator.py` 和 `test_scheduler.py` 中默认行为测试不受影响（mock 已隔离实际开关值）
-- 新增一例：验证 `EngineConfig()` 构造后 `enable_cross_check` 为 True
+本文件原计划误称「`config.py` 中 `enable_cross_check: bool = False`」并引用不存在的 `EngineConfig`，已据实修正。
 
 ## 影响
 
-- **正面**：新用户开箱即用获得跨引擎分歧检测；`kzocr smoke —skip-push` 等冒烟路径自动覆盖全流程。
-- **负面**：无实际负面——开关无资源泄漏风险，不启用时仅为单次 `if` 判断（成本可忽略）。如需关闭仍可通过环境变量。
+- `orchestrate_book(overrides=None)` 默认走跨引擎校验（与生产路径一致）。
+- 经 `run_engine` / CLI 行为无变化（原本就是 `True`）。
+- 仍可用 `KZOCR_ENABLE_CROSS_CHECK=0` 或显式 `EngineOverrides(enable_cross_check=False)` 关闭。
 
 ## 验收标准
 
-1. `EngineConfig().enable_cross_check == True`
+1. `EngineOverrides().enable_cross_check == True`
 2. `ruff check kzocr/ tests/` — 0 errors
-3. `pytest tests/ -q --ignore=tests/benchmarks` — 全量通过无回归
+3. `pytest tests/ -q` — 全量通过无回归
