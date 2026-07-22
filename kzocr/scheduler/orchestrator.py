@@ -1046,6 +1046,31 @@ def _process_one_page(page_num: int, page_input: PageInput, ctx: _PageContext) -
     return outcome
 
 
+def _process_one_page_safe(
+    page_num: int, page_input: "PageInput", ctx: "_PageContext"
+) -> "_PageOutcome":
+    """包装 ``_process_one_page``：捕获任意单页异常，转为 ``failed`` 态 outcome。
+
+    目的：页级并发编排（``KZOCR_PAGE_PARALLEL=1``）中，单个损坏页（如 fitz 渲染
+    xref 损坏、引擎偶发崩溃）不应经 ``executor.map`` 上抛导致整本书中止。捕获后
+    由 ``_run_book_parallel`` 合并阶段记入 ``failed_pages`` 并跳过该页的 db 写与分歧
+    最终化，其余页正常产出。串行主循环不受此包装影响（仍按原路径处理）。
+    """
+    try:
+        return _process_one_page(page_num, page_input, ctx)
+    except Exception as _exc:  # noqa: BLE001 — 单页故障须隔离，不让整书失败
+        return _PageOutcome(
+            page_num=page_num,
+            verdict=GlyphVerdict(
+                status="FAIL", confidence=0.0, details=f"page_error: {_exc}"
+            ),
+            final_text="",
+            appended=False,
+            failed=True,
+            failed_reason=f"{type(_exc).__name__}: {_exc}",
+        )
+
+
 def _run_book_parallel(
     pdf_path: str,
     config: "Config",
@@ -1104,7 +1129,7 @@ def _run_book_parallel(
         return pages_text, pages_order, failed_pages, uncertain_pages, trace, engine_usage_counter, tally
 
     def _work(pn: int) -> _PageOutcome:
-        return _process_one_page(pn, PageInput(page_num=pn, img=None), ctx)
+        return _process_one_page_safe(pn, PageInput(page_num=pn, img=None), ctx)
 
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
         # executor.map 按提交顺序返回，天然按页序；worker 内部各自渲染、互不共享状态。

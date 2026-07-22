@@ -270,3 +270,46 @@ def test_parallel_large_book_bounded_workers(monkeypatch, tmp_path):
     # 12 页全部成功采纳
     assert len(result.pages) == n
     assert not result.failed_pages
+
+
+# ── 9. 单页容错（单元）：_process_one_page_safe 捕获异常转 failed 态 ──
+def test_process_one_page_safe_catches_exception(monkeypatch):
+    def _boom(pn, pi, ctx):
+        raise RuntimeError("render xref broken")
+
+    monkeypatch.setattr(_orc, "_process_one_page", _boom)
+    out = _orc._process_one_page_safe(7, PageInput(page_num=7, img=None), object())
+    assert out.failed is True
+    assert "RuntimeError" in out.failed_reason
+    assert "render xref broken" in out.failed_reason
+    assert out.appended is False
+    assert out.tier1_passed is False  # 触发合并阶段跳过 db 写 / 分歧最终化
+
+
+def test_process_one_page_safe_passthrough_on_success(monkeypatch):
+    stub = _orc._PageOutcome(
+        page_num=2, verdict=_verifier.GlyphVerdict(status="PASS", confidence=0.9),
+        final_text="玄参", appended=True,
+    )
+    monkeypatch.setattr(_orc, "_process_one_page", lambda pn, pi, ctx: stub)
+    assert _orc._process_one_page_safe(2, PageInput(page_num=2, img=None), object()) is stub
+
+
+# ── 10. 单页容错（集成）：某页损坏不中止整书，进 failed_pages ──
+def test_parallel_one_page_error_does_not_abort_book(monkeypatch, tmp_path):
+    orig = _orc._process_one_page
+
+    def _side(pn, pi, ctx):
+        if pn == 1:
+            raise RuntimeError("boom on page 1")
+        return orig(pn, pi, ctx)
+
+    monkeypatch.setattr(_orc, "_process_one_page", _side)
+    reg = _reg(tier1_pages=_text_pages("甲", "乙", "丙"))
+    cfg = StubConfig(db_dir=str(tmp_path))
+    result = _run_parallel("/fp", "bk_ft", cfg, reg, None, monkeypatch, 3, False)
+    # 第 1 页失败，其余两页正常产出
+    assert 1 in result.failed_pages
+    assert "boom on page 1" in result.failed_pages[1]
+    assert len(result.pages) == 2
+    assert {p.text for p in result.pages} == {"甲", "丙"}
