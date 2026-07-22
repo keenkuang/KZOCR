@@ -343,6 +343,29 @@ def test_add_learned_confusion_cache_update(tmp_path: Path, monkeypatch):
     assert cache.get("芩") == "苓"
 
 
+def test_add_learned_confusion_batch(tmp_path: Path, monkeypatch):
+    """批量回写：min_freq 过滤低频、去重已存在对、返回实际新增条数。"""
+    import json
+
+    from kzocr.scheduler.cross_align import add_learned_confusion_batch
+
+    p = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", p)
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", None)
+    pairs = [
+        {"wrong": "芩", "correct": "苓", "count": 10},  # >=5 入
+        {"wrong": "炙", "correct": "灸", "count": 1},  # <5 跳过
+        {"wrong": "黄", "correct": "皇", "count": 8},  # >=5 入
+    ]
+    added = add_learned_confusion_batch(pairs, source="canonical_stage3", min_freq=5)
+    assert added == 2
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert {d["wrong"] for d in data} == {"芩", "黄"}
+    # 重复回写同对 -> 不再新增
+    added2 = add_learned_confusion_batch(pairs, source="canonical_stage3", min_freq=5)
+    assert added2 == 0
+
+
 # ── compute_vl_marks（字符级 VL 标注，Part B） ────────────────────────────────
 
 class _FakeLine:
