@@ -23,6 +23,7 @@ char_idx 投影对齐无意义）。改为对两引擎**全文**做字符级 dif
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -329,6 +330,33 @@ def add_learned_confusion(wrong: str, correct: str, source: str = "") -> bool:
         _KEYS_SPLIT_CACHE.setdefault("wrong", {}).setdefault(wrong, "三级通用")
         _KEYS_SPLIT_CACHE.setdefault("correct", {}).setdefault(correct, "三级通用")
     return True
+
+
+def add_learned_confusion_batch(
+    confusion_pairs: list[dict],
+    source: str = "canonical_stage3",
+    *,
+    min_freq: int | None = None,
+) -> int:
+    """批量回写混淆对到 ``learned_confusion.json``（stage 3 反哺接口）。
+
+    ``confusion_pairs``：``[{"wrong": str, "correct": str, "count": int}, ...]``。
+    仅回写频次 ``>= min_freq``（默认 ``KZOCR_CONFUSION_MIN_FREQ=5``）的混淆对；
+    已存在的对（按 wrong+correct 去重）跳过。``source`` 标签区分自动回写与人工
+    ``review_manifest`` 回流，二者共存不冲突。
+
+    返回实际新增条数。逐个调用 ``add_learned_confusion``，原子写入、同步内存缓存。
+    """
+    if min_freq is None:
+        min_freq = int(os.environ.get("KZOCR_CONFUSION_MIN_FREQ", "5"))
+    added = 0
+    for p in confusion_pairs:
+        cnt = p.get("count", 0)
+        if cnt < min_freq:
+            continue
+        if add_learned_confusion(p.get("wrong", ""), p.get("correct", ""), source=source):
+            added += 1
+    return added
 
 
 @dataclass

@@ -81,6 +81,10 @@ class _DeferredCrossCheck:
     engine_b: str = ""
     tally_div: int = 0
     tally_high: int = 0
+    # 两点修订 stage 2/3：延迟模式下在 defer 时即计算字级 canonical + 错误记录，
+    # 交由最终化阶段落库（数据在 defer 时齐备，最终化时仅缺 cur/cross 文本）。
+    canon: list = field(default_factory=list)
+    errs: list = field(default_factory=list)
 
 
 @dataclass
@@ -323,15 +327,25 @@ def _run_success_cross_check(
         # 延迟模式：不写库 / 不仲裁 / 不更新 tally，仅返回本页分歧数据，
         # 交由合并阶段按页序最终化（保守模式依赖跨页累计 tally）。
         if defer:
+            canon, errs = _persist_canonical_and_errors(
+                db, page_num, engine_a, tier2[0].meta.name,
+                cur_text, cross_text, char_boxes, divs, save=False,
+            )
             return _DeferredCrossCheck(
                 is_consensus=False, divs=divs, high=high,
                 engine_a=engine_a, engine_b=tier2[0].meta.name,
                 tally_div=len(divs), tally_high=len(high),
+                canon=canon, errs=errs,
             )
 
         db.write_cross_divergences(
             page_no=page_num, divs=divs,
             engine_a=engine_a, engine_b=tier2[0].meta.name,
+        )
+        # 两点修订 stage 2/3：字级 canonical + 错误记录落库（best-effort）
+        _persist_canonical_and_errors(
+            db, page_num, engine_a, tier2[0].meta.name,
+            cur_text, cross_text, char_boxes, divs,
         )
         # 全书 high 占比二级判据：样本充足且越阈值时进入保守模式，
         # 该页 high 分歧全部留人工复核（见 _is_conservative / v4 扩面结论）。
@@ -407,14 +421,24 @@ def _run_tier3_divergence(
         high = [d for d in divs if d.priority in ("P0", "P1", "high")]
         # 延迟模式：不写库 / 不仲裁 / 不更新 tally，仅返回本页分歧数据。
         if defer:
+            canon, errs = _persist_canonical_and_errors(
+                db, page_num, engine_a, engine_b,
+                cur_text, result_text, char_boxes, divs, save=False,
+            )
             return _DeferredCrossCheck(
                 is_consensus=False, divs=divs, high=high,
                 engine_a=engine_a, engine_b=engine_b,
                 tally_div=len(divs), tally_high=len(high),
+                canon=canon, errs=errs,
             )
         db.write_cross_divergences(
             page_no=page_num, divs=divs,
             engine_a=engine_a, engine_b=engine_b,
+        )
+        # 两点修订 stage 2/3：字级 canonical + 错误记录落库（best-effort）
+        _persist_canonical_and_errors(
+            db, page_num, engine_a, engine_b,
+            cur_text, result_text, char_boxes, divs,
         )
         # M4 复核队列规则：high 优先级分歧（数字/剂量、形近字）100% 进人工复核
         conservative = _is_conservative(tally) if tally is not None else False
@@ -448,6 +472,57 @@ def _run_tier3_divergence(
     except Exception as exc:  # 分歧比对属增强，绝不阻断主流程
         _logger.warning("[orchestrator] cross_align failed page=%d: %s", page_num, exc)
         return None
+
+
+def _persist_canonical_and_errors(
+    db: BookDB,
+    page_num: int,
+    engine_a: str,
+    engine_b: str,
+    cur_text: str,
+    cross_text: str,
+    char_boxes: Optional[list[list[list[int]]]],
+    divs: Optional[list],
+    *,
+    save: bool = True,
+) -> tuple[list, list]:
+    """两点修订 stage 2/3：构造字级 canonical + 派生错误记录（best-effort）。
+
+    返回 ``(canon, errs)``。``save=True``（同步模式）时落库并切字图；
+    ``save=False``（延迟模式）时仅计算、不落库不切图，结果存入 ``_DeferredCrossCheck``
+    交由最终化阶段落库（遵守 defer 不写库契约）。任一异常仅告警，绝不阻断主流程。
+
+    - ``cur_text``/``cross_text`` 为两引擎整页原文（按 ``\\n`` 切分到各行）；
+    - ``char_boxes`` 为整页逐行字框（与 Tier1/版心图坐标系一致）。
+    """
+    try:
+        from kzocr.scheduler.canonical import build_page_canonical_and_errors
+
+        page_lines: list[tuple[int, int, str, list]] = []
+        cur_lines = (cur_text or "").split("\n")
+        for i, cb in enumerate(char_boxes or []):
+            line_text = cur_lines[i] if i < len(cur_lines) else ""
+            page_lines.append((0, i + 1, line_text, cb))
+        if not page_lines:
+            return [], []
+        # 延迟模式不切图（save=False → source_pdf 留空），避免 defer 阶段副作用
+        source_pdf = db.get_source_pdf() if save else ""
+        canon, errs = build_page_canonical_and_errors(
+            page_lines, cur_text or "", cross_text or "", engine_a, engine_b,
+            page_num, line_confidence=0.9, divs=divs or None,
+            source_pdf=source_pdf, db_dir=db.db_dir, book_code=db.book_code,
+        )
+        if save:
+            if canon:
+                db.save_canonical_chars(db.book_code, canon)
+            if errs:
+                db.save_error_records(errs)
+        return canon, errs
+    except Exception as exc:
+        _logger.warning(
+            "[orchestrator] canonical/error persist failed page=%d: %s", page_num, exc
+        )
+        return [], []
 
 
 # v4 扩面结论落地的二级判据：全书 high 占比 ≥ 此阈值进入「保守仲裁」（多留人工），
@@ -743,6 +818,11 @@ def _finalize_divergences_success(
         page_no=page_num, divs=dcc.divs,
         engine_a=dcc.engine_a, engine_b=dcc.engine_b,
     )
+    # 两点修订 stage 2/3：延迟模式计算的字级 canonical + 错误记录落库
+    if dcc.canon:
+        db.save_canonical_chars(db.book_code, dcc.canon)
+    if dcc.errs:
+        db.save_error_records(dcc.errs)
     high = dcc.high
     if high:
         va = get_vision_adapter()
@@ -788,6 +868,11 @@ def _finalize_divergences_tier3(
         page_no=page_num, divs=dcc.divs,
         engine_a=dcc.engine_a, engine_b=dcc.engine_b,
     )
+    # 两点修订 stage 2/3：延迟模式计算的字级 canonical + 错误记录落库
+    if dcc.canon:
+        db.save_canonical_chars(db.book_code, dcc.canon)
+    if dcc.errs:
+        db.save_error_records(dcc.errs)
     high = dcc.high
     if high:
         db.record_anomaly(

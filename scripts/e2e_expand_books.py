@@ -130,6 +130,8 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
             # GlyphVerifier 调优 + 校对台差异高亮）使用。Divergence 全为
             # int/str/list 字段，dataclasses.asdict 可直接 JSON 序列化。
             "divergences": [dataclasses.asdict(d) for d in divs],
+            "a_text": a,
+            "b_text": b,
         })
         if (pno + 1) % 5 == 0:
             print(f"  [{name}] p{pno+1}/{pages} 累计分歧={total} high={high} (本次新增 {processed_new})",
@@ -309,6 +311,7 @@ def _persist_e2e_divergences(db: "BookDB", rec: dict) -> int:
     增量合并中的旧页）保持原表不动，避免误删既有明细。
     """
     from kzocr.scheduler.cross_align import Divergence
+    from kzocr.scheduler.canonical import build_page_canonical_and_errors
 
     per_page = rec.get("per_page") or []
     total = 0
@@ -320,6 +323,7 @@ def _persist_e2e_divergences(db: "BookDB", rec: dict) -> int:
         page_no = p["page"]
         if page_no not in cleared:
             db.clear_cross_divergences([page_no])
+            db.clear_error_records([page_no])
             cleared.add(page_no)
         try:
             divs = [Divergence(**d) for d in raw]
@@ -328,6 +332,23 @@ def _persist_e2e_divergences(db: "BookDB", rec: dict) -> int:
         total += db.write_cross_divergences(
             page_no, divs, engine_a="PaddleOCR", engine_b="RapidOCR",
         )
+        # stage 2/3: build canonical chars + error records (best-effort)
+        try:
+            a_text = p.get("a_text") or ""
+            b_text = p.get("b_text") or ""
+            page_lines = [
+                (0, i + 1, ln, []) for i, ln in enumerate(a_text.split("\n"))
+            ]
+            canon, errs = build_page_canonical_and_errors(
+                page_lines, a_text, b_text, "PaddleOCR", "RapidOCR",
+                page_no, divs=divs,
+            )
+            if canon:
+                db.save_canonical_chars(db.book_code, canon)
+            if errs:
+                db.save_error_records(errs)
+        except Exception as exc:
+            print(f"  [warn] p{page_no} canonical/error persist failed: {exc}", flush=True)
     if total:
         print(f"[persist] 已落库 {total} 条分歧明细 -> cross_divergence", flush=True)
     return total

@@ -106,6 +106,61 @@ def crop_line_to_png(
         return None
 
 
+def crop_char_to_png(
+    pdf_path: str,
+    page_num: int,
+    char_bbox,
+    para_seq: int,
+    line_seq: int,
+    char_pos: int,
+    book_code: str,
+    db_dir: str,
+    *,
+    doc_cache: Optional[dict] = None,
+    img_cache: Optional[dict] = None,
+) -> Optional[str]:
+    """切出单个字裁剪图，落 ``<db_dir>/<book_code>_crops/P{page}_L{para}_{line}_C{char_pos}.png``。
+
+    返回相对 ``db_dir`` 的路径；无可切/失败返回 ``None``。
+
+    ``char_bbox`` 须为整页版心图坐标系（与 BookDB.line.char_boxes 一致，dpi=150 不缩放）。
+    ``page_num`` 为 1-based。与 ``crop_line_to_png`` 共用 doc/img 缓存，逐页只渲染一次。
+    """
+    if not pdf_path or not char_bbox:
+        return None
+    try:
+        doc_cache = doc_cache if doc_cache is not None else {}
+        img_cache = img_cache if img_cache is not None else {}
+        import fitz
+
+        if pdf_path not in doc_cache:
+            doc_cache[pdf_path] = fitz.open(str(pdf_path))
+        doc = doc_cache[pdf_path]
+        cache_key = (pdf_path, page_num)
+        if cache_key not in img_cache:
+            img_cache[cache_key] = render_body_page(doc, page_num - 1)
+        img = img_cache[cache_key]
+
+        x0, y0, x1, y1 = char_bbox
+        crop = img[y0:y1, x0:x1]
+        if crop.size == 0:
+            return None
+
+        from PIL import Image as PILImage
+
+        rel = f"{book_code}_crops/P{page_num}_L{para_seq}_{line_seq}_C{char_pos}.png"
+        out_abs = os.path.join(db_dir, rel)
+        os.makedirs(os.path.dirname(out_abs), exist_ok=True)
+        PILImage.fromarray(crop).save(out_abs, "PNG")
+        return rel
+    except Exception:
+        _logger.warning(
+            "[crop_images] 切字裁图失败（%s P%d L%d_%d C%d）",
+            book_code, page_num, para_seq, line_seq, char_pos, exc_info=True,
+        )
+        return None
+
+
 def close_doc_cache(doc_cache: dict) -> None:
     """关闭 crop_line_to_png 持有的所有 fitz 文档（best-effort）。"""
     for doc in doc_cache.values():
