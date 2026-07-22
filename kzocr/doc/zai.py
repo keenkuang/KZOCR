@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import io
 import json
 import logging
 import os
@@ -11,6 +14,8 @@ import sqlite3
 import uuid
 from pathlib import Path
 from typing import Optional
+
+import fitz
 
 from .. import config
 from ..engine.types import BookResult
@@ -24,7 +29,7 @@ _SCHEMA_DDL = [
         bookCode TEXT PRIMARY KEY, title TEXT, author TEXT, publisher TEXT,
         pubYear INTEGER, pubEra TEXT, bookType TEXT, source TEXT,
         pageCount INTEGER, lineCount INTEGER, cerValue REAL, lineAccuracy REAL,
-        isMock INTEGER)""",
+        isMock INTEGER, source_pdf TEXT)""",
     """CREATE TABLE IF NOT EXISTS Page (
         pageNum INTEGER, bookCode TEXT, paragraphCount INTEGER, lineCount INTEGER)""",
     """CREATE TABLE IF NOT EXISTS Paragraph (
@@ -36,7 +41,8 @@ _SCHEMA_DDL = [
         engineTexts TEXT, consensus TEXT, llmCorrected TEXT, glyphVerified TEXT,
         final TEXT, humanFinal TEXT, confidence REAL, auditSource TEXT,
         headingLevel INTEGER, disputed INTEGER, missingCharAlert TEXT,
-        extraCharAlert TEXT, charLevelJson TEXT)""",
+        extraCharAlert TEXT, charLevelJson TEXT,
+        crop_img BLOB, charBoxes TEXT)""",
     """CREATE TABLE IF NOT EXISTS Proofread (
         id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER, seqInPara INTEGER,
         lineId TEXT, originalText TEXT, correctedText TEXT, changeType TEXT, severity TEXT,
@@ -55,6 +61,10 @@ _SCHEMA_DDL = [
     """CREATE TABLE IF NOT EXISTS FormulaIngredient (
         id TEXT PRIMARY KEY, formulaId TEXT, bookCode TEXT, herbName TEXT, herbCorrectedName TEXT,
         dosageValue TEXT, unit TEXT, roleInFormula TEXT, isToxic INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS ExportMeta (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, tool_version TEXT,
+        exported_at TEXT DEFAULT (datetime('now')), book_code TEXT,
+        source_hash TEXT, signature TEXT)""",
 ]
 
 
@@ -82,6 +92,43 @@ def _resolve_bookdb_path(book_code: str) -> Path:
     """解析 BookDB 文件路径（与 storage.db.BookDB 一致：KZOCR_DB_DIR 或 cwd/db）。"""
     db_dir = os.environ.get("KZOCR_DB_DIR", "") or os.path.join(os.getcwd(), "db")
     return Path(db_dir) / f"{book_code}.db"
+
+
+def _migrate_line(conn: sqlite3.Connection) -> None:
+    """向前兼容旧结构 custom.db：补齐 Line/Book 新增列（烘焙裁图/字符框/来源 PDF）。
+
+    用 ``PRAGMA table_info`` 探测，缺失则 ``ALTER TABLE ... ADD COLUMN``。
+    在建表后、写数据前调用（使用 package 的 sqlite conn）。
+    """
+    line_cols = {r[1] for r in conn.execute("PRAGMA table_info(Line)").fetchall()}
+    if "crop_img" not in line_cols:
+        conn.execute("ALTER TABLE Line ADD COLUMN crop_img BLOB")
+    if "charBoxes" not in line_cols:
+        conn.execute("ALTER TABLE Line ADD COLUMN charBoxes TEXT DEFAULT ''")
+    book_cols = {r[1] for r in conn.execute("PRAGMA table_info(Book)").fetchall()}
+    if "source_pdf" not in book_cols:
+        conn.execute("ALTER TABLE Book ADD COLUMN source_pdf TEXT DEFAULT ''")
+
+
+def _compute_source_hash(conn: sqlite3.Connection) -> str:
+    """按统一契约对 Line 表逐行哈希：id 升序，行格式见打包规范。
+
+    ``source_hash = sha256``，逐行 ``f"{id}|{pageNum}|{paraSeq}|{seqInPara}|"
+    "{engineTexts}|{consensus}\\n"``。**不含 humanFinal**（校对员会修改，纳入会导致
+    合法回导被误拒）；仅覆盖生产者担保的不可变源内容。
+    """
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id,pageNum,paraSeq,seqInPara,engineTexts,consensus "
+        "FROM Line ORDER BY id"
+    ).fetchall()
+    h = hashlib.sha256()
+    for r in rows:
+        h.update(
+            f"{r['id']}|{r['pageNum']}|{r['paraSeq']}|{r['seqInPara']}|"
+            f"{r['engineTexts']}|{r['consensus']}\n".encode("utf-8")
+        )
+    return h.hexdigest()
 
 
 def _register_postgres_meta(book: BookResult, bookdb_path: str,
@@ -205,10 +252,16 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
     os.makedirs(db.parent, exist_ok=True)
     conn = sqlite3.connect(str(db), timeout=30)
     _restrict_db_perms(db)
+    # 来源校验（D）+ 烘焙裁图（A）+ 字符框（B）所需的 BookDB 连接与 PDF 文档句柄
+    _bdb = None
+    _doc = None
+    _page_cache: dict[int, "object"] = {}
     try:
         cur = conn.cursor()
         for ddl in _SCHEMA_DDL:
             cur.execute(ddl)
+        # 自动迁移：旧结构 custom.db 补齐 Line.crop_img/charBoxes、Book.source_pdf
+        _migrate_line(conn)
         # 自动迁移：旧库的四张全局表可能无 bookCode 列，补列并清空一次全域
         for t in ("Pattern", "Term", "Formula", "FormulaIngredient"):
             try:
@@ -225,31 +278,34 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
 
         total_lines = sum(len(para.lines) for p in book.pages for para in p.paragraphs)
 
-        # Book
+        # Book（含 source_pdf：来源 PDF 路径，供离线原图回溯）
         cur.execute(
             "INSERT INTO Book (bookCode,title,author,publisher,pubYear,pubEra,bookType,"
-            "source,pageCount,lineCount,cerValue,lineAccuracy,isMock) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "source,pageCount,lineCount,cerValue,lineAccuracy,isMock,source_pdf) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (book.book_code, book.title, book.author, book.publisher,
              book.pub_year, book.pub_era, book.book_type, book.engine_label,
              len(book.pages), total_lines, None, None,
-             int(bool(getattr(book, "is_mock", False)))),
+             int(bool(getattr(book, "is_mock", False))),
+             str(pdf_path) if pdf_path else ""),
         )
 
         counts = {"pages": 0, "paragraphs": 0, "lines": 0, "proofreads": 0,
                   "patterns": 0, "terms": 0, "formulas": 0, "ingredients": 0}
 
-        # 重导出闭环（W1）：best-effort 从 BookDB 重新载入人工终校，合并进导出包。
+        # 重导出闭环（W1）+ 字符级校正（B）：best-effort 打开一次 BookDB，
+        # 既读人工终校(hf_map) 也供逐行读 char_boxes，写完后在 finally 关闭。
         hf_map: dict[tuple[int, int, int], str] = {}
         try:
             from kzocr.storage.db import BookDB
             if os.path.exists(str(bookdb_path)):
                 _bdb = BookDB(book.book_code, db_dir=os.environ.get("KZOCR_DB_DIR", ""))
-                try:
-                    hf_map = _bdb.get_human_final_map()
-                finally:
-                    _bdb.close()
+                hf_map = _bdb.get_human_final_map()
         except Exception:
             logger.warning("[doc.zai] 重导出读取 BookDB 人工终校失败，跳过合并", exc_info=True)
+
+        # 原图回溯（A）开关：KZOCR_CROP_IMG=0 关闭（默认开）
+        crop_enabled = os.environ.get("KZOCR_CROP_IMG", "1") != "0"
 
         # Page / Paragraph / Line / Proofread
         for p in book.pages:
@@ -274,19 +330,54 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                     human_final = ln.human_final or hf_map.get(
                         (p.page_num, para_seq, line_seq), ""
                     )
+                    # 字符级校正（B）：逐行 char_boxes 坐标（版心裁切后图像像素坐标）
+                    cbs = None
+                    if _bdb is not None:
+                        getter = getattr(_bdb, "get_line_char_boxes", None)
+                        if getter is not None:
+                            cbs = getter(p.page_num, para_seq, line_seq)
+                    char_boxes_json = json.dumps(cbs) if cbs else "[]"
+                    # 原图回溯（A）：烘焙每行裁图 crop_img（默认开，KZOCR_CROP_IMG=0 关）
+                    crop_img = None
+                    if crop_enabled and pdf_path is not None and cbs:
+                        try:
+                            from PIL import Image as PILImage
+                            from ..engine.run import _crop_to_body, _pdf_page_to_numpy
+                            if _doc is None:
+                                _doc = fitz.open(str(pdf_path))
+                            pn = p.page_num
+                            if pn not in _page_cache:
+                                img = _pdf_page_to_numpy(_doc[pn - 1], dpi=150)
+                                _page_cache[pn] = _crop_to_body(img, page_num=pn)
+                            img = _page_cache[pn]
+                            x0 = min(b[0] for b in cbs)
+                            y0 = min(b[1] for b in cbs)
+                            x1 = max(b[2] for b in cbs)
+                            y1 = max(b[3] for b in cbs)
+                            crop = img[y0:y1, x0:x1]
+                            buf = io.BytesIO()
+                            PILImage.fromarray(crop).save(buf, "PNG")
+                            crop_img = buf.getvalue()
+                        except Exception:
+                            logger.warning(
+                                "[doc.zai] 烘焙裁图失败（line=%s），crop_img 置空",
+                                line_id, exc_info=True,
+                            )
+                            crop_img = None
                     cur.execute(
                         "INSERT INTO Line (id,pageNum,bookCode,paraSeq,seqInPara,"
                         "engineTexts,consensus,llmCorrected,glyphVerified,final,"
                         "humanFinal,confidence,auditSource,headingLevel,disputed,"
-                        "missingCharAlert,extraCharAlert,charLevelJson) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "missingCharAlert,extraCharAlert,charLevelJson,crop_img,charBoxes) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (line_id, p.page_num, book.book_code, para_seq,
                          line_seq,
                          engine_texts_json, ln.consensus, ln.llm_corrected,
                          ln.glyph_verified,
                          ln.final, human_final, ln.confidence, book.engine_label,
                          None, int(ln.disputed), ln.missing_char_alert,
-                         ln.extra_char_alert, ln.char_level_json),
+                         ln.extra_char_alert, ln.char_level_json,
+                         crop_img, char_boxes_json),
                     )
                     counts["lines"] += 1
                     for pr in ln.proofreads:
@@ -367,6 +458,22 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
 
         conn.commit()
 
+        # 来源校验（D）：写完数据后写 ExportMeta（source_hash + signature）
+        source_hash = _compute_source_hash(conn)
+        key = os.environ.get("KZOCR_PACKAGE_KEY", "")
+        if key:
+            signature = hmac.new(key.encode(), source_hash.encode(),
+                                 hashlib.sha256).hexdigest()
+        else:
+            signature = source_hash
+        import kzocr
+        cur.execute(
+            "INSERT INTO ExportMeta (tool_version,book_code,source_hash,signature) "
+            "VALUES (?,?,?,?)",
+            (kzocr.__version__, book.book_code, source_hash, signature),
+        )
+        conn.commit()
+
         if not skip_prisma_marker:
             marker = Path(str(db) + ".zai_prisma_marker")
             marker.write_text(book.book_code, encoding="utf-8")
@@ -381,3 +488,7 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
         }
     finally:
         conn.close()
+        if _bdb is not None:
+            _bdb.close()
+        if _doc is not None:
+            _doc.close()
