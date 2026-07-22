@@ -225,6 +225,7 @@ def _run_real(pdf_path: str, cfg: Config, book_code: str | None = None) -> BookR
         title=title,
         engine_label="kimi",
         final_markdown=final_md or "",
+        source_pdf=pdf_path,
     )
     # H4 修复：真实引擎路径若未给出结构化 pages（如仅 final_markdown），
     # 从 Markdown 重建至少一页多段落，保证 zai 校对台非空（pageCount>0）。
@@ -784,6 +785,7 @@ def _run_vlm(pdf_path: str, cfg: Config, book_code: str | None = None) -> BookRe
             final_markdown=full_md,
             pages=pages,
             failed_pages=failed_pages,
+            source_pdf=pdf_path,
         )
     finally:
         doc.close()

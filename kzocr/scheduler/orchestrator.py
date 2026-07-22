@@ -1413,6 +1413,7 @@ def orchestrate_book(
             failed_pages=failed_pages, uncertain_pages=uncertain_pages,
             tier1_result=tier1_result, engine_usage_counter=engine_usage_counter,
             start_time=start_time, vl_budget=vl_budget, title=title,
+            pdf_path=pdf_path,
         )
 
     for page_num, page_input in enumerate(render_pages(pdf_path, config)):
@@ -1670,6 +1671,7 @@ def _finalize_book(
     start_time: float,
     vl_budget: Optional["VLBudgetTracker"],
     title: str,
+    pdf_path: str = "",
 ) -> "BookResult":
     """书完成后处理（串行 / 并行路径共用）。
 
@@ -1739,6 +1741,7 @@ def _finalize_book(
         failed_pages=failed_pages,
         uncertain_pages=uncertain_pages,
         engine_trace=trace,
+        source_pdf=pdf_path,
     )
 
 

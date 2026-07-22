@@ -276,6 +276,7 @@ class BookResult:
     engine_label: str = "unknown"
     is_mock: bool = False
     toc: Optional["TocTree"] = None    # F1: 目录树（后处理填充，默认 None）
+    source_pdf: str = ""               # B7: 来源 PDF 路径（persist 时按 char_boxes 切片落裁剪图）
 
 
 # ── F1: 目录树类型（TOC 抽取）──

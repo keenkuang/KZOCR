@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS book (
     author      TEXT DEFAULT '',
     publisher   TEXT DEFAULT '',
     pub_year    INTEGER DEFAULT 0,
+    source_pdf  TEXT DEFAULT '',     -- B7: 来源 PDF 路径（按 char_boxes 切片落裁剪图）
     created_at  TEXT DEFAULT (datetime('now'))
 );
 
@@ -138,6 +139,7 @@ CREATE TABLE IF NOT EXISTS line (
     text        TEXT DEFAULT '',
     char_boxes  TEXT DEFAULT '[]',
     human_final TEXT DEFAULT '',
+    crop_img_path TEXT DEFAULT '',    -- B7: 行裁剪图相对路径（<db_dir>/<book_code>_crops/...png）
     UNIQUE (page_num, para_seq, line_seq)
 );
 
@@ -205,6 +207,7 @@ class BookDB:
                 "KZOCR_DB_DIR", os.path.join(os.getcwd(), "db")
             )
         os.makedirs(db_dir, exist_ok=True)
+        self.db_dir = db_dir
         db_path = os.path.join(db_dir, f"{book_code}.db")
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
@@ -229,15 +232,24 @@ class BookDB:
                     text TEXT DEFAULT '',
                     char_boxes TEXT DEFAULT '[]',
                     human_final TEXT DEFAULT '',
+                    crop_img_path TEXT DEFAULT '',
                     UNIQUE (page_num, para_seq, line_seq)
                 )"""
             )
             # 旧行 para_seq 归 0；OR IGNORE 防止历史脏数据出现重复层级键时整库迁移失败
             self._conn.execute(
-                "INSERT OR IGNORE INTO line (page_num, para_seq, line_seq, text, char_boxes) "
-                "SELECT page_num, 0, line_seq, text, char_boxes FROM _line_old"
+                "INSERT OR IGNORE INTO line "
+                "(page_num, para_seq, line_seq, text, char_boxes, crop_img_path) "
+                "SELECT page_num, 0, line_seq, text, char_boxes, "
+                "COALESCE(crop_img_path, '') FROM _line_old"
             )
             self._conn.execute("DROP TABLE _line_old")
+        # 迁移：line 补 crop_img_path 列（B7 裁剪图路径；旧库无此列 → ALTER 补列）
+        if "crop_img_path" not in [r[1] for r in self._conn.execute("PRAGMA table_info(line)")]:
+            self._conn.execute("ALTER TABLE line ADD COLUMN crop_img_path TEXT DEFAULT ''")
+        # 迁移：book 补 source_pdf 列（B7 来源 PDF 路径）
+        if "source_pdf" not in [r[1] for r in self._conn.execute("PRAGMA table_info(book)")]:
+            self._conn.execute("ALTER TABLE book ADD COLUMN source_pdf TEXT DEFAULT ''")
         # proofread 唯一索引（防止同一行同一改正重导入重复；IF NOT EXISTS 对新建库无副作用）
         self._conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_proofread_line_correction "
@@ -355,15 +367,20 @@ class BookDB:
         author: str = "",
         publisher: str = "",
         pub_year: int = 0,
+        source_pdf: str = "",
     ) -> None:
-        """UPSERT 书级元数据（Postgres BookMeta 为权威，此处仅存内容所需书级键）。"""
+        """UPSERT 书级元数据（Postgres BookMeta 为权威，此处仅存内容所需书级键）。
+
+        source_pdf：B7 来源 PDF 路径，供按 char_boxes 切片落裁剪图。
+        """
         self._conn.execute(
-            """INSERT INTO book (book_code, title, author, publisher, pub_year)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO book (book_code, title, author, publisher, pub_year, source_pdf)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(book_code) DO UPDATE SET
                  title=excluded.title, author=excluded.author,
-                 publisher=excluded.publisher, pub_year=excluded.pub_year""",
-            (book_code, title, author, publisher, pub_year),
+                 publisher=excluded.publisher, pub_year=excluded.pub_year,
+                 source_pdf=excluded.source_pdf""",
+            (book_code, title, author, publisher, pub_year, source_pdf),
         )
         self._conn.commit()
 
@@ -397,45 +414,81 @@ class BookDB:
         *,
         text: str = "",
         char_boxes: Optional[list[list[int]]] = None,
+        crop_img_path: str = "",
     ) -> None:
-        """UPSERT 单行（层级键 page_num+para_seq+line_seq）。"""
+        """UPSERT 单行（层级键 page_num+para_seq+line_seq）。crop_img_path：B7 裁剪图相对路径。"""
         self._conn.execute(
-            """INSERT INTO line (page_num, para_seq, line_seq, text, char_boxes)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO line (page_num, para_seq, line_seq, text, char_boxes, crop_img_path)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(page_num, para_seq, line_seq) DO UPDATE SET
-                 text=excluded.text, char_boxes=excluded.char_boxes""",
-            (page_num, para_seq, line_seq, text, json.dumps(char_boxes or [], ensure_ascii=False)),
+                 text=excluded.text, char_boxes=excluded.char_boxes,
+                 crop_img_path=excluded.crop_img_path""",
+            (page_num, para_seq, line_seq, text,
+             json.dumps(char_boxes or [], ensure_ascii=False), crop_img_path),
         )
         self._conn.commit()
 
     def save_book_result(self, book: BookResult) -> None:
-        """把整本 BookResult 落库（book + 每页 text/confidence/char_boxes + 层级行展开）。"""
+        """把整本 BookResult 落库（book + 每页 text/confidence/char_boxes + 层级行展开）。
+
+        若 ``book.source_pdf`` 存在，逐行按 char_boxes 包围盒切出裁剪图落盘，
+        并把相对路径写入 ``line.crop_img_path``（B7）。受 ``KZOCR_CROP_IMG`` 开关控制
+        （默认开；``=0`` 关闭则不落图，crop_img_path 留空）。best-effort：切图失败仅告警。
+        """
+        from kzocr.storage.crop_images import crop_line_to_png, close_doc_cache
+
         self.save_book(
             book.book_code, title=book.title, author=book.author,
             publisher=book.publisher, pub_year=book.pub_year,
+            source_pdf=book.source_pdf,
         )
-        for p in book.pages:
-            self.save_page(
-                book.book_code, p.page_num, text=p.text,
-                confidence=p.confidence, char_boxes=p.char_boxes,
-            )
-            # 层级展开行（页-段-行-字）：段序号/行序均按位置派生（1-based），
-            # 与 push_book_to_zai 导出回路同源，不依赖引擎是否填充 sequence_in_* 字段，
-            # 确保 导出→导入 闭环 key 自洽（C1）。
-            flat = 0
-            if p.paragraphs:
-                for para_seq, para in enumerate(p.paragraphs, start=1):
-                    for line_seq, ln in enumerate(para.lines, start=1):
-                        cb = p.char_boxes[flat] if (p.char_boxes and flat < len(p.char_boxes)) else None
+        crop_enabled = os.environ.get("KZOCR_CROP_IMG", "1") != "0"
+        source_pdf = book.source_pdf
+        doc_cache: dict = {}
+        img_cache: dict = {}
+        try:
+            for p in book.pages:
+                self.save_page(
+                    book.book_code, p.page_num, text=p.text,
+                    confidence=p.confidence, char_boxes=p.char_boxes,
+                )
+                # 层级展开行（页-段-行-字）：段序号/行序均按位置派生（1-based），
+                # 与 push_book_to_zai 导出回路同源，不依赖引擎是否填充 sequence_in_* 字段，
+                # 确保 导出→导入 闭环 key 自洽（C1）。
+                flat = 0
+                if p.paragraphs:
+                    for para_seq, para in enumerate(p.paragraphs, start=1):
+                        for line_seq, ln in enumerate(para.lines, start=1):
+                            cb = p.char_boxes[flat] if (p.char_boxes and flat < len(p.char_boxes)) else None
+                            crop_path = ""
+                            if crop_enabled and source_pdf and cb:
+                                crop_path = crop_line_to_png(
+                                    source_pdf, p.page_num, cb, para_seq, line_seq,
+                                    book.book_code, self.db_dir,
+                                    doc_cache=doc_cache, img_cache=img_cache,
+                                ) or ""
+                            self._save_line(
+                                p.page_num, para_seq, line_seq,
+                                text=ln.final or ln.consensus or "",
+                                char_boxes=cb, crop_img_path=crop_path,
+                            )
+                            flat += 1
+                elif p.char_boxes:
+                    for j, cb in enumerate(p.char_boxes):
+                        crop_path = ""
+                        if crop_enabled and source_pdf and cb:
+                            crop_path = crop_line_to_png(
+                                source_pdf, p.page_num, cb, 0, j,
+                                book.book_code, self.db_dir,
+                                doc_cache=doc_cache, img_cache=img_cache,
+                            ) or ""
                         self._save_line(
-                            p.page_num, para_seq, line_seq,
-                            text=ln.final or ln.consensus or "",
-                            char_boxes=cb,
+                            p.page_num, 0, j, text="", char_boxes=cb,
+                            crop_img_path=crop_path,
                         )
-                        flat += 1
-            elif p.char_boxes:
-                for j, cb in enumerate(p.char_boxes):
-                    self._save_line(p.page_num, 0, j, text="", char_boxes=cb)
+        finally:
+            if doc_cache:
+                close_doc_cache(doc_cache)
 
     def get_page(self, page_num: int) -> Optional[dict[str, Any]]:
         row = self._conn.execute(
