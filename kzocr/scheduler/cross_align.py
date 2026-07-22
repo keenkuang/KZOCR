@@ -459,6 +459,59 @@ def run_cross_align(
     return divs
 
 
+def _vl_status_of(div_status: str) -> str:
+    """把 cross_divergence.status 归并为标注语义。
+
+    - ``vl``    ：程序/VL 已裁决（accepted_a/accepted_b/arbitrated）→ 黄底待核
+    - ``human`` ：仍须纯人工（pending/both_wrong/skipped）→ 红底待校
+    """
+    if div_status in ("accepted_a", "accepted_b", "arbitrated"):
+        return "vl"
+    return "human"
+
+
+def compute_vl_marks(
+    page_lines: list,
+    divs: list[dict],
+) -> dict[int, list[tuple[int, int, str]]]:
+    """逐行计算字符级 VL 标注区间（供校对台黄/红高亮）。
+
+    纯函数、无外部依赖。``page_lines`` 为按序排列的行对象（含 ``final``/
+    ``consensus`` 文本字段，任一非空即可）。``divs`` 为 ``cross_divergence``
+    行（dict，含 ``a_seg``/``b_seg``/``status``）。
+
+    以 ``a_seg`` 或 ``b_seg`` 在每行基准文本（``final or consensus``）中做子串
+    匹配，命中区段 ``[i, i+len(seg))`` 标记为对应语义（``vl``/``human``）。同页
+    多处分歧可落在同一行不同区间；重叠区间后写入者覆盖先写入者（前端按序叠加即可）。
+
+    返回 ``{line_idx: [(start, end, "vl"|"human"), ...]}``，仅含确有标注的行。
+    """
+    if not divs or not page_lines:
+        return {}
+    result: dict[int, list[tuple[int, int, str]]] = {}
+    for idx, ln in enumerate(page_lines):
+        hay = getattr(ln, "final", None) or getattr(ln, "consensus", None) or ""
+        if not hay:
+            continue
+        for d in divs:
+            seg = d.get("a_seg") or d.get("b_seg") or ""
+            if not seg:
+                continue
+            status = _vl_status_of(d.get("status") or "pending")
+            start = 0
+            while True:
+                pos = hay.find(seg, start)
+                if pos < 0:
+                    break
+                result.setdefault(idx, []).append(
+                    (pos, pos + len(seg), status)
+                )
+                start = pos + 1
+    for idx in result:
+        result[idx].sort()
+    return result
+
+
 def write_divergences(
     db_path: str | Path,
     page_no: int,

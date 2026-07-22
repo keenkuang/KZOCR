@@ -66,6 +66,8 @@ class LineResult:
     extra_char_alert: Optional[str] = None
     char_level_json: Optional[str] = None
     crop_img_path: Optional[str] = None      # B7：裁剪图引用（存路径不存像素）
+    vl_status: str = ""                       # 分歧修订来源标记（行级派生）：""=无分歧/"vl"=程序(VL/共识)已修正待核/"human"=纯人工待校
+    vl_marks: list = field(default_factory=list)  # 字符级 VL 标注：[(start, end, "vl"|"human"), ...]，start/end 为 consensus 文本字符区间（含左不含右）
 
 
 @dataclass

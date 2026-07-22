@@ -293,3 +293,63 @@ async def test_proofread_redirect_on_missing_db():
     from kzocr.proofread.app import main
     rc = main(["--db", "/nonexistent/custom.db"])
     assert rc == 1
+
+
+def test_get_line_reads_vl_marks_column(tmp_path):
+    """Line 表含 vl_marks 列时，get_line 应原样返回该字符级标注。"""
+    import sqlite3
+    from kzocr.proofread.api import CustomDbProofread
+    pkg = tmp_path / "vl.db"
+    conn = sqlite3.connect(str(pkg))
+    conn.executescript(
+        """
+        CREATE TABLE Book (bookCode TEXT PRIMARY KEY, title TEXT, isMock INTEGER);
+        CREATE TABLE Line (
+            id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER,
+            seqInPara INTEGER, engineTexts TEXT, consensus TEXT, final TEXT,
+            humanFinal TEXT, confidence REAL, headingLevel INTEGER, disputed INTEGER,
+            auditSource TEXT, charLevelJson TEXT, vl_marks TEXT);
+        """
+    )
+    conn.execute("INSERT INTO Book (bookCode, title, isMock) VALUES ('B1','书',0)")
+    conn.execute(
+        "INSERT INTO Line (id, pageNum, bookCode, paraSeq, seqInPara, engineTexts, "
+        "consensus, final, humanFinal, confidence, headingLevel, disputed, vl_marks) "
+        "VALUES ('B1-L1-1',1,'B1',1,1,'{}','黄芪三钱','黄芪三钱','',0.9,0,0,"
+        "'[[2,4,\"vl\"]]')",
+    )
+    conn.commit()
+    conn.close()
+    db = CustomDbProofread(pkg)
+    line = db.get_line("B1", "B1-L1-1")
+    assert line is not None
+    assert line.vl_marks == [[2, 4, "vl"]]
+
+
+def test_get_line_missing_vl_marks_column_defaults_empty(tmp_path):
+    """旧包缺 vl_marks 列时，get_line 应优雅降级为空列表。"""
+    import sqlite3
+    from kzocr.proofread.api import CustomDbProofread
+    pkg = tmp_path / "novl.db"
+    conn = sqlite3.connect(str(pkg))
+    conn.executescript(
+        """
+        CREATE TABLE Book (bookCode TEXT PRIMARY KEY, title TEXT, isMock INTEGER);
+        CREATE TABLE Line (
+            id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER,
+            seqInPara INTEGER, engineTexts TEXT, consensus TEXT, final TEXT,
+            humanFinal TEXT, confidence REAL, headingLevel INTEGER, disputed INTEGER,
+            auditSource TEXT, charLevelJson TEXT);
+        """
+    )
+    conn.execute("INSERT INTO Book (bookCode, title, isMock) VALUES ('B1','书',0)")
+    conn.execute(
+        "INSERT INTO Line (id, pageNum, bookCode, paraSeq, seqInPara, engineTexts, "
+        "consensus, final, humanFinal, confidence, headingLevel, disputed) "
+        "VALUES ('B1-L1-1',1,'B1',1,1,'{}','黄芪三钱','黄芪三钱','',0.9,0,0)",
+    )
+    conn.commit()
+    conn.close()
+    db = CustomDbProofread(pkg)
+    line = db.get_line("B1", "B1-L1-1")
+    assert line.vl_marks == []

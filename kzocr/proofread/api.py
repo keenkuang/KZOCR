@@ -48,6 +48,7 @@ class LineItem:
     proofread_status: str = "pending"  # pending / done
     char_boxes: list = field(default_factory=list)   # [[x1,y1,x2,y2], ...]，像素空间同 crop_img
     crop_img_b64: str = ""                            # 原图裁剪 PNG 的 base64（旧包/关闭时为空）
+    vl_marks: list = field(default_factory=list)      # 字符级 VL 标注：[[start,end,"vl"|"human"],...]，区间相对 consensus 文本
 
 
 @dataclass
@@ -71,6 +72,11 @@ def _read_line(conn: sqlite3.Connection, row: sqlite3.Row) -> LineItem:
         if ("crop_img" in keys and row["crop_img"])
         else ""
     )
+    vl_marks: list = (
+        json.loads(row["vl_marks"])
+        if ("vl_marks" in keys and row["vl_marks"])
+        else []
+    )
     return LineItem(
         id=row["id"],
         page_num=row["pageNum"],
@@ -88,6 +94,7 @@ def _read_line(conn: sqlite3.Connection, row: sqlite3.Row) -> LineItem:
         proofread_status="done" if (row["humanFinal"] and row["humanFinal"].strip()) else "pending",
         char_boxes=char_boxes,
         crop_img_b64=crop_img_b64,
+        vl_marks=vl_marks,
     )
 
 

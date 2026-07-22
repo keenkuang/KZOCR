@@ -9,6 +9,9 @@
   .d-ins { background:#d1fae5; color:#065f46; }
   .d-del { background:#fee2e2; color:#991b1b; text-decoration:line-through; }
   .d-rep { background:#ffedd5; color:#9a3412; }
+  /* VL 字符级标注（Part B）：黄=程序/VL 已修正待核；红=纯人工待校 */
+  .d-vl { background:#fef08a; border-radius:2px; }
+  .d-human { background:#fecaca; border-radius:2px; }
   /* 字符框叠加（Module B）：绝对定位在 crop_img 之上 */
   .crop-wrap { position:relative; display:inline-block; line-height:0; }
   .crop-wrap > img { display:block; max-width:320px; width:320px; height:auto; }
@@ -77,7 +80,8 @@
          id="line-{{ line.id }}"
          data-engine-texts='{{ line.engine_texts | tojson }}'
          data-consensus='{{ line.consensus | tojson }}'
-         data-final='{{ line.final | tojson }}'>
+         data-final='{{ line.final | tojson }}'
+         data-vl-marks='{{ line.vl_marks | tojson }}'>
       <div class="flex items-start justify-between">
         <div class="text-xs text-gray-400 font-mono mb-1">
           P{{ line.page_num }} · ¶{{ line.para_seq }} · L{{ line.seq_in_para }}
@@ -92,10 +96,10 @@
         </div>
       </div>
 
-      <!-- 共识文本（参考） -->
+      <!-- 共识文本（参考，带 VL 字符级黄/红标注） -->
       {% if line.consensus %}
       <div class="mt-1 p-2 bg-gray-50 rounded text-sm text-gray-600">
-        <span class="text-xs text-gray-400">共识参考：</span>{{ line.consensus }}
+        <span class="text-xs text-gray-400">共识参考：</span><span id="consensus-marked-{{ line.id }}">{{ line.consensus }}</span>
       </div>
       {% endif %}
 
@@ -332,6 +336,40 @@ function renderDiff(a, b) {
   }).join('');
 }
 
+// 字符级 VL 标注（Part B）：在共识参考文本上按 vl_marks 区间叠加黄/红底色。
+// vl_marks = [[start, end, "vl"|"human"], ...]（区间相对 consensus 字符，含左不含右）。
+function applyVlMarks(lineId) {
+  const card = document.getElementById('line-' + lineId);
+  if (!card) return;
+  let consensus;
+  try { consensus = JSON.parse(card.dataset.consensus || '""'); } catch (e) { consensus = ''; }
+  if (typeof consensus !== 'string' || !consensus) return;
+  let marks;
+  try { marks = JSON.parse(card.dataset.vlMarks || '[]'); } catch (e) { marks = []; }
+  if (!Array.isArray(marks) || marks.length === 0) return;
+  const cls = new Array(consensus.length).fill(null);
+  for (const m of marks) {
+    if (!Array.isArray(m) || m.length < 3) continue;
+    const start = Math.max(0, m[0] | 0);
+    const end = Math.min(consensus.length, m[1] | 0);
+    for (let i = start; i < end; i++) cls[i] = m[2];
+  }
+  let html = '';
+  let i = 0;
+  while (i < consensus.length) {
+    const k = cls[i];
+    if (k == null) { html += escapeHtml(consensus[i]); i++; continue; }
+    let j = i;
+    while (j < consensus.length && cls[j] === k) j++;
+    const seg = consensus.slice(i, j);
+    const c = (k === 'vl') ? 'd-vl' : 'd-human';
+    html += `<span class="${c}">${escapeHtml(seg)}</span>`;
+    i = j;
+  }
+  const el = document.getElementById('consensus-marked-' + lineId);
+  if (el) el.innerHTML = html;
+}
+
 function fillDiff(lineId) {
   const card = document.getElementById('line-' + lineId);
   if (!card) return;
@@ -358,6 +396,11 @@ function fillDiff(lineId) {
 
 document.querySelectorAll('.diff-panel').forEach(p => {
   p.addEventListener('toggle', () => { if (p.open) fillDiff(p.dataset.lineId); });
+});
+
+// 页面加载即对所有行叠加字符级 VL 黄/红标注
+document.querySelectorAll('[id^="line-"]').forEach(card => {
+  applyVlMarks(card.id.slice(5));
 });
 
 // ── 字符框叠加 + 点击定位（Module B，纯前端，无新依赖） ──

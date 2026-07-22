@@ -7,6 +7,7 @@ from pathlib import Path
 from kzocr.scheduler.cross_align import (
     align_boxes_to_text,
     align_engines,
+    compute_vl_marks,
     load_confusion_keys_split,
     run_cross_align,
     strip_punct,
@@ -340,3 +341,60 @@ def test_add_learned_confusion_cache_update(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", cache)
     add_learned_confusion("芩", "苓")
     assert cache.get("芩") == "苓"
+
+
+# ── compute_vl_marks（字符级 VL 标注，Part B） ────────────────────────────────
+
+class _FakeLine:
+    def __init__(self, consensus="", final=""):
+        self.consensus = consensus
+        self.final = final
+
+
+def test_compute_vl_marks_vl_status_maps_yellow():
+    lines = [_FakeLine(consensus="黄芪三钱甘草"), _FakeLine(consensus="当归五钱")]
+    divs = [
+        {"a_seg": "三钱", "b_seg": "二钱", "status": "arbitrated"},
+        {"a_seg": "五钱", "b_seg": "三钱", "status": "accepted_a"},
+    ]
+    marks = compute_vl_marks(lines, divs)
+    # 第 0 行：黄芪[三钱]甘草 -> 三钱 在索引 2
+    assert (2, 4, "vl") in [(s, e, k) for s, e, k in marks[0]]
+    # 第 1 行：当归[五钱] -> 五钱 在索引 2
+    assert (2, 4, "vl") in [(s, e, k) for s, e, k in marks[1]]
+
+
+def test_compute_vl_marks_human_status_maps_red():
+    lines = [_FakeLine(consensus="生姜三片")]
+    divs = [{"a_seg": "三片", "b_seg": "二片", "status": "pending"}]
+    marks = compute_vl_marks(lines, divs)
+    # 生姜[三片] -> 三片 在索引 2
+    assert (2, 4, "human") in [(s, e, k) for s, e, k in marks[0]]
+
+
+def test_compute_vl_marks_line_level_vl_wins_over_human():
+    lines = [_FakeLine(consensus="黄芪三钱甘草二钱")]
+    divs = [
+        {"a_seg": "三钱", "b_seg": "二钱", "status": "pending"},
+        {"a_seg": "二钱", "b_seg": "三钱", "status": "arbitrated"},
+    ]
+    marks = compute_vl_marks(lines, divs)
+    kinds = {k for _, _, k in marks[0]}
+    # 同一行出现 vl 与 human 两种区间，二者都保留（前端按区间叠加）
+    assert "vl" in kinds and "human" in kinds
+    # 黄芪[三钱]甘草[二钱] -> (2,4,human) 与 (6,8,vl)
+    assert marks[0][0] == (2, 4, "human")
+    assert marks[0][1] == (6, 8, "vl")
+
+
+def test_compute_vl_marks_empty_inputs():
+    assert compute_vl_marks([], []) == {}
+    assert compute_vl_marks([_FakeLine(consensus="x")], []) == {}
+
+
+def test_compute_vl_marks_matches_final_preferring_final():
+    lines = [_FakeLine(consensus="旧共识", final="新终校三钱")]
+    divs = [{"a_seg": "三钱", "b_seg": "二钱", "status": "arbitrated"}]
+    marks = compute_vl_marks(lines, divs)
+    # final 优先匹配：新终校[三钱] -> 三钱 在索引 3
+    assert (3, 5, "vl") in [(s, e, k) for s, e, k in marks[0]]

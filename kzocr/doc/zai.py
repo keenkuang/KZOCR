@@ -19,6 +19,7 @@ import fitz
 
 from .. import config
 from ..engine.types import BookResult
+from ..scheduler.cross_align import compute_vl_marks
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ _SCHEMA_DDL = [
         final TEXT, humanFinal TEXT, confidence REAL, auditSource TEXT,
         headingLevel INTEGER, disputed INTEGER, missingCharAlert TEXT,
         extraCharAlert TEXT, charLevelJson TEXT,
-        crop_img BLOB, charBoxes TEXT)""",
+        crop_img BLOB, charBoxes TEXT, vl_marks TEXT)""",
     """CREATE TABLE IF NOT EXISTS Proofread (
         id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER, seqInPara INTEGER,
         lineId TEXT, originalText TEXT, correctedText TEXT, changeType TEXT, severity TEXT,
@@ -105,6 +106,8 @@ def _migrate_line(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE Line ADD COLUMN crop_img BLOB")
     if "charBoxes" not in line_cols:
         conn.execute("ALTER TABLE Line ADD COLUMN charBoxes TEXT DEFAULT ''")
+    if "vl_marks" not in line_cols:
+        conn.execute("ALTER TABLE Line ADD COLUMN vl_marks TEXT DEFAULT ''")
     book_cols = {r[1] for r in conn.execute("PRAGMA table_info(Book)").fetchall()}
     if "source_pdf" not in book_cols:
         conn.execute("ALTER TABLE Book ADD COLUMN source_pdf TEXT DEFAULT ''")
@@ -315,6 +318,17 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                 (p.page_num, book.book_code, len(p.paragraphs), page_line_count),
             )
             counts["pages"] += 1
+            # 字符级 VL 标注（Part B）：按页查主库 cross_divergence，映射到逐行字符区间
+            _page_divs: list = []
+            if _bdb is not None:
+                try:
+                    _page_divs = _bdb.get_cross_divergences(page_no=p.page_num)
+                except Exception:
+                    logger.warning("[doc.zai] 读取 cross_divergence 失败（page=%s），vl_marks 置空", p.page_num)
+                    _page_divs = []
+            _page_lines = [ln for para in p.paragraphs for ln in para.lines]
+            _page_marks = compute_vl_marks(_page_lines, _page_divs)
+            _line_idx = 0
             for para_seq, para in enumerate(p.paragraphs, start=1):
                 para_id = f"{book.book_code}-P{p.page_num}-{para_seq}"
                 cur.execute(
@@ -374,12 +388,16 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                                 line_id, exc_info=True,
                             )
                             crop_img = None
+                    # 字符级 VL 标注（Part B）：本行分歧区间（含左不含右）
+                    _marks = _page_marks.get(_line_idx, [])
+                    vl_marks_json = json.dumps(_marks, ensure_ascii=False)
+                    _line_idx += 1
                     cur.execute(
                         "INSERT INTO Line (id,pageNum,bookCode,paraSeq,seqInPara,"
                         "engineTexts,consensus,llmCorrected,glyphVerified,final,"
                         "humanFinal,confidence,auditSource,headingLevel,disputed,"
-                        "missingCharAlert,extraCharAlert,charLevelJson,crop_img,charBoxes) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "missingCharAlert,extraCharAlert,charLevelJson,crop_img,charBoxes,vl_marks) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (line_id, p.page_num, book.book_code, para_seq,
                          line_seq,
                          engine_texts_json, ln.consensus, ln.llm_corrected,
@@ -387,7 +405,7 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                          ln.final, human_final, ln.confidence, book.engine_label,
                          None, int(ln.disputed), ln.missing_char_alert,
                          ln.extra_char_alert, ln.char_level_json,
-                         crop_img, char_boxes_json),
+                         crop_img, char_boxes_json, vl_marks_json),
                     )
                     counts["lines"] += 1
                     for pr in ln.proofreads:

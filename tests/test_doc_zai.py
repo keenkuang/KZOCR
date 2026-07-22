@@ -167,3 +167,59 @@ def test_migrate_line_adds_columns(tmp_path):
     book_cols = {r[1] for r in conn.execute("PRAGMA table_info(Book)").fetchall()}
     assert "source_pdf" in book_cols
     conn.close()
+
+
+class _FakeBookDBWithDivs(_FakeBookDB):
+    """带 cross_divergence 的假 BookDB（验证 Part B vl_marks 烘焙）。"""
+    def get_cross_divergences(self, page_no=None, priority=None):
+        return [{"a_seg": "当归", "b_seg": "川芎", "status": "arbitrated"}]
+
+
+def test_push_writes_vl_marks(tmp_path, monkeypatch):
+    """烘焙时按 cross_divergence 把字符级 vl_marks 写入 custom.db Line 表。"""
+    import kzocr.storage.db as _sdb
+    monkeypatch.setattr(_sdb, "BookDB", _FakeBookDBWithDivs)
+    monkeypatch.setattr(zai.os.path, "exists", lambda p: True)
+
+    out = tmp_path / "custom.db"
+    zai.push_book_to_zai(
+        _make_book(), zai_path=out, pdf_path=Path("/fake.pdf"),
+        persist_bookdb=False, register_postgres=False,
+    )
+    conn = _open_custom(out)
+    row = conn.execute("SELECT vl_marks FROM Line").fetchone()
+    marks = json.loads(row["vl_marks"]) if row["vl_marks"] else []
+    # 共识「当归」整段被 arbitrated 裁决 -> 黄(vl) 全行
+    assert marks == [[0, 2, "vl"]]
+    conn.close()
+
+
+def test_push_vl_marks_column_migration(tmp_path, monkeypatch):
+    """旧 custom.db 缺 vl_marks 列时自动 ALTER 补齐，不报错。"""
+    out = tmp_path / "custom.db"
+    conn = sqlite3.connect(str(out))
+    # 复刻「vl_marks 加入前的旧 Line 表」：含全部旧列、仅缺 vl_marks
+    conn.execute(
+        "CREATE TABLE Line ("
+        "id TEXT PRIMARY KEY, pageNum INTEGER, bookCode TEXT, paraSeq INTEGER, "
+        "seqInPara INTEGER, engineTexts TEXT, consensus TEXT, llmCorrected TEXT, "
+        "glyphVerified TEXT, final TEXT, humanFinal TEXT, confidence REAL, "
+        "auditSource TEXT, headingLevel INTEGER, disputed INTEGER, "
+        "missingCharAlert TEXT, extraCharAlert TEXT, charLevelJson TEXT, "
+        "crop_img BLOB, charBoxes TEXT)"
+    )
+    conn.commit()
+    conn.close()
+    # ensure_package_schema 应在写入前补齐 vl_marks 列；用真实 push 路径触发迁移
+    import kzocr.storage.db as _sdb
+    monkeypatch.setattr(_sdb, "BookDB", _FakeBookDB)
+    monkeypatch.setattr(zai.os.path, "exists", lambda p: True)
+    res = zai.push_book_to_zai(
+        _make_book(), zai_path=out, pdf_path=Path("/fake.pdf"),
+        persist_bookdb=False, register_postgres=False,
+    )
+    assert res["counts"]["lines"] == 1
+    conn2 = _open_custom(out)
+    cols = {r[1] for r in conn2.execute("PRAGMA table_info(Line)").fetchall()}
+    assert "vl_marks" in cols
+    conn2.close()
