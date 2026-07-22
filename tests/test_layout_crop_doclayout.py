@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from unittest import mock
 
 import numpy as np
@@ -97,6 +99,58 @@ def test_crop_by_doclayout_trims_left_side_eyebrow():
     assert out.shape[1] == (1280 + 15) - left
     assert left > 92, "左侧竖眉(50-92)应被裁掉"
     assert left != 120, "不应再被 120 下限兜死"
+
+
+class _UnsafeModel:
+    """模拟非线程安全的 C++ 版面模型：若 predict 被并发调用则崩溃。
+
+    用于验证 _DOC_LAYOUT_LOCK 真正串行化了推理（页级并发编排下多 worker 共享单例模型）。
+    """
+
+    def __init__(self, boxes):
+        self._boxes = boxes
+        self._busy = False
+        self._guard = threading.Lock()
+        self.concurrent_violations = 0
+
+    def predict(self, img, batch_size=1):
+        with self._guard:
+            if self._busy:
+                self.concurrent_violations += 1
+                raise RuntimeError("concurrent predict detected")
+            self._busy = True
+        try:
+            time.sleep(0.01)  # 制造并发窗口
+            return [_FakeResult(self._boxes)]
+        finally:
+            with self._guard:
+                self._busy = False
+
+
+def test_doclayout_inference_serialized_under_concurrency():
+    """8 线程并发调用 _doclayout_rect，加锁后模型 predict 必须串行（零并发违规）。"""
+    img = _make_img(1000, 800)
+    boxes = [_box("text", 100, 200, 600, 300)]
+    model = _UnsafeModel(boxes)
+    results = [None] * 8
+    errors: list[Exception] = []
+
+    def _worker(i):
+        try:
+            results[i] = layout_crop._doclayout_rect(img)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    with mock.patch.object(layout_crop, "_get_doclayout_model", return_value=model):
+        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert not errors, f"并发推理抛出异常: {errors}"
+    assert model.concurrent_violations == 0, "predict 被并发调用，锁未生效"
+    assert all(r is not None for r in results)
 
 
 def test_crop_by_doclayout_no_body_returns_none():
