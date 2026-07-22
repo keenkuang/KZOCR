@@ -5,6 +5,39 @@
 
 ---
 
+## v2026-07-22 交付式校对台增强（A–H）+ e2e 分歧明细落库
+
+> 闭环计划 `electric-nebula-curie-R5VASMaA.md`（方向 2 三功能 + 方向 3 回导加固 B.1–B.5 + 识别率衔接 H）。
+> **A–H 全部实现并推 main**（版本维持 **0.25.0**）：全量 **1104 passed + 2 skipped + 2 deselected**（较 1092 +12），ruff 全过，CI 在 3.10/3.11/3.12 全 ✅。
+> 提交：`7d271a5`/`c3a51c3`/`b39f5e8`（e2e 落库）、`add27a6`/`269cb2b`/`d0c2185`（A/B后端/C/D/E/F/G）、`4919185`（B 前端字符框叠加）、`bfc7e1d`（H）、`6f00016`（README 徽章同步）。
+
+### 一、e2e 扩面结果落主库 BookDB（前序，衔接识别率提升的数据归宿）
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/storage/db.py` | 新增 `e2e_expansion` 表（按书分库；字段 book_code/pdf/book_title/pages_processed/pages_requested/total_divergences/high_divergences/engine_a/engine_b/render_warnings_json/run_at/batch）+ `save_e2e_expansion(...)`（INSERT 历史，返回 id）+ `get_e2e_expansions(book_code)`。 |
+| `scripts/e2e_expand_books.py` | 抽 `_safe_book_code(name)`（复用 `run.py` 的 `re.sub(r"[^A-Za-z0-9_\\-]", "_", ...)`，与 VLM 链路对齐，保证同书落同一按书分库文件）；新增 `_persist_e2e(rec, db_dir)`（写该书 BookDB）；新增 `--persist-db` 开关（`KZOCR_E2E_PERSIST_DB` env 兜底）；每本书 checkpoint 后落库（落库失败仅告警不阻断汇总）。 |
+| `scripts/run_e2e_nightly.py` | `run_batch` 传 `--persist-db`，使 nightly 默认落库。 |
+| 修复 | `parse_target_line` 用 `rsplit(None, 1)` 只切「路径/页数」一处，保留文件名内任意连续空格/tab（修胡天宝书 2 空格致 `isfile` 误判 + 失败书无限重试 bug）；新增 `_FAILED_KEYS` 持久化跳过机制。 |
+
+### 二、校对台增强 A–H（离线 custom.db 交付 + 回导加固 + 分歧明细落库）
+
+| 模块 | 说明 |
+|------|------|
+| **A 原图回溯** | `kzocr/doc/zai.py` Line 加 `crop_img BLOB` + `_migrate_line()`（缺列 ALTER 兼容旧包）；`push_book_to_zai` 每书开一次 `fitz`，按该行 char_boxes 并集 bbox 裁 150 DPI 图烘焙进 custom.db（`KZOCR_CROP_IMG=0` 可关）。`api.py` `LineItem.crop_img_b64` + `review.html` 行首 `<img>` 离线自包含展示。 |
+| **B 字符级校正** | `zai.py` Line 加 `charBoxes TEXT`，`push_book_to_zai` 写入（**转相对裁图坐标**，与 crop_img 原点对齐修复整体偏移 bug）；`api.py` `LineItem.char_boxes` + 纯函数 `scale_char_box`（像素→显示，利于测试）；`review.html` 字符框绝对定位叠加 + 点击高亮/复制坐标/跳转原图/插入字符。 |
+| **C 差异高亮** | `api.py` 新增 `compute_diff(a,b)`（LCS 字符级 diff，`equal/insert/delete/replace` 四态）+ `DiffToken`；`review.html` 每行折叠「差异视图」面板，纯前端 JS 对「各引擎→共识」「共识→人工终校」做绿/红/橙高亮。数据（engine_texts/consensus/humanFinal）已存在 Line，无数据层改动。 |
+| **D B.1 来源校验** | `zai.py` 新增 `ExportMeta` 表（tool_version/source_hash/signature）；`push_book_to_zai` 写 `sha256` 过 Line 不可变字段（排除 `humanFinal`）。`proofread.validate_proofread_package` 校验缺失/不一致即拒（旧包 `KZOCR_ALLOW_LEGACY=1` 放行）。 |
+| **E B.2 审计** | `db.py` 新增 `import_audit` 表 + `record_import_audit`；`import_proofread_package` 成功回导后落一行（imported_by/package_hash/lines/proofreads/version）。 |
+| **F B.3 事务幂等** | `db.py` `save_line_human_finals`/`save_proofreads` 加 `commit: bool=True`；`import_proofread_package` 包进单事务，异常 `rollback` 避免中途部分写入。 |
+| **G B.5 多回导冲突** | `proofread` 表加 `imported_at`/`import_version`；每次回导版本号递增并保留历史行（`UNIQUE(line_id, corrected_text)`）；`import_audit` 记 version 供回溯。 |
+| **H 识别率衔接（本次收尾）** | `e2e_expand_books.py` `count_book` 给每页 `per_page` 附加 `divergences`（`dataclasses.asdict`，引擎来源 PaddleOCR/RapidOCR 注明）；`_persist_e2e` 落库时把逐条分歧明细写进按书分库 BookDB 的 `cross_divergence` 表（按页号幂等覆盖），衔接 `confusion_set` 学习 / GlyphVerifier 调优 / 校对台差异高亮。`db.py` 新增 `clear_cross_divergences(page_nos)`。新增 4 例回归测试（count_book 附 divergences / 落库 cross_divergence / 重跑幂等 / 增量合并不误删旧页 / clear_cross_divergences）。 |
+
+> 说明：H 路径 `run_cross_align` 未传 `boxes_a`，故 `Divergence.boxes` 恒空；需字符级定位的视觉仲裁走 orchestrator 全路径（已 `align_boxes_to_text` 注入 char_boxes）。
+> 范围边界：不删任何代码；不引入外部依赖；`KZOCR_CROP_IMG=0`/`KZOCR_ALLOW_LEGACY=1` 等降级开关保留。
+
+---
+
 ## v2026-07-22 版本号一致性校验与修复（维护性，版本维持 0.25.0）
 
 > 按发版版本 bump 检查清单（记忆 `README_badge_count.md` A–F 分区）全量校验各文件版本戳，
