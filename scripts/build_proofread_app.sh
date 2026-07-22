@@ -73,6 +73,20 @@ OPTS=(
     --noconfirm
 )
 
+# ── 单文件 vs 目录分发取舍（默认 onedir，勿强行改默认以免回归）──────────────
+# onedir（默认）：
+#   + 启动快（无需解压），文件已铺开；改配置/排查友好
+#   - 产物为多文件目录（~154MB），分发需整目录拷贝
+# onefile（--onefile）：
+#   + 单一可执行文件，分发最干净
+#   - 每次启动需把全部依赖解压到临时目录（首次较慢，占用磁盘 I/O），
+#     且进程退出才清理临时文件
+# 结论：日常交付用 onedir；如需「一个 exe 发给用户」再显式传 --onefile。
+#
+# ── 图标（--icon）────────────────────────────────────────────────────────
+# 当前仓库无 .ico 资源，故不启用 --icon（缺资源会让 pyinstaller 报错）。
+# 若有图标资源（如 assets/proofread.ico），可取消下一行注释：
+#   [ "$MODE" != "--clean" ] && OPTS+=(--icon "assets/proofread.ico")
 if [ "$MODE" = "--onefile" ]; then
     OPTS+=(--onefile)
 else

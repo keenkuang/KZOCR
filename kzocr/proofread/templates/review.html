@@ -20,6 +20,10 @@
   .chbox .chbox-idx { position:absolute; top:-1px; left:1px; font-size:9px; line-height:1.2;
                       color:#2563eb; background:rgba(255,255,255,0.75); padding:0 2px;
                       border-radius:2px; }
+  /* 无原图占位（旧包 / 未烘焙图降级场景） */
+  .crop-placeholder { width:320px; height:120px; display:flex; align-items:center;
+                      justify-content:center; background:#f3f4f6; color:#9ca3af;
+                      border:1px dashed #d1d5db; border-radius:6px; font-size:13px; }
 </style>
 <div class="max-w-5xl mx-auto">
   <!-- 进度条 -->
@@ -95,9 +99,9 @@
       </div>
       {% endif %}
 
-      <!-- Module A 原图 + Module B 字符框叠加（无原图则跳过） -->
-      {% if line.crop_img_b64 %}
+      <!-- Module A 原图 + Module B 字符框叠加（无原图时显示占位） -->
       <div class="mt-2">
+        {% if line.crop_img_b64 %}
         <div class="crop-wrap" id="cropwrap-{{ line.id }}">
           <img id="orig-{{ line.id }}"
                src="data:image/png;base64,{{ line.crop_img_b64 }}"
@@ -119,8 +123,10 @@
           </button>
           <span class="text-xs text-gray-400">点击字符框：高亮 · 复制坐标 · 插入该字</span>
         </div>
+        {% else %}
+        <div class="crop-placeholder">无原图</div>
+        {% endif %}
       </div>
-      {% endif %}
 
       <!-- 引擎原文（差异背景） -->
       {% if line.engine_texts %}
