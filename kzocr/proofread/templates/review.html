@@ -9,6 +9,17 @@
   .d-ins { background:#d1fae5; color:#065f46; }
   .d-del { background:#fee2e2; color:#991b1b; text-decoration:line-through; }
   .d-rep { background:#ffedd5; color:#9a3412; }
+  /* 字符框叠加（Module B）：绝对定位在 crop_img 之上 */
+  .crop-wrap { position:relative; display:inline-block; line-height:0; }
+  .crop-wrap > img { display:block; max-width:320px; width:320px; height:auto; }
+  .chbox { position:absolute; box-sizing:border-box; border:1px solid rgba(37,99,235,0.6);
+           cursor:pointer; }
+  .chbox:hover { border-color:rgba(37,99,235,1); background:rgba(37,99,235,0.08); }
+  .chbox.active { border-color:#ef4444; background:rgba(239,68,68,0.18); }
+  .chbox.chbox-noglyph { border-style:dashed; opacity:0.55; }
+  .chbox .chbox-idx { position:absolute; top:-1px; left:1px; font-size:9px; line-height:1.2;
+                      color:#2563eb; background:rgba(255,255,255,0.75); padding:0 2px;
+                      border-radius:2px; }
 </style>
 <div class="max-w-5xl mx-auto">
   <!-- 进度条 -->
@@ -61,7 +72,8 @@
                 {% if line.proofread_status == 'done' %}border-l-green-500{% else %}border-l-amber-400{% endif %}"
          id="line-{{ line.id }}"
          data-engine-texts='{{ line.engine_texts | tojson }}'
-         data-consensus='{{ line.consensus | tojson }}'>
+         data-consensus='{{ line.consensus | tojson }}'
+         data-final='{{ line.final | tojson }}'>
       <div class="flex items-start justify-between">
         <div class="text-xs text-gray-400 font-mono mb-1">
           P{{ line.page_num }} · ¶{{ line.para_seq }} · L{{ line.seq_in_para }}
@@ -80,6 +92,33 @@
       {% if line.consensus %}
       <div class="mt-1 p-2 bg-gray-50 rounded text-sm text-gray-600">
         <span class="text-xs text-gray-400">共识参考：</span>{{ line.consensus }}
+      </div>
+      {% endif %}
+
+      <!-- Module A 原图 + Module B 字符框叠加（无原图则跳过） -->
+      {% if line.crop_img_b64 %}
+      <div class="mt-2">
+        <div class="crop-wrap" id="cropwrap-{{ line.id }}">
+          <img id="orig-{{ line.id }}"
+               src="data:image/png;base64,{{ line.crop_img_b64 }}"
+               alt="原图裁剪 P{{ line.page_num }} L{{ line.seq_in_para }}"
+               onload="layoutBoxes('{{ line.id }}')">
+          {% for b in line.char_boxes %}
+          <div class="chbox"
+               data-line="{{ line.id }}"
+               data-idx="{{ loop.index0 }}"
+               data-bx='{{ b | tojson }}'>
+            <span class="chbox-idx">{{ loop.index }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="mt-1 flex items-center gap-2">
+          <button onclick="jumpToOrig('{{ line.id }}')"
+                  class="px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300">
+            跳转原图
+          </button>
+          <span class="text-xs text-gray-400">点击字符框：高亮 · 复制坐标 · 插入该字</span>
+        </div>
       </div>
       {% endif %}
 
@@ -313,6 +352,83 @@ function fillDiff(lineId) {
 
 document.querySelectorAll('.diff-panel').forEach(p => {
   p.addEventListener('toggle', () => { if (p.open) fillDiff(p.dataset.lineId); });
+});
+
+// ── 字符框叠加 + 点击定位（Module B，纯前端，无新依赖） ──
+
+// 字形对齐：char_boxes[i] 与 consensus 字符按索引对齐，回退 final / human_final。
+function glyphFor(lineId, idx) {
+  const card = document.getElementById('line-' + lineId);
+  if (!card) return '';
+  for (const attr of ['consensus', 'final']) {
+    let src = '';
+    try { src = JSON.parse(card.dataset[attr] || '""') || ''; } catch (e) { src = ''; }
+    if (src && idx < src.length) return src[idx];
+  }
+  return '';
+}
+
+// 把 crop_img 自然像素空间的 bbox 映射到显示像素，并写入字形标签。
+function layoutBoxes(lineId) {
+  const img = document.getElementById('orig-' + lineId);
+  if (!img) return;
+  const wrap = img.parentElement;
+  const natural = img.naturalWidth || 1;
+  const scale = (img.clientWidth || natural) / natural;
+  wrap.querySelectorAll('.chbox').forEach(box => {
+    let coords;
+    try { coords = JSON.parse(box.dataset.bx); } catch (e) { coords = []; }
+    if (!Array.isArray(coords) || coords.length < 4) return;
+    const [x1, y1, x2, y2] = coords;
+    box.style.left = (x1 * scale) + 'px';
+    box.style.top = (y1 * scale) + 'px';
+    box.style.width = ((x2 - x1) * scale) + 'px';
+    box.style.height = ((y2 - y1) * scale) + 'px';
+    const idx = parseInt(box.dataset.idx, 10) || 0;
+    const glyph = glyphFor(lineId, idx);
+    box.dataset.glyph = glyph;
+    const lbl = box.querySelector('.chbox-idx');
+    if (lbl) lbl.textContent = glyph ? (glyph + '·' + (idx + 1)) : ('#' + (idx + 1));
+    box.classList.toggle('chbox-noglyph', !glyph);
+  });
+}
+
+// 在 textarea 光标处插入文本。
+function insertAtCursor(el, text) {
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, start) + text + el.value.slice(end);
+  el.selectionStart = el.selectionEnd = start + text.length;
+  el.focus();
+}
+
+// 点击字符框：高亮 + 复制坐标 + 插入字形（无字形则降级为无操作）。
+function onChboxClick(box) {
+  const lineId = box.dataset.line;
+  box.classList.toggle('active');
+  const bx = box.dataset.bx || '';
+  if (navigator.clipboard && bx) {
+    navigator.clipboard.writeText(bx).catch(() => {});
+  }
+  const glyph = box.dataset.glyph || '';
+  const ta = document.getElementById('input-' + lineId);
+  if (glyph && ta) insertAtCursor(ta, glyph);
+}
+
+// 「跳转原图」按钮：滚动定位到该行 crop_img。
+function jumpToOrig(lineId) {
+  const img = document.getElementById('orig-' + lineId);
+  if (img) img.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+document.querySelectorAll('.chbox').forEach(b => {
+  b.addEventListener('click', () => onChboxClick(b));
+});
+window.addEventListener('resize', () => {
+  document.querySelectorAll('.crop-wrap').forEach(w => {
+    const id = (w.id || '').replace('cropwrap-', '');
+    if (id) layoutBoxes(id);
+  });
 });
 </script>
 {% endblock %}

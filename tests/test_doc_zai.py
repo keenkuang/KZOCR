@@ -96,6 +96,26 @@ def test_push_writes_crop_img_and_charboxes(tmp_path, patched):
     conn.close()
 
 
+def test_push_charboxes_baked_crop_relative(tmp_path, patched):
+    """Module B：烘焙进 custom.db 的 charBoxes 必须是相对裁图坐标（包围盒左上角为
+    原点），否则前端叠加会整体偏移 (x0,y0)。"""
+    out = tmp_path / "custom.db"
+    zai.push_book_to_zai(
+        _make_book(), zai_path=out, pdf_path=Path("/fake.pdf"),
+        persist_bookdb=False, register_postgres=False,
+    )
+    conn = _open_custom(out)
+    cbs = json.loads(conn.execute("SELECT charBoxes FROM Line").fetchone()["charBoxes"])
+    # 原始 cbs = [[10,10,20,20],[25,10,35,20]] → 包围盒原点 (10,10)
+    # 相对裁图后应为 [[0,0,10,10],[15,0,25,10]]
+    assert cbs == [[0, 0, 10, 10], [15, 0, 25, 10]]
+    # 相对坐标内不应再出现原始绝对原点（如 10 出现在非边界处）
+    flat = [v for box in cbs for v in box]
+    assert min(flat[0::2]) == 0  # 最左 x 归零
+    assert min(flat[1::2]) == 0  # 最上 y 归零
+    conn.close()
+
+
 def test_push_crop_img_disabled(tmp_path, patched, monkeypatch):
     monkeypatch.setenv("KZOCR_CROP_IMG", "0")
     out = tmp_path / "custom.db"

@@ -330,13 +330,24 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                     human_final = ln.human_final or hf_map.get(
                         (p.page_num, para_seq, line_seq), ""
                     )
-                    # 字符级校正（B）：逐行 char_boxes 坐标（版心裁切后图像像素坐标）
+                    # 字符级校正（B）：逐行 char_boxes 坐标（版心裁切后图像像素坐标）。
+                    # 烘焙进 custom.db 时转为「相对裁图」坐标：以该行列所有字框包围盒
+                    # 左上角 (x0,y0) 为原点，与 crop_img 子图严格对齐，前端方可直接叠加。
                     cbs = None
                     if _bdb is not None:
                         getter = getattr(_bdb, "get_line_char_boxes", None)
                         if getter is not None:
                             cbs = getter(p.page_num, para_seq, line_seq)
-                    char_boxes_json = json.dumps(cbs) if cbs else "[]"
+                    char_boxes_json = "[]"
+                    crop_origin = None
+                    if cbs:
+                        x0 = min(b[0] for b in cbs)
+                        y0 = min(b[1] for b in cbs)
+                        crop_origin = (x0, y0)
+                        char_boxes_json = json.dumps(
+                            [[b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0] for b in cbs],
+                            ensure_ascii=False,
+                        )
                     # 原图回溯（A）：烘焙每行裁图 crop_img（默认开，KZOCR_CROP_IMG=0 关）
                     crop_img = None
                     if crop_enabled and pdf_path is not None and cbs:
@@ -350,8 +361,7 @@ def push_book_to_zai(book: BookResult, db_path: Optional[Path] = None,
                                 img = _pdf_page_to_numpy(_doc[pn - 1], dpi=150)
                                 _page_cache[pn] = _crop_to_body(img, page_num=pn)
                             img = _page_cache[pn]
-                            x0 = min(b[0] for b in cbs)
-                            y0 = min(b[1] for b in cbs)
+                            x0, y0 = crop_origin
                             x1 = max(b[2] for b in cbs)
                             y1 = max(b[3] for b in cbs)
                             crop = img[y0:y1, x0:x1]

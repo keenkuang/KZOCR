@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import sqlite3
@@ -44,6 +46,8 @@ class LineItem:
     char_level_json: str
     heading: str = ""     # 所属标题/段落上下文
     proofread_status: str = "pending"  # pending / done
+    char_boxes: list = field(default_factory=list)   # [[x1,y1,x2,y2], ...]，像素空间同 crop_img
+    crop_img_b64: str = ""                            # 原图裁剪 PNG 的 base64（旧包/关闭时为空）
 
 
 @dataclass
@@ -54,6 +58,19 @@ class PageGroup:
 
 
 def _read_line(conn: sqlite3.Connection, row: sqlite3.Row) -> LineItem:
+    # 防御性读取：旧包可能缺少 char_boxes / crop_img 列（sqlite3.Row 对缺列
+    # 直接用 row["x"] 会抛 KeyError），故先用 keys() 探明存在性。
+    keys = row.keys()
+    char_boxes: list = (
+        json.loads(row["char_boxes"])
+        if ("char_boxes" in keys and row["char_boxes"])
+        else []
+    )
+    crop_img_b64: str = (
+        base64.b64encode(row["crop_img"]).decode()
+        if ("crop_img" in keys and row["crop_img"])
+        else ""
+    )
     return LineItem(
         id=row["id"],
         page_num=row["pageNum"],
@@ -69,6 +86,8 @@ def _read_line(conn: sqlite3.Connection, row: sqlite3.Row) -> LineItem:
         disputed_sub=row["disputed"] or 0,
         char_level_json=row["charLevelJson"] or "",
         proofread_status="done" if (row["humanFinal"] and row["humanFinal"].strip()) else "pending",
+        char_boxes=char_boxes,
+        crop_img_b64=crop_img_b64,
     )
 
 
@@ -266,6 +285,23 @@ class DiffToken:
     text: str         # 展示文本（insert/replace 取目标；delete 取源；equal 取原文）
     old: str = ""     # 源片段（delete/replace 取值）
     new: str = ""     # 目标片段（insert/replace 取值）
+
+
+def scale_char_box(box: list, scale: float) -> dict:
+    """把图像像素空间的字符框映射到显示像素空间。
+
+    纯函数，便于单测与前端算法对齐。``box`` 为 ``[x1, y1, x2, y2]``（crop_img
+    自然像素），``scale`` 为 显示宽度 / 自然宽度。返回 left/top/width/height。
+    """
+    if len(box) < 4:
+        return {"left": 0, "top": 0, "width": 0, "height": 0}
+    x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+    return {
+        "left": x1 * scale,
+        "top": y1 * scale,
+        "width": (x2 - x1) * scale,
+        "height": (y2 - y1) * scale,
+    }
 
 
 def compute_diff(a: str, b: str) -> list[DiffToken]:
