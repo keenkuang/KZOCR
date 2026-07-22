@@ -249,3 +249,106 @@ class CustomDbProofread:
             if b.book_code == book_code:
                 return b
         return None
+
+
+@dataclass
+class DiffToken:
+    """字符级 diff 的一个片段。
+
+    - op == "equal"   ：两侧相同文本。
+    - op == "insert"  ：仅出现在目标文本 b 中的新增内容（绿色）。
+    - op == "delete"  ：仅出现在源文本 a 中的被删内容（红色）。
+    - op == "replace" ：位置对应的删除+插入配对，即“修改”（橙色）。
+      old 为源片段，new 为目标片段；text 统一取 new（显示用）。
+    """
+
+    op: str           # "equal" | "insert" | "delete" | "replace"
+    text: str         # 展示文本（insert/replace 取目标；delete 取源；equal 取原文）
+    old: str = ""     # 源片段（delete/replace 取值）
+    new: str = ""     # 目标片段（insert/replace 取值）
+
+
+def compute_diff(a: str, b: str) -> list[DiffToken]:
+    """对两段文本做字符级 LCS diff，返回带类型的 token 列表。
+
+    纯函数、无外部依赖，便于单测与前端算法对齐。着色语义由调用方按
+    op 决定（insert=绿 / delete=红 / replace=橙 / equal=默认）。
+    """
+    n, m = len(a), len(b)
+    if n == 0 and m == 0:
+        return []
+
+    # LCS 长度表：dp[i][j] = a[i:] 与 b[j:] 的 LCS 长度
+    dp: list[list[int]] = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            dp[i][j] = (
+                dp[i + 1][j + 1] + 1 if a[i] == b[j]
+                else max(dp[i + 1][j], dp[i][j + 1])
+            )
+
+    # 回溯得到 equal/delete/insert 原始片段
+    raw: list[tuple[str, str]] = []
+    i = j = 0
+    while i < n and j < m:
+        if a[i] == b[j]:
+            start = i
+            while i < n and j < m and a[i] == b[j]:
+                i += 1
+                j += 1
+            raw.append(("equal", a[start:i]))
+        elif dp[i + 1][j] >= dp[i][j + 1]:
+            raw.append(("delete", a[i]))
+            i += 1
+        else:
+            raw.append(("insert", b[j]))
+            j += 1
+    while i < n:
+        raw.append(("delete", a[i]))
+        i += 1
+    while j < m:
+        raw.append(("insert", b[j]))
+        j += 1
+
+    # 将相邻的 delete 段 + insert 段（两种顺序）合并为 replace（即“修改”）。
+    # 例：cat→dog 整段合并为一次 replace，而非逐字符错配。
+    tokens: list[DiffToken] = []
+    k = 0
+    while k < len(raw):
+        op, text = raw[k]
+        if op == "delete":
+            old_txt = text
+            e = k + 1
+            while e < len(raw) and raw[e][0] == "delete":
+                old_txt += raw[e][1]
+                e += 1
+            if e < len(raw) and raw[e][0] == "insert":
+                new_txt = raw[e][1]
+                e += 1
+                while e < len(raw) and raw[e][0] == "insert":
+                    new_txt += raw[e][1]
+                    e += 1
+                tokens.append(DiffToken("replace", new_txt, old=old_txt, new=new_txt))
+            else:
+                tokens.append(DiffToken("delete", old_txt, old=old_txt))
+            k = e
+        elif op == "insert":
+            new_txt = text
+            e = k + 1
+            while e < len(raw) and raw[e][0] == "insert":
+                new_txt += raw[e][1]
+                e += 1
+            if e < len(raw) and raw[e][0] == "delete":
+                old_txt = raw[e][1]
+                e += 1
+                while e < len(raw) and raw[e][0] == "delete":
+                    old_txt += raw[e][1]
+                    e += 1
+                tokens.append(DiffToken("replace", new_txt, old=old_txt, new=new_txt))
+            else:
+                tokens.append(DiffToken("insert", new_txt, new=new_txt))
+            k = e
+        else:
+            tokens.append(DiffToken("equal", text, old=text, new=text))
+            k += 1
+    return tokens

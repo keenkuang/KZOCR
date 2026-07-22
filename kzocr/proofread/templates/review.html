@@ -5,6 +5,11 @@
 <span class="text-sm text-gray-400 ml-4">{{ book_title }}</span>
 {% endblock %}
 {% block content %}
+<style>
+  .d-ins { background:#d1fae5; color:#065f46; }
+  .d-del { background:#fee2e2; color:#991b1b; text-decoration:line-through; }
+  .d-rep { background:#ffedd5; color:#9a3412; }
+</style>
 <div class="max-w-5xl mx-auto">
   <!-- 进度条 -->
   <div class="bg-white rounded-lg shadow-md p-4 mb-4">
@@ -54,7 +59,9 @@
     {% for line in lines %}
     <div class="bg-white rounded-lg shadow-sm p-4 border-l-4
                 {% if line.proofread_status == 'done' %}border-l-green-500{% else %}border-l-amber-400{% endif %}"
-         id="line-{{ line.id }}">
+         id="line-{{ line.id }}"
+         data-engine-texts='{{ line.engine_texts | tojson }}'
+         data-consensus='{{ line.consensus | tojson }}'>
       <div class="flex items-start justify-between">
         <div class="text-xs text-gray-400 font-mono mb-1">
           P{{ line.page_num }} · ¶{{ line.para_seq }} · L{{ line.seq_in_para }}
@@ -81,6 +88,17 @@
       <details class="mt-1">
         <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">各引擎原文</summary>
         <pre class="mt-1 p-2 bg-gray-50 rounded text-xs text-gray-500 overflow-x-auto">{{ line.engine_texts }}</pre>
+      </details>
+      {% endif %}
+
+      <!-- 差异视图（字符级 diff 高亮，默认收起） -->
+      {% if line.engine_texts or line.consensus %}
+      <details class="mt-2 diff-panel" data-line-id="{{ line.id }}">
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
+          差异视图（引擎 / 共识 / 人工 字符级对比）
+        </summary>
+        <div class="mt-1 p-2 bg-gray-50 rounded text-xs leading-relaxed overflow-x-auto"
+             id="diff-{{ line.id }}"></div>
       </details>
       {% endif %}
 
@@ -192,5 +210,109 @@ async function exportBook() {
     btn.textContent = '回导 BookDB';
   }
 }
+
+// ── 差异视图（字符级 LCS diff，纯前端，无新依赖） ──────────
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]
+  ));
+}
+
+// LCS 字符级 diff，返回 [{op, old, text}]；算法与 kzocr/proofread/api.py:compute_diff 对齐
+function buildDiff(a, b) {
+  const n = a.length, m = b.length;
+  const dp = Array.from({length: n + 1}, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const raw = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      const start = i;
+      while (i < n && j < m && a[i] === b[j]) { i++; j++; }
+      raw.push({op: 'equal', text: a.slice(start, i)});
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      raw.push({op: 'delete', text: a[i]}); i++;
+    } else {
+      raw.push({op: 'insert', text: b[j]}); j++;
+    }
+  }
+  while (i < n) { raw.push({op: 'delete', text: a[i]}); i++; }
+  while (j < m) { raw.push({op: 'insert', text: b[j]}); j++; }
+  const merged = [];
+  let k = 0;
+  while (k < raw.length) {
+    const cur = raw[k];
+    if (cur.op === 'delete') {
+      let oldTxt = cur.text;
+      let e = k + 1;
+      while (e < raw.length && raw[e].op === 'delete') { oldTxt += raw[e].text; e++; }
+      if (e < raw.length && raw[e].op === 'insert') {
+        let newTxt = raw[e].text; e++;
+        while (e < raw.length && raw[e].op === 'insert') { newTxt += raw[e].text; e++; }
+        merged.push({op: 'replace', old: oldTxt, text: newTxt});
+      } else {
+        merged.push({op: 'delete', old: oldTxt, text: oldTxt});
+      }
+      k = e;
+    } else if (cur.op === 'insert') {
+      let newTxt = cur.text;
+      let e = k + 1;
+      while (e < raw.length && raw[e].op === 'insert') { newTxt += raw[e].text; e++; }
+      if (e < raw.length && raw[e].op === 'delete') {
+        let oldTxt = raw[e].text; e++;
+        while (e < raw.length && raw[e].op === 'delete') { oldTxt += raw[e].text; e++; }
+        merged.push({op: 'replace', old: oldTxt, text: newTxt});
+      } else {
+        merged.push({op: 'insert', old: '', text: newTxt});
+      }
+      k = e;
+    } else {
+      merged.push({op: 'equal', old: '', text: cur.text});
+      k++;
+    }
+  }
+  return merged;
+}
+
+function renderDiff(a, b) {
+  return buildDiff(a, b).map(t => {
+    if (t.op === 'equal') return escapeHtml(t.text);
+    if (t.op === 'insert') return `<span class="d-ins">${escapeHtml(t.text)}</span>`;
+    if (t.op === 'delete') return `<span class="d-del">${escapeHtml(t.text)}</span>`;
+    return `<span class="d-rep">${escapeHtml(t.text)}</span>`;
+  }).join('');
+}
+
+function fillDiff(lineId) {
+  const card = document.getElementById('line-' + lineId);
+  if (!card) return;
+  let et;
+  try { et = JSON.parse(card.dataset.engineTexts || '{}'); } catch (e) { et = {}; }
+  if (typeof et !== 'object' || et === null) et = {};
+  let consensus;
+  try { consensus = JSON.parse(card.dataset.consensus || '""'); } catch (e) { consensus = ''; }
+  if (typeof consensus !== 'string') consensus = '';
+  const human = (document.getElementById('input-' + lineId) || {}).value || '';
+
+  const container = document.getElementById('diff-' + lineId);
+  let html = '';
+  const engines = Object.keys(et);
+  if (engines.length === 0) {
+    html += '<div class="text-gray-400">（无引擎原文）</div>';
+  }
+  for (const name of engines) {
+    html += `<div class="mb-1"><span class="font-semibold">${escapeHtml(name)} → 共识</span><br>${renderDiff(String(et[name] ?? ''), consensus)}</div>`;
+  }
+  html += `<div class="mt-1 pt-1 border-t border-gray-200"><span class="font-semibold">共识 → 人工终校</span><br>${renderDiff(consensus, human)}</div>`;
+  container.innerHTML = html;
+}
+
+document.querySelectorAll('.diff-panel').forEach(p => {
+  p.addEventListener('toggle', () => { if (p.open) fillDiff(p.dataset.lineId); });
+});
 </script>
 {% endblock %}
