@@ -138,3 +138,47 @@ def test_feedback_driver_min_freq_filters(tmp_path: Path, monkeypatch):
     assert summary["candidates"] == 0
     assert summary["added"] == 0
     assert not learned.is_file()
+
+
+def test_feedback_report_book_aggregation(tmp_path: Path, monkeypatch, capsys):
+    """Summary reports scanned/with-candidates counts and per-pair book_list (cross-book)."""
+    # A: 2 QIN->LING, B: 1 QIN->LING (merge to 3 across 2 books), C: no errors
+    db_dir = _build_book_dir(tmp_path, {"A": 2, "B": 1})
+    BookDB("C", db_dir=str(db_dir)).close()  # empty book, still scanned
+    learned = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", learned)
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", None)
+
+    from feedback_canonical_errors import run
+
+    summary = run(str(db_dir), min_count=1, apply=False)
+    assert summary["books_scanned"] == 3
+    assert summary["books_with_candidates"] == 2
+    assert summary["candidates"] == 1
+    rep = summary["report"][0]
+    assert rep["count"] == 3
+    assert rep["books"] == 2
+    assert rep["book_list"] == ["A", "B"]
+    out = capsys.readouterr().out
+    assert "扫描库=3" in out and "有候选库=2" in out
+
+
+def test_feedback_top_n_does_not_truncate_report(tmp_path: Path, monkeypatch):
+    """top_n only limits the console table; the returned summary report stays complete."""
+    db_dir = _build_book_dir(tmp_path, {"A": 6})
+    # add a second distinct single-char pair so there are 2 report rows
+    db = BookDB("A", db_dir=str(db_dir))
+    db.save_error_records([
+        ErrorRecord(2, 1, i, "RapidOCR", ZHI, JIU, 200 + i, "replace")
+        for i in range(6)
+    ])
+    db.close()
+    learned = tmp_path / "learned_confusion.json"
+    monkeypatch.setattr("kzocr.scheduler.cross_align._LEARNED_CONFUSION_PATH", learned)
+    monkeypatch.setattr("kzocr.scheduler.cross_align._CONFUSION_CACHE", None)
+
+    from feedback_canonical_errors import run
+
+    full = run(str(db_dir), min_count=5, apply=False, top_n=1)
+    assert len(full["report"]) == 2  # report intact regardless of top_n
+    assert full["candidates"] == 2
