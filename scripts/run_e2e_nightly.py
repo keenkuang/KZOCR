@@ -30,6 +30,28 @@ TONIGHT_JSON = EXPAND_DIR / "summary_tonight.json"
 MERGED_MD = EXPAND_DIR / "SUMMARY_MERGED.md"
 NIGHTLY_LOG = EXPAND_DIR / "nightly.log"
 
+# 本轮已尝试但失败的书籍 _book_key 集，避免无限重试同一失败书
+_FAILED_KEYS: set[str] = set()
+_FAILED_LOG = EXPAND_DIR / "_failed_keys.json"
+
+
+def _load_failed_keys() -> set[str]:
+    if _FAILED_LOG.is_file():
+        try:
+            with open(_FAILED_LOG, encoding="utf-8") as fh:
+                return set(json.load(fh))
+        except Exception as exc:
+            log(f"[warn] 读取失败书列表失败: {exc}")
+    return set()
+
+
+def _save_failed_keys(keys: set[str]) -> None:
+    try:
+        with open(_FAILED_LOG, "w", encoding="utf-8") as fh:
+            json.dump(sorted(keys), fh, ensure_ascii=False)
+    except Exception as exc:
+        log(f"[warn] 写入失败书列表失败: {exc}")
+
 ROOTS = [
     "/home/keen/Documents/OCR0625",
     "/home/keen/Documents",
@@ -117,15 +139,24 @@ def loaded_book_keys(path: Path) -> set[str]:
 
 def build_candidates() -> list[str]:
     done_keys = loaded_book_keys(HIST_JSON) | loaded_book_keys(TONIGHT_JSON)
+    global _FAILED_KEYS
+    _FAILED_KEYS |= _load_failed_keys()
     found = scan_pdfs()
-    inc, skip = [], []
+    inc, skip, failed_skip = [], [], []
     for real, name in found.items():
-        if _book_key(name) in done_keys:
+        bk = _book_key(name)
+        if bk in done_keys:
+            continue
+        if bk in _FAILED_KEYS:
+            failed_skip.append(real)
             continue
         (inc if is_medical(name) else skip).append(real)
-    log(f"扫描到 PDF {len(found)} 个；已扩面书名 {len(done_keys)}；医学命中 {len(inc)}；跳过 {len(skip)}")
+    log(f"扫描到 PDF {len(found)} 个；已扩面书名 {len(done_keys)}；"
+        f"失败跳过 {len(failed_skip)}；医学命中 {len(inc)}；跳过 {len(skip)}")
     for p in sorted(skip):
         log(f"  SKIP {p}")
+    for p in sorted(failed_skip):
+        log(f"  FAILED_SKIP {p}")
     return sorted(inc)
 
 
@@ -200,10 +231,20 @@ def main() -> int:
             log(f"[idle] 本轮无新书，休眠 {args.idle}s 后重扫（等你掉落新 PDF）")
             time.sleep(args.idle)
             continue
+        # 记录候选书名 key，用于本轮结束后检测哪些失败
+        cand_keys = {_book_key(Path(p).name) for p in candidates}
         log(f"[round {round_n}] 处理 {len(candidates)} 本未扩面古籍")
         run_batch(candidates, args.pages)
         merge_and_report()
-        log(f"[round {round_n}] 完成，继续循环")
+        # 检测失败书：本轮候选但未出现在 done_keys 中 → 加入 _FAILED_KEYS
+        done_after = loaded_book_keys(HIST_JSON) | loaded_book_keys(TONIGHT_JSON)
+        for bk in cand_keys:
+            if bk not in done_after:
+                _FAILED_KEYS.add(bk)
+                log(f"[warn] 书 {bk} 处理失败，已加入失败跳过列表，不再重试")
+        if _FAILED_KEYS:
+            _save_failed_keys(_FAILED_KEYS)
+        log(f"[round {round_n}] 完成（失败跳过累计 {len(_FAILED_KEYS)} 本），继续循环")
     return 0
 
 
