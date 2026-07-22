@@ -18,6 +18,11 @@ exports/
 *.db
 trace/
 
+# PyInstaller 桌面打包产物
+build/
+dist/
+*.spec
+
 # 形近字自学习集（运行时生成，可进化；非静态资源）
 kzocr/resources/learned_confusion.json
 
