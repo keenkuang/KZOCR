@@ -317,7 +317,26 @@ def test_save_and_get_e2e_expansion(tmp_db):
     assert len(tmp_db.get_e2e_expansions("test_book")) == 2
 
 
-def test_get_line_char_boxes(tmp_db):
+def test_clear_cross_divergences(tmp_db):
+    """clear_cross_divergences 仅删指定页号的分歧，保留其余页。"""
+    from kzocr.scheduler.cross_align import Divergence
+
+    tmp_db.write_cross_divergences(
+        0, [Divergence(page_no=0, div_type="replace", a_seg="丙", b_seg="己")],
+        engine_a="PaddleOCR", engine_b="RapidOCR",
+    )
+    tmp_db.write_cross_divergences(
+        1, [Divergence(page_no=1, div_type="replace", a_seg="戊", b_seg="辛")],
+        engine_a="PaddleOCR", engine_b="RapidOCR",
+    )
+    assert len(tmp_db.get_cross_divergences()) == 2
+    n = tmp_db.clear_cross_divergences([0])
+    assert n == 1
+    rows = tmp_db.get_cross_divergences()
+    assert len(rows) == 1
+    assert rows[0]["page_no"] == 1
+    # 空列表直接返回 0，不入 SQL
+    assert tmp_db.clear_cross_divergences([]) == 0
     """get_line_char_boxes 返回解析后的逐字 bbox；无此行返回 None。"""
     tmp_db._conn.execute(
         "INSERT INTO line (page_num, para_seq, line_seq, text, char_boxes, human_final) "

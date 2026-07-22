@@ -166,3 +166,123 @@ def test_safe_book_code_alignment_with_run_py():
     assert m._safe_book_code(name) == expected
     # 同一文件名多次派生稳定且非空
     assert m._safe_book_code(name) and m._safe_book_code(name) == m._safe_book_code(name)
+
+
+def test_count_book_attaches_divergences():
+    """count_book 的 per_page 每页附带 divergences（asdict 后的分歧对象，含引擎来源）。"""
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    a = _FakeAdapter("甲乙丙丁戊")
+    b = _FakeAdapter("甲乙己庚辛")  # 与 a 不同 → 产生分歧
+    with mock.patch.object(m, "render_page", _fake_render_factory(img, True)):
+        rec = m.count_book(
+            "x.pdf", pages=3, dpi=150, paddle=a, rapid=b,
+            confusion_set={}, body_start=0,
+        )
+    for p in rec["per_page"]:
+        assert "divergences" in p
+        for d in p["divergences"]:
+            # asdict 产物为纯 dict，含 Divergence 全部字段
+            assert set(d.keys()) >= {
+                "page_no", "div_type", "a_seg", "b_seg", "a_context",
+                "boxes", "priority", "status", "engine_a", "engine_b",
+            }
+            # run_cross_align 已注明引擎来源（Module H 落库需正确 provenance）
+            assert d["engine_a"] == "PaddleOCR"
+            assert d["engine_b"] == "RapidOCR"
+
+
+def test_persist_e2e_writes_divergences(tmp_path):
+    """_persist_e2e 把每页逐条分歧明细落 cross_divergence 表，且重跑幂等不重复。"""
+    import dataclasses as _dc
+
+    from kzocr.scheduler.cross_align import Divergence
+
+    d1 = Divergence(page_no=0, div_type="replace", a_seg="丙", b_seg="己",
+                    a_context="甲乙【丙】丁", priority="P1",
+                    engine_a="PaddleOCR", engine_b="RapidOCR")
+    d2 = Divergence(page_no=1, div_type="replace", a_seg="戊", b_seg="辛",
+                    a_context="庚辛【戊】壬", priority="normal",
+                    engine_a="PaddleOCR", engine_b="RapidOCR")
+    rec = {
+        "book": "测试书.pdf",
+        "pdf": "/x/测试书.pdf",
+        "pages_processed": 2,
+        "pages_requested": 2,
+        "total_divergences": 2,
+        "high_divergences": 1,
+        "render_warnings": [],
+        "per_page": [
+            {"page": 0, "div": 1, "high": 1,
+             "divergences": [_dc.asdict(d1)]},
+            {"page": 1, "div": 1, "high": 0,
+             "divergences": [_dc.asdict(d2)]},
+        ],
+    }
+    rid = m._persist_e2e(rec, db_dir=str(tmp_path))
+    assert rid >= 1
+    bc = m._safe_book_code(rec["book"])
+    db = m.BookDB(bc, db_dir=str(tmp_path))
+    try:
+        rows = db.get_cross_divergences()
+    finally:
+        db.close()
+    assert len(rows) == 2
+    seg_pairs = {(r["a_seg"], r["b_seg"]) for r in rows}
+    assert ("丙", "己") in seg_pairs
+    assert ("戊", "辛") in seg_pairs
+
+    # 幂等：同 rec 重跑，按页号清除后重写，行数不变（不产生重复行）
+    m._persist_e2e(rec, db_dir=str(tmp_path))
+    db = m.BookDB(bc, db_dir=str(tmp_path))
+    try:
+        assert len(db.get_cross_divergences()) == 2
+    finally:
+        db.close()
+
+
+def test_persist_e2e_keeps_divergences_for_pages_without_detail(tmp_path):
+    """增量合并 rec 中：带明细的新页重写，无明细的旧页保持原表不动（不误删）。"""
+    import dataclasses as _dc
+
+    from kzocr.scheduler.cross_align import Divergence
+
+    bc = m._safe_book_code("测试书.pdf")
+    # 先用一条「全部带明细」的 rec 落库 baseline
+    base = Divergence(page_no=0, div_type="replace", a_seg="丙", b_seg="己",
+                      a_context="甲乙【丙】丁", priority="P1",
+                      engine_a="PaddleOCR", engine_b="RapidOCR")
+    rec_all = {
+        "book": "测试书.pdf", "pdf": "/x/测试书.pdf",
+        "pages_processed": 1, "pages_requested": 1,
+        "total_divergences": 1, "high_divergences": 1, "render_warnings": [],
+        "per_page": [{"page": 0, "div": 1, "high": 1,
+                      "divergences": [_dc.asdict(base)]}],
+    }
+    m._persist_e2e(rec_all, db_dir=str(tmp_path))
+
+    # 增量合并 rec：旧页 p0 无明细（来自旧 summary），新页 p1 带明细
+    new_div = Divergence(page_no=1, div_type="replace", a_seg="戊", b_seg="辛",
+                         a_context="庚辛【戊】壬", priority="normal",
+                         engine_a="PaddleOCR", engine_b="RapidOCR")
+    rec_merge = {
+        "book": "测试书.pdf", "pdf": "/x/测试书.pdf",
+        "pages_processed": 2, "pages_requested": 2,
+        "total_divergences": 2, "high_divergences": 1, "render_warnings": [],
+        "per_page": [
+            {"page": 0, "div": 1, "high": 1},  # 无 divergences
+            {"page": 1, "div": 1, "high": 0,
+             "divergences": [_dc.asdict(new_div)]},
+        ],
+    }
+    m._persist_e2e(rec_merge, db_dir=str(tmp_path))
+
+    db = m.BookDB(bc, db_dir=str(tmp_path))
+    try:
+        rows = db.get_cross_divergences()
+    finally:
+        db.close()
+    # p0 的明细未被清除（保持 baseline 落库），p1 新写入 → 共 2 行
+    assert len(rows) == 2
+    seg_pairs = {(r["a_seg"], r["b_seg"]) for r in rows}
+    assert ("丙", "己") in seg_pairs
+    assert ("戊", "辛") in seg_pairs

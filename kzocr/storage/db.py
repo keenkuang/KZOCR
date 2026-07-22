@@ -689,6 +689,23 @@ class BookDB:
         self._conn.commit()
         return rows
 
+    def clear_cross_divergences(self, page_nos: list[int]) -> int:
+        """删除指定页号的跨引擎分歧（重新落库前幂等覆盖用）。
+
+        返回删除行数。page_nos 为空时直接返回 0（不入 SQL 防注入占位符退化）。
+        e2e 扩面（scripts/e2e_expand_books.py）每次落库前按页号清旧再重写，
+        保证 cross_divergence 反映最新一次结果而不产生重复行。
+        """
+        if not page_nos:
+            return 0
+        placeholders = ",".join("?" for _ in page_nos)
+        cur = self._conn.execute(
+            f"DELETE FROM cross_divergence WHERE page_no IN ({placeholders})",
+            list(page_nos),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def get_cross_divergences(
         self,
         page_no: int | None = None,

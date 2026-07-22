@@ -14,6 +14,7 @@ _crop_to_body + 最长边≤2048 缩放），使双引擎分歧数字与 orchest
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import re
@@ -110,7 +111,10 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
             render_warnings.append(pno)
         a = paddle.run_page(PageInput(page_num=pno, img=img)).text or ""
         b = rapid.run_page(PageInput(page_num=pno, img=img)).text or ""
-        divs = run_cross_align(pno, a, b, confusion_set=confusion_set)
+        divs = run_cross_align(
+            pno, a, b, confusion_set=confusion_set,
+            engine_a="PaddleOCR", engine_b="RapidOCR",
+        )
         # 优先级语义：core 用 P0/P1/normal（见 cross_align._is_priority），
         # orchestrator 将 P0/P1/high 一并归入「高优先」分歧队列。此处与之对齐，
         # 否则 P0(剂量数字)/P1(形近字) 永不被统计，per_page[].high 恒为 0。
@@ -118,7 +122,15 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
         total += len(divs)
         high += n_high
         processed_new += 1
-        per_page.append({"page": pno, "div": len(divs), "high": n_high})
+        per_page.append({
+            "page": pno,
+            "div": len(divs),
+            "high": n_high,
+            # Module H：逐条分歧明细随 summary 落盘，供识别率提升（confusion_set/
+            # GlyphVerifier 调优 + 校对台差异高亮）使用。Divergence 全为
+            # int/str/list 字段，dataclasses.asdict 可直接 JSON 序列化。
+            "divergences": [dataclasses.asdict(d) for d in divs],
+        })
         if (pno + 1) % 5 == 0:
             print(f"  [{name}] p{pno+1}/{pages} 累计分歧={total} high={high} (本次新增 {processed_new})",
                   flush=True)
@@ -264,11 +276,15 @@ def _safe_book_code(name: str) -> str:
 
 
 def _persist_e2e(rec: dict, db_dir: str = "") -> int:
-    """把一条 e2e 扩面记录落主库 BookDB（按书分库），返回新行 id。"""
+    """把一条 e2e 扩面记录落主库 BookDB（按书分库），返回新行 id。
+
+    同时把 rec['per_page'] 中每页的逐条分歧明细落 cross_divergence 表
+    （Module H：识别率提升衔接），按页号幂等覆盖，避免重跑产生重复行。
+    """
     book_code = _safe_book_code(rec["book"])
     db = BookDB(book_code, db_dir=db_dir)
     try:
-        return db.save_e2e_expansion(
+        rid = db.save_e2e_expansion(
             book_code=book_code,
             pdf=rec["pdf"],
             book_title=rec["book"],
@@ -279,8 +295,42 @@ def _persist_e2e(rec: dict, db_dir: str = "") -> int:
             render_warnings=rec.get("render_warnings"),
             batch=os.environ.get("KZOCR_E2E_BATCH", ""),
         )
+        _persist_e2e_divergences(db, rec)
+        return rid
     finally:
         db.close()
+
+
+def _persist_e2e_divergences(db: "BookDB", rec: dict) -> int:
+    """把 rec 中每页的逐条分歧明细落 cross_divergence 表，返回写入行数。
+
+    幂等：仅对 rec 中「带 divergences 明细」的页，先按页号清掉该书 cross_divergence
+    中对应旧记录再重写，保证表内容始终反映最新一次 rec。不带明细的页（如 --merge
+    增量合并中的旧页）保持原表不动，避免误删既有明细。
+    """
+    from kzocr.scheduler.cross_align import Divergence
+
+    per_page = rec.get("per_page") or []
+    total = 0
+    cleared: set[int] = set()
+    for p in per_page:
+        raw = p.get("divergences") or []
+        if not raw:
+            continue  # 无明细的页保持原表不动（增量合并旧页不丢既有落库）
+        page_no = p["page"]
+        if page_no not in cleared:
+            db.clear_cross_divergences([page_no])
+            cleared.add(page_no)
+        try:
+            divs = [Divergence(**d) for d in raw]
+        except (TypeError, ValueError):
+            continue
+        total += db.write_cross_divergences(
+            page_no, divs, engine_a="PaddleOCR", engine_b="RapidOCR",
+        )
+    if total:
+        print(f"[persist] 已落库 {total} 条分歧明细 -> cross_divergence", flush=True)
+    return total
 
 
 if __name__ == "__main__":
