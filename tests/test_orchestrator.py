@@ -470,15 +470,15 @@ def test_arbitrate_helper_no_vision():
     assert db2.status_updates == []
 
 
-# ── 12.2 helper：VL 路由（accepted_a → resolved，manual → unresolved）──
+# ── 12.2 helper：VL 路由（accepted_a / manual 都进人工队列，resolved 恒空）──
 def test_arbitrate_helper_vision_routing():
     high = _high_divergences()
     va = StubVisionAdapter(["accepted_a", "manual"])  # 剩余分歧 stub 默认 manual
     db = StubDB()
     img = np.zeros((8, 8, 3), dtype=np.uint8)
     out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {})
-    assert len(out["resolved"]) == 1          # 第一个分歧被 VL 接受
-    assert len(out["unresolved"]) == len(high) - 1  # 其余进人工队列
+    assert out["resolved"] == []                      # 永不自动接受
+    assert len(out["unresolved"]) == len(high)        # 全部进人工队列
     assert len(db.status_updates) == len(high)       # 每处分歧都更新仲裁状态
     assert db.status_updates[0][4] == "accepted_a"
     assert all(s[4] == "manual" for s in db.status_updates[1:])
@@ -508,30 +508,19 @@ def test_arbitrate_helper_vision_exception():
     assert db.status_updates == []  # 异常分支未持久化状态
 
 
-# ── 12.5 helper：保守模式覆盖 VL 接受 → 全部进人工 ──
-def test_arbitrate_helper_conservative_overrides_accept():
-    """conservative=True 时，即便 VL 给出明确接受裁决，high 分歧也全部留人工复核，
-    不自动接受（high 占比高的书 VL unresolved 率高，自动接受不可靠，见 v4 扩面结论）。"""
+# ── helper：所有 high 分歧（含 VL 已明确裁决者）一律进人工复核队列 ──
+def test_arbitrate_all_high_enter_human_queue():
+    """目标一字不差：无论 VL 给出何种裁决（accepted_a / accepted_b / manual），
+    high 分歧都计入 unresolved（进人工队列），不再因 VL 明确裁决而「自动接受」跳过。
+    VL 仍被调用以记录裁决状态（供校对台黄/红标注依据）。"""
     high = _high_divergences()
     va = StubVisionAdapter(["accepted_a", "accepted_b"])  # VL 明确接受
     db = StubDB()
     img = np.zeros((8, 8, 3), dtype=np.uint8)
-    out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, conservative=True)
-    assert out["resolved"] == []
-    assert len(out["unresolved"]) == len(high)
-    # VL 仍被调用以记录裁决状态（供人工复核参考）
-    assert len(db.status_updates) == len(high)
-
-
-# ── 12.6 helper：默认（非保守）仍按 VL 裁决路由（回归守护）──
-def test_arbitrate_helper_non_conservative_keeps_accept():
-    high = _high_divergences()
-    va = StubVisionAdapter(["accepted_a", "manual"])
-    db = StubDB()
-    img = np.zeros((8, 8, 3), dtype=np.uint8)
     out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {})
-    assert len(out["resolved"]) == 1
-    assert len(out["unresolved"]) == len(high) - 1
+    assert out["resolved"] == []                       # 永不自动接受
+    assert len(out["unresolved"]) == len(high)         # 全部进人工队列
+    assert len(db.status_updates) == len(high)         # VL 仍记录裁决状态
 
 
 # ── 12.7 W4 VL 预算守卫：超预算停止 VL 调用、分歧留人工队列 ──
@@ -555,30 +544,31 @@ def test_arbitrate_helper_vl_budget_per_run_exhausted():
 
 
 def test_arbitrate_helper_vl_budget_partial_per_run():
-    """预算未耗尽前逐次仲裁；耗尽后剩余分歧跳过（per_run 逐次计数）。"""
+    """预算未耗尽前逐次仲裁；耗尽后剩余分歧跳过（per_run 逐次计数）。
+    无论是否送 VL，所有 high 分歧都进人工队列（resolved 恒为空）。"""
     high = _high_divergences()
     va = StubVisionAdapter(["accepted_a", "manual"])
     db = StubDB()
     img = np.zeros((8, 8, 3), dtype=np.uint8)
     budget = VLBudgetTracker(VLBudgetConfig(per_run=1))
     out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, vl_budget=budget)
-    # 首个分歧送 VL 并被接受（resolved）；第二个因预算耗尽跳过 → unresolved
+    # 首个分歧送 VL 并被接受（仍 unresolved）；第二个因预算耗尽跳过 → unresolved
     assert va.arbitrated == high[:1]
     assert budget.run_used == 1
-    assert len(out["resolved"]) == 1
-    assert len(out["unresolved"]) == len(high) - 1
+    assert len(out["resolved"]) == 0
+    assert len(out["unresolved"]) == len(high)
 
 
 def test_arbitrate_helper_vl_budget_unlimited_no_change():
-    """预算不限（默认 None / per_run=0）时行为与不传预算完全一致。"""
+    """预算不限（默认 None / per_run=0）时行为与不传预算完全一致；所有 high 进人工队列。"""
     high = _high_divergences()
     va = StubVisionAdapter(["accepted_a", "manual"])
     db = StubDB()
     img = np.zeros((8, 8, 3), dtype=np.uint8)
     budget = VLBudgetTracker(VLBudgetConfig(per_run=0))
     out = _orc._arbitrate_high_divergences(0, high, img, va, None, db, {}, vl_budget=budget)
-    assert len(out["resolved"]) == 1
-    assert len(out["unresolved"]) == len(high) - 1
+    assert len(out["resolved"]) == 0
+    assert len(out["unresolved"]) == len(high)
     assert va.arbitrated == high  # 全部送 VL
     assert db.anomalies == []  # 无 VLBudget 异常
 
@@ -605,24 +595,10 @@ def test_sample_consensus_error_vl_budget_exhausted():
     assert "vl_budget_exhausted" in vl_anoms[0][1].details
 
 
-# ── 12.9 _is_conservative 阈值与最小样本 ──
-
-def test_is_conservative_threshold_and_min():
-    # 样本不足 MIN_PAGES：不进入保守（避免早期 high 占比翻跳）
-    assert _orc._is_conservative({"div": 5, "high": 5}) is False
-    # 样本充足但占比低于阈值：非保守
-    assert _orc._is_conservative({"div": 10, "high": 2}) is False
-    # 样本充足且占比 ≥ 阈值：保守
-    assert _orc._is_conservative({"div": 10, "high": 5}) is True
-    assert _orc._is_conservative({"div": 100, "high": 40}) is True
-    # 边界恰好 0.40
-    assert _orc._is_conservative({"div": 10, "high": 4}) is True
-
-
-# ── 12.8 成功路径：tally 回写 + 保守模式经 VL 仍全部进人工 ──
+# ── 12.9 成功路径：tally 回写 + 所有 high 分歧经 VL 仍全部进人工 ──
 def test_run_success_cross_check_threads_tally(monkeypatch):
-    """_run_success_cross_check 将全书分歧累计回写 tally，并按 tally 越阈值进入
-    保守模式（VL 接受也不自动接受 high 分歧）。"""
+    """_run_success_cross_check 将全书分歧累计回写 tally；目标一字不差，
+    VL 即便明确接受 high 分歧，也仍全部进人工复核队列。"""
     fake_candidate = types.SimpleNamespace(meta=types.SimpleNamespace(name="rapid"))
     monkeypatch.setattr(_orc, "_safe_select_candidates", lambda *a, **k: [fake_candidate])
     monkeypatch.setattr(
@@ -631,7 +607,7 @@ def test_run_success_cross_check_threads_tally(monkeypatch):
     )
     db = StubDB()
     va = StubVisionAdapter(["accepted_a", "accepted_a"])  # VL 明确接受
-    tally = {"div": 100, "high": 50}  # 已越阈值 → 保守
+    tally = {"div": 100, "high": 50}
     img = np.zeros((8, 8, 3), dtype=np.uint8)
     page_input = PageInput(page_num=0, img=img)
     before_div = tally["div"]
@@ -646,7 +622,7 @@ def test_run_success_cross_check_threads_tally(monkeypatch):
     assert is_consensus is False  # 有分歧 → 非共识页
     assert tally["div"] > before_div  # tally 被回写（当前页分歧计入）
     assert db.wrote is True  # 分歧已落库
-    # 保守模式：VL 虽接受，high 分歧仍全部进人工 → 记录 anomaly
+    # 目标一字不差：VL 虽接受，high 分歧仍全部进人工 → 记录 anomaly
     assert len(db.anomalies) == 1
 
 
@@ -707,9 +683,10 @@ def test_success_cross_check_boxes_a_flows_to_db(monkeypatch, tmp_path):
     assert single, "单字分歧应携带恰好 1 个框"
 
 
-# ── 12.6 成功路径：high 分歧 + VL 全部 accepted → 不进人工队列 ──
-def test_success_cross_check_high_vl_resolved(monkeypatch, tmp_path):
-    """VL 已裁决全部 high 分歧时，成功页不再入 M4 复核队列（增强见效）。"""
+# ── 12.6 成功路径：high 分歧 + VL 全部 accepted → 仍进人工队列 ──
+def test_success_cross_check_high_vl_still_enters_human_queue(monkeypatch, tmp_path):
+    """VL 已裁决全部 high 分歧时，成功页仍须入 M4 复核队列（目标一字不差，
+    程序修正的字仍须人工核对一遍）。VL 裁决仅更新 cross_divergence 状态（黄底标注依据）。"""
     adapter = StubVisionAdapter(["accepted_a", "accepted_a"])
     _patch_glm_stub(monkeypatch, adapter)
     monkeypatch.setattr(
@@ -729,11 +706,11 @@ def test_success_cross_check_high_vl_resolved(monkeypatch, tmp_path):
     db = BookDB("bk_succ_vl", db_dir=str(tmp_path))
     divs = db.get_cross_divergences(page_no=0)
     assert any(d["priority"] in ("P0", "P1") for d in divs)
-    # 全部 high 分歧状态被 VL 更新为 accepted_a
+    # 全部 high 分歧状态被 VL 更新为 accepted_a（黄底标注依据）
     assert all(d["status"] == "accepted_a" for d in divs if d["priority"] in ("P0", "P1"))
-    # resolved 不进人工队列
+    # 即便 VL 已裁决，所有 high 分歧仍进人工队列（不再自动接受跳过）
     anomalies = db.get_unresolved_anomalies()
-    assert not any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
+    assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
 
 
 # ── 12.7 失败路径：high 分歧 + 有图 + VL → 更新状态且仍进队列 ──
@@ -762,3 +739,48 @@ def test_failure_path_high_vl_arbitrates(monkeypatch, tmp_path):
     anomalies = db.get_unresolved_anomalies()
     assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
 
+
+
+def test_apply_vl_status_sets_char_level_marks():
+    """_apply_vl_status 应把 cross_divergence.status 映射为字符级 vl_marks。"""
+    from kzocr.engine.types import LineResult, ParagraphResult
+    from kzocr.scheduler.orchestrator import _apply_vl_status
+
+    class _StubDB:
+        def __init__(self, divs):
+            self._divs = divs
+        def get_cross_divergences(self, page_no=None, priority=None):
+            return self._divs
+
+    line0 = LineResult(consensus="黄芪三钱甘草")
+    line1 = LineResult(consensus="当归五钱")
+    page = PageResult(
+        page_num=0,
+        paragraphs=[ParagraphResult(lines=[line0]), ParagraphResult(lines=[line1])],
+    )
+    book = BookResult(book_code="test", title="t", pages=[page])
+    divs = [
+        {"a_seg": "三钱", "b_seg": "二钱", "status": "arbitrated"},
+        {"a_seg": "五钱", "b_seg": "三钱", "status": "accepted_a"},
+    ]
+    _apply_vl_status(0, _StubDB(divs), book)
+    assert line0.vl_marks == [[2, 4, "vl"]]
+    assert line0.vl_status == "vl"
+    assert line1.vl_marks == [[2, 4, "vl"]]
+    assert line1.vl_status == "vl"
+
+
+def test_apply_vl_status_human_pending_maps_red():
+    from kzocr.engine.types import LineResult, ParagraphResult
+    from kzocr.scheduler.orchestrator import _apply_vl_status
+
+    class _StubDB:
+        def get_cross_divergences(self, page_no=None, priority=None):
+            return [{"a_seg": "三片", "b_seg": "二片", "status": "pending"}]
+
+    line = LineResult(consensus="生姜三片")
+    page = PageResult(page_num=0, paragraphs=[ParagraphResult(lines=[line])])
+    book = BookResult(book_code="test", title="t", pages=[page])
+    _apply_vl_status(0, _StubDB(), book)
+    assert line.vl_marks == [[2, 4, "human"]]
+    assert line.vl_status == "human"

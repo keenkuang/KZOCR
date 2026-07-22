@@ -238,9 +238,9 @@ def test_parallel_cross_check_vl_resolved(monkeypatch, tmp_path):
     divs = db.get_cross_divergences(page_no=0)
     assert any(d["priority"] in ("P0", "P1") for d in divs)
     assert all(d["status"] == "accepted_a" for d in divs if d["priority"] in ("P0", "P1"))
-    # resolved 不进人工队列
+    # 即便 VL 已裁决（accepted_a），所有 high 分歧仍进人工队列（一字不差，不再自动接受跳过）
     anomalies = db.get_unresolved_anomalies()
-    assert not any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
+    assert any(a["page_num"] == 0 and "cross_divergence" in a["details"] for a in anomalies)
 
 
 # ── 7. 渲染隔离：每 worker 独立渲染本页（调用次数 = 页数）──

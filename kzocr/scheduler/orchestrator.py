@@ -42,8 +42,8 @@ from kzocr.scheduler.scheduler import Budget, EngineOverrides, EngineScheduler, 
 from kzocr.scheduler.verifier import DetectorContext, GlyphVerifier, VisionRecheckAdapter
 from kzocr.scheduler.cross_align import (
     align_boxes_to_text,
+    compute_vl_marks,
     Divergence,
-    DivergenceArbitration,
     load_confusion_set,
     run_cross_align,
 )
@@ -283,7 +283,8 @@ def _run_success_cross_check(
 
     纯增强（try/except 不阻断主流程）；无 Tier2 候选时静默跳过（本机无 GPU/密钥时正常行为）。
     High 优先分歧经 record_anomaly 入 M4 队列；``vision_adapter`` 非空时对 high 分歧执行
-    Box-Guided VL 仲裁（``_arbitrate_high_divergences``），仅 VL 未裁决（manual）的分歧进人工队列。
+    Box-Guided VL 仲裁（``_arbitrate_high_divergences``），所有 high 分歧（含 VL 已裁决者）
+    一律进人工队列，VL 仅回填 status 供校对台黄/红标注。
 
     Args:
         defer: 页级并发模式下为 ``True``。此时本函数**不写库 / 不仲裁 / 不更新全局
@@ -342,8 +343,8 @@ def _run_success_cross_check(
                 vision_adapter, bucket, db, confusion_set,
                 conservative=conservative, vl_budget=vl_budget,
             )
-            # 仅 VL 无法裁决（manual）或视觉不可用时的 high 分歧进人工复核队列；
-            # VL 已给出明确裁决（accepted_a/b、both_wrong）的不重复进队。
+            # 所有 high 分歧（含 VL 已明确裁决者）一律进人工复核队列；
+            # VL 仅回填 cross_divergence.status 供校对台黄/红标注（一字不差）。
             unresolved = arb_result["unresolved"]
             if unresolved:
                 db.record_anomaly(
@@ -522,11 +523,13 @@ def _arbitrate_high_divergences(
     遍历 ``high`` 分歧调 ``vision_adapter.arbitrate_divergence`` +
     ``db.update_cross_divergence_status``，更新各分歧点的仲裁状态。返回
     ``{"resolved": [...], "unresolved": [...]}``：
-    - resolved：VL 给出明确裁决（accepted_a / accepted_b / both_wrong），无需再进人工队列；
-    - unresolved：VL 无法裁决（manual）或视觉不可用，需进人工复核。
+    - resolved：恒为空（已废弃自动接受）；
+    - unresolved：所有 high 分歧——无论 VL 给出何种裁决（accepted_a / accepted_b /
+      arbitrated / manual），目标一字不差，全部进人工复核队列；VL 仅回填 status
+      供校对台黄/红标注。
 
     ``vl_budget`` 非 None 且预算耗尽时，停止 VL 调用、本页 high 分歧全部以
-    unresolved 返回，并记一条 ``VLBudget`` 观测异常（与保守模式同语义降级）。
+    unresolved 返回，并记一条 ``VLBudget`` 观测异常。
 
     纯增强：视觉不可用 / 单点异常均不影响主流程，绝不阻断编排。
     """
@@ -558,79 +561,18 @@ def _arbitrate_high_divergences(
             )
             if vl_budget is not None:
                 vl_budget.spend()
+            # VL 裁决仅回填 cross_divergence.status（供校对台黄/红标注依据），
+            # 不自动接受跳过人工：目标一字不差，所有 high 分歧一律进人工复核队列。
             db.update_cross_divergence_status(
                 page_num, d.div_type, d.a_seg, d.b_seg, arb.decision,
             )
-            # VL 确认的裁决自动回填 line.human_final（纯增强，异常静默跳过）
-            try:
-                _apply_vl_fix(db, page_num, d, arb)
-            except Exception:
-                _logger.debug(
-                    "[vl_fix] page=%d skipped (non-fatal)", page_num,
-                )
-            if conservative or arb.decision == "manual":
-                # 保守模式：即便 VL 给出明确裁决，也将 high 分歧全部留人工复核，
-                # 不自动接受（high 占比高的书 VL unresolved 率高，自动接受不可靠）。
-                unresolved.append(d)
-            else:
-                resolved.append(d)
+            unresolved.append(d)
         except Exception as exc:  # 视觉仲裁属增强，绝不阻断主流程
             _logger.warning(
                 "[orchestrator] cross_arbitrate failed page=%d: %s", page_num, exc,
             )
             unresolved.append(d)
     return {"resolved": resolved, "unresolved": unresolved}
-
-
-def _apply_vl_fix(
-    db: BookDB, page_num: int, divergence: Divergence, arb: DivergenceArbitration,
-) -> None:
-    """VL 仲裁裁决 accepted_a/accepted_b → 自动回填 line.human_final。
-
-    在 ``line`` 表中搜索包含 ``a_seg`` 的行（原始引擎侧文本），
-    找到后将 VL 确认的文本写入 ``human_final``（accepted_a → a_seg,
-    accepted_b → b_seg）。不匹配/歧义/空白时静默跳过（不阻断人工复审流程）。
-
-    Args:
-        db: BookDB 实例。
-        page_num: 页码。
-        divergence: 被仲裁的 Divergence 对象（含 a_seg/b_seg）。
-        arb: VL 仲裁裁决结果。
-    """
-    if arb.decision not in ("accepted_a", "accepted_b"):
-        return
-    confirmed = divergence.a_seg if arb.decision == "accepted_a" else divergence.b_seg
-    if not confirmed:
-        return
-
-    lines = db.get_page_lines(page_num)
-    # 用 a_seg 搜索行文本（a_seg 代表原始引擎侧输出，一定在行文本中）
-    search = divergence.a_seg
-    if not search:
-        return
-    matches = [
-        (r["para_seq"], r["line_seq"])
-        for r in lines
-        if search in (r.get("text") or "")
-    ]
-    if len(matches) == 0:
-        _logger.debug(
-            "[vl_fix] page=%d no line containing %r", page_num, confirmed,
-        )
-        return
-    if len(matches) > 1:
-        _logger.debug(
-            "[vl_fix] page=%d ambiguous %r matched %d lines, skip",
-            page_num, confirmed, len(matches),
-        )
-        return
-
-    para_seq, line_seq = matches[0]
-    db.save_line_human_final(page_num, para_seq, line_seq, confirmed)
-    _logger.info(
-        "[vl_fix] page=%d line=(%d,%d) written %r (vl=%s)",
-        page_num, para_seq, line_seq, confirmed, arb.decision,
-    )
 
 
 def _sample_consensus_error(
@@ -794,8 +736,8 @@ def _finalize_divergences_success(
 ) -> None:
     """成功路径分歧最终化（合并阶段串行执行）。
 
-    镜像 ``_run_success_cross_check`` 的非延迟分支：写交叉分歧 → VL 仲裁（保守模式依赖
-    跨页累计 tally，故必须合并阶段判定）→ 未裁决（manual）分歧进人工复核队列。
+    镜像 ``_run_success_cross_check`` 的非延迟分支：写交叉分歧 → VL 仲裁（更新 status）→
+    所有 high 分歧（含 VL 已裁决者）一律进人工复核队列（一字不差）。
     """
     db.write_cross_divergences(
         page_no=page_num, divs=dcc.divs,
@@ -1751,3 +1693,32 @@ def _join_paragraphs(page: PageResult) -> str:
     for para in page.paragraphs:
         parts.append("".join(line.final or line.consensus or "" for line in para.lines))
     return "\n".join(parts)
+
+
+def _apply_vl_status(page_num: int, db: BookDB, tier1_result: Optional["BookResult"]) -> None:
+    """将本页跨引擎分歧的修订来源标记回写到 LineResult（字符级 vl_marks + 行级 vl_status）。
+
+    供校对台「黄/红底」标注使用：黄底 = 程序（VL/共识）已修正待人工核对；
+    红底 = 纯人工待校。逐行匹配分歧片段（a_seg/b_seg）落入哪一行文本，按字符区间
+    标记 ``vl`` / ``human``（见 ``compute_vl_marks``）。无分歧行不标记。
+
+    仅依赖已落库的分歧状态（cross_divergence.status），不改动主流程。
+    """
+    if tier1_result is None or page_num >= len(tier1_result.pages):
+        return
+    divs = db.get_cross_divergences(page_no=page_num)
+    if not divs:
+        return
+    page = tier1_result.pages[page_num]
+    lines = [ln for para in page.paragraphs for ln in para.lines]
+    if not lines:
+        return
+    marks = compute_vl_marks(lines, divs)
+    for idx, ranges in marks.items():
+        if idx >= len(lines):
+            continue
+        lines[idx].vl_marks = [list(r) for r in ranges]
+        if any(status == "vl" for _, _, status in ranges):
+            lines[idx].vl_status = "vl"          # 黄：程序已修正待核
+        else:
+            lines[idx].vl_status = "human"       # 红：纯人工待校
