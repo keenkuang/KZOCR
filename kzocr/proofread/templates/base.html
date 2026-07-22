@@ -4,26 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}KZOCR 校对工作台{% endblock %}</title>
-  <script src="/static/vendor/tailwind.js"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            tcm: {
-              primary: 'oklch(0.42 0.11 158)',
-              'primary-light': 'oklch(0.72 0.14 65)',
-              sidebar: 'oklch(0.2 0.02 155)',
-              'sidebar-hover': 'oklch(0.26 0.03 155)',
-              bg: 'oklch(0.985 0.008 85)',
-              card: 'oklch(0.995 0.005 85)',
-              destructive: 'oklch(0.55 0.20 28)',
-            }
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="stylesheet" href="/static/vendor/tailwind.min.css">
   <!-- lucide 原生图标库（与 zai lucide-react 同源；UMD 适配非 React 环境） -->
   <script src="/static/vendor/lucide.min.js"></script>
   <style>

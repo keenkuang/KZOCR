@@ -5,6 +5,22 @@
 
 ---
 
+## v2026-07-23 校对台 Tailwind 预编译升级（移除浏览器端 JIT 运行时）
+
+> fix：proofread 前端原用 vendored 的 Tailwind Play CDN 运行时（tailwind.js，浏览器端 JIT 编译约 4MB），大页面有 FOUC 闪烁与编译卡顿。改为构建时预编译并固化 `tailwind.min.css` 进仓库；`tailwind.config.js` 由 base.html 内联配置迁移而来，`scripts/build_tailwind.sh` 经 npx 生成。CI/桌面包无需 node 工具链，离线更稳、产物更小（约 12KB）。
+
+| 模块 | 说明 |
+|------|------|
+| kzocr/proofread/static/vendor/tailwind.min.css | 新增：预编译产物（提交进 git），替代 tailwind.js。 |
+| kzocr/proofread/static/vendor/tailwind.js | 删除：不再需要浏览器端运行时。 |
+| kzocr/proofread/templates/base.html | `<script src=tailwind.js>` + 内联 `tailwind.config` 改为 `<link rel=stylesheet href=tailwind.min.css>`。 |
+| tailwind.config.js | 新增：content 扫描 templates，tcm.* oklch 配色，safelist 保底 JS 动态类。 |
+| kzocr/proofread/static/src/input.css | 新增：`@tailwind` 三指令入口。 |
+| scripts/build_tailwind.sh | 新增：npx tailwindcss@3 生成 CSS。 |
+| tests/test_proofread.py | test_static_vendor_assets_served 改断言新文件与 safelist 类。 |
+
+---
+
 ## v2026-07-23 校对台离线打包（Tailwind/lucide 本地化，桌面分发离线可用）
 
 > fix：校对台 UI 原依赖 cdn.tailwindcss.com 与 unpkg.com/lucide 两个外部 CDN，桌面分发在离线环境缺样式/图标。改为本地 vendored 资源，由 FastAPI StaticFiles 挂载 /static 提供；不引入 node 工具链；版本锁定（Tailwind 3.4.17 / lucide 1.25.0）。

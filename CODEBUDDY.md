@@ -96,6 +96,16 @@ run_engine()
 
 > 已解决：原 `#1 ProbeResult.keys 类型`（`dict[str, str]` 含明文 `sk-xxx`）已由 PR #1（`fix: v0.7 types.py 同步`，2026-07-10）同步为 `dict[str, bool]`，与设计 §3.3 对齐，无需再特殊处理。
 
+## 交付式校对台（proofread 桌面分发）
+
+- 位置：`kzocr/proofread/`（FastAPI + Jinja2 + 本地 vendored Tailwind/lucide 的独立人工校对工作台）。
+- 入口：`kzocr proofread --db <custom.db>`；桌面分发入口 `scripts/proofread_entry.py`（uvicorn 后台线程 + 就绪轮询后开浏览器 + tkinter splash，无 GUI 降级控制台）。
+- 桌面打包：`bash scripts/build_proofread_app.sh`（PyInstaller onedir，产物 `dist/KZOCR-校对台`，约 154MB，排除 torch / paddleocr / glm / tcm_ocr 等重型依赖）。
+- ✅ 离线化已实现（2026-07-23，`8c57cd1`）：原依赖 `cdn.tailwindcss.com` 与 `unpkg.com/lucide` 两个外部 CDN，已改为本地 vendored 资源（`kzocr/proofread/static/vendor/tailwind.min.css` 预编译产物、`lucide.min.js` 锁 1.25.0），由 `app.py` 用 `StaticFiles` 挂载 `/static` 本地 serve；`scripts/build_tailwind.sh` 经 npx 生成并固化 CSS，`build_proofread_app.sh` 补 `--add-data` 打包 static。离线环境样式/图标完整，CI/桌面包不引入 node 工具链；改样式需重跑 build_tailwind.sh（产物已提交）。
+- 后续可选升级：预编译 Tailwind CSS（方案 B，需 node + tailwindcss 工具链、零运行时）目前未做。
+
+---
+
 ## 设计文档索引
 - 方案：`docs/plans/ocr-engine-unification.{v0.3-FREEZE, v0.4-AMEND, v0.5-AMEND, v0.7, v0.7-DETAILED}.md`
 - 评审报告：`docs/reviews/<日期>-round<N>-v0.7/`（多角色）。v0.7 历经多轮评审（round1→round9）后已进入编码并实现、合入 main（当前 v0.26.0）；设计稿中的「待实现」标记已过期，以 `kzocr/scheduler/` 实际代码为准。

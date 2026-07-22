@@ -410,9 +410,9 @@ async def test_static_vendor_assets_served(tmp_path):
     from kzocr.proofread.app import app_factory
     app = app_factory(pkg)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r_tw = await c.get("/static/vendor/tailwind.js")
+        r_tw = await c.get("/static/vendor/tailwind.min.css")
         assert r_tw.status_code == 200
-        assert "tailwind" in r_tw.text.lower()
+        assert "text-red-600" in r_tw.text
         r_lu = await c.get("/static/vendor/lucide.min.js")
         assert r_lu.status_code == 200
         assert "lucide" in r_lu.text.lower()
