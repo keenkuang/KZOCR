@@ -122,3 +122,47 @@ def test_parse_target_line_preserves_internal_spaces():
     assert m.parse_target_line("普通书名.pdf", 20) == ("普通书名.pdf", 20)
     # 行末非整数（文件名内部有空格，如 foo 123.pdf）→ 整体当路径，不误拆
     assert m.parse_target_line("foo 123.pdf", 20) == ("foo 123.pdf", 20)
+
+
+def test_persist_e2e_record_writes_db(tmp_path):
+    """_persist_e2e 把一条 e2e 扩面记录写入该书按书分库的 BookDB。"""
+    import json as _json
+    rec = {
+        "book": "胡天宝标本逆从法治疗Ⅱ型糖尿病  _笔记.pdf",
+        "pdf": "/x/胡天宝标本逆从法治疗Ⅱ型糖尿病  _笔记.pdf",
+        "pages_processed": 40,
+        "pages_requested": 40,
+        "total_divergences": 100,
+        "high_divergences": 20,
+        "render_warnings": [3, 7],
+    }
+    rid = m._persist_e2e(rec, db_dir=str(tmp_path))
+    assert rid >= 1
+    bc = m._safe_book_code(rec["book"])
+    db = m.BookDB(bc, db_dir=str(tmp_path))
+    try:
+        rows = db.get_e2e_expansions(bc)
+    finally:
+        db.close()
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["pdf"] == rec["pdf"]
+    assert r["book_title"] == rec["book"]
+    assert r["pages_processed"] == 40
+    assert r["total_divergences"] == 100
+    assert r["high_divergences"] == 20
+    assert _json.loads(r["render_warnings_json"]) == [3, 7]
+
+
+def test_safe_book_code_alignment_with_run_py():
+    """_safe_book_code 与 kzocr.engine.run 中 VLM 链路用的 book_code 派生规则一致。
+
+    run.py 的 _run_vlm 用 re.sub(r"[^A-Za-z0-9_\\-]", "_", os.path.splitext(title)[0])；
+    此处用同一正则独立复算 expected 做对齐校验。
+    """
+    import re as _re
+    name = "胡天宝标本逆从法治疗Ⅱ型糖尿病  _笔记.pdf"
+    expected = _re.sub(r"[^A-Za-z0-9_\-]", "_", os.path.splitext(name)[0])
+    assert m._safe_book_code(name) == expected
+    # 同一文件名多次派生稳定且非空
+    assert m._safe_book_code(name) and m._safe_book_code(name) == m._safe_book_code(name)

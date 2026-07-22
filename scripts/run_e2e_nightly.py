@@ -169,6 +169,7 @@ def run_batch(pdfs: list[str], pages: int) -> None:
         sys.executable, str(REPO / "scripts" / "e2e_expand_books.py"),
         "--list", str(list_file), "--merge",
         "--out", str(TONIGHT_JSON), "--pages", str(pages), "--dpi", "150",
+        "--persist-db",
     ]
     log(f"[run] {' '.join(cmd)}")
     subprocess.run(cmd, cwd=str(REPO), check=False)

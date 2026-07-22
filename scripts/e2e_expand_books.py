@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 
 import fitz
@@ -25,6 +26,7 @@ from kzocr.engine.adapters import PaddleOCRAdapter, RapidOCRAdapter
 from kzocr.engine.run import _crop_to_body, _pdf_page_to_numpy
 from kzocr.engine.types import PageInput
 from kzocr.scheduler.cross_align import load_confusion_set, run_cross_align
+from kzocr.storage.db import BookDB
 
 
 def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048) -> tuple[np.ndarray, bool]:
@@ -151,7 +153,11 @@ def main() -> int:
     ap.add_argument("--out", default="e2e_expand/summary.json", help="汇总输出 JSON")
     ap.add_argument("--merge", action="store_true",
                     help="增量合并：复用 --out 已有记录，仅计算未覆盖的页")
+    ap.add_argument("--persist-db", action="store_true",
+                    help="把 e2e 扩面结果落主库 BookDB（按书分库）；亦可用 "
+                         "KZOCR_E2E_PERSIST_DB=1 开启")
     args = ap.parse_args()
+    persist = args.persist_db or os.environ.get("KZOCR_E2E_PERSIST_DB") == "1"
 
     # 解析 (pdf, pages) 目标列表；--list 行内可用 `路径 页数` 覆盖默认页数
     targets: list[tuple[str, int]] = []
@@ -207,8 +213,16 @@ def main() -> int:
         # 中途退出后可用 --merge 从检查点续跑（已完成的书会被跳过）。
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(list(results_by_pdf.values()), fh, ensure_ascii=False, indent=2)
-        existing_map[pdf] = rec  # 检查点后也作为后续书的合并基线
+            existing_map[pdf] = rec  # 检查点后也作为后续书的合并基线
         print(f"[checkpoint] 已落盘 {len(results_by_pdf)} 本 -> {args.out}", flush=True)
+        # 落主库：把本次扩面记录写入该书 BookDB（系统 of record，按书分库）。
+        # 失败仅告警不阻断汇总（e2e 扩面本身是旁路实测，落库是附加元数据归宿）。
+        if persist:
+            try:
+                rid = _persist_e2e(rec, db_dir=os.environ.get("KZOCR_DB_DIR", ""))
+                print(f"[persist] 已落库 e2e 记录 id={rid} book={rec['book']}", flush=True)
+            except Exception as exc:
+                print(f"[warn] e2e 落库失败（不影响汇总）: {exc}", flush=True)
 
     results = list(results_by_pdf.values())
     with open(args.out, "w", encoding="utf-8") as fh:
@@ -236,6 +250,37 @@ def parse_target_line(line: str, default_pages: int) -> tuple[str, int]:
     if len(parts) == 2 and parts[-1].isdigit():
         return parts[0], int(parts[-1])
     return line, default_pages
+
+
+_SAFE_BOOK_CODE_RE = re.compile(r"[^A-Za-z0-9_\-]")
+
+
+def _safe_book_code(name: str) -> str:
+    """从书名/文件名(去扩展名)派生安全 book_code，与 kzocr.engine.run._run_vlm 一致。
+
+    保证同一本书落进同一个按书分库的 BookDB 文件（系统 of record）。
+    """
+    return _SAFE_BOOK_CODE_RE.sub("_", os.path.splitext(name)[0])
+
+
+def _persist_e2e(rec: dict, db_dir: str = "") -> int:
+    """把一条 e2e 扩面记录落主库 BookDB（按书分库），返回新行 id。"""
+    book_code = _safe_book_code(rec["book"])
+    db = BookDB(book_code, db_dir=db_dir)
+    try:
+        return db.save_e2e_expansion(
+            book_code=book_code,
+            pdf=rec["pdf"],
+            book_title=rec["book"],
+            pages_processed=rec["pages_processed"],
+            pages_requested=rec.get("pages_requested", 0),
+            total_divergences=rec["total_divergences"],
+            high_divergences=rec["high_divergences"],
+            render_warnings=rec.get("render_warnings"),
+            batch=os.environ.get("KZOCR_E2E_BATCH", ""),
+        )
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

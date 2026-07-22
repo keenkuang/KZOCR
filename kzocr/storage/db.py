@@ -158,6 +158,24 @@ CREATE TABLE IF NOT EXISTS proofread (
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE (line_id, corrected_text)
 );
+
+-- e2e 跨引擎扩面记录（运营主库侧的「扩面元数据」归宿；此前只存 summary JSON）。
+-- 按书分库：每书一本 e2e_expansion 历史，记录跑过的 pdf/书名/页数/分歧数/时间。
+CREATE TABLE IF NOT EXISTS e2e_expansion (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_code           TEXT NOT NULL,
+    pdf                 TEXT NOT NULL DEFAULT '',
+    book_title          TEXT NOT NULL DEFAULT '',
+    pages_processed     INTEGER DEFAULT 0,
+    pages_requested     INTEGER DEFAULT 0,
+    total_divergences   INTEGER DEFAULT 0,
+    high_divergences    INTEGER DEFAULT 0,
+    engine_a            TEXT DEFAULT 'PaddleOCR',
+    engine_b            TEXT DEFAULT 'RapidOCR',
+    render_warnings_json TEXT DEFAULT '[]',
+    run_at              TEXT DEFAULT (datetime('now')),
+    batch               TEXT DEFAULT ''
+);
 """
 
 
@@ -733,6 +751,52 @@ class BookDB:
             (recipe_no, status, confidence, issues_json),
         )
         self._conn.commit()
+
+    # ── e2e 跨引擎扩面记录（运营主库侧的扩面元数据归宿）──
+
+    def save_e2e_expansion(
+        self,
+        *,
+        book_code: str,
+        pdf: str,
+        book_title: str,
+        pages_processed: int,
+        pages_requested: int = 0,
+        total_divergences: int = 0,
+        high_divergences: int = 0,
+        engine_a: str = "PaddleOCR",
+        engine_b: str = "RapidOCR",
+        render_warnings: Optional[list[int]] = None,
+        batch: str = "",
+    ) -> int:
+        """写入一条 e2e 跨引擎扩面记录（保留历史，自增 id）。返回新行 id。
+
+        落库动机：e2e 扩面此前只写 summary JSON，运营主库完全不知哪些书被扩过面。
+        此处按书分库落 BookDB（系统 of record），使「跑过什么书/多少页/什么文件名/
+        何时」可经主库查询。
+        """
+        cur = self._conn.execute(
+            """INSERT INTO e2e_expansion
+               (book_code, pdf, book_title, pages_processed, pages_requested,
+                total_divergences, high_divergences, engine_a, engine_b,
+                render_warnings_json, batch)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                book_code, pdf, book_title, pages_processed, pages_requested,
+                total_divergences, high_divergences, engine_a, engine_b,
+                json.dumps(render_warnings or [], ensure_ascii=False), batch,
+            ),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def get_e2e_expansions(self, book_code: str) -> list[dict[str, Any]]:
+        """读取某书的全部 e2e 扩面记录（按 run_at 升序）。"""
+        rows = self._conn.execute(
+            "SELECT * FROM e2e_expansion WHERE book_code=? ORDER BY run_at",
+            (book_code,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def get_quality_results(
         self, *, status_filter: Optional[str] = None

@@ -273,3 +273,43 @@ def test_vacuum_completes_and_db_valid(tmp_db):
     assert row is not None
     assert row["char_count"] == 100
     assert row["ocr_status"] == "success"
+
+
+def test_e2e_expansion_table_created(tmp_db):
+    """e2e_expansion 表存在（schema 已落地）。"""
+    names = [r[0] for r in tmp_db._conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    assert "e2e_expansion" in names
+
+
+def test_save_and_get_e2e_expansion(tmp_db):
+    """save_e2e_expansion 写入后 get_e2e_expansions 按 book_code 返回该记录。"""
+    import json as _json
+    rid = tmp_db.save_e2e_expansion(
+        book_code="test_book",
+        pdf="/x/foo.pdf",
+        book_title="foo",
+        pages_processed=40,
+        pages_requested=40,
+        total_divergences=100,
+        high_divergences=20,
+        render_warnings=[3, 7],
+        batch="2026-07-22",
+    )
+    assert rid >= 1
+    rows = tmp_db.get_e2e_expansions("test_book")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["pdf"] == "/x/foo.pdf"
+    assert r["book_title"] == "foo"
+    assert r["pages_processed"] == 40
+    assert r["total_divergences"] == 100
+    assert r["high_divergences"] == 20
+    assert _json.loads(r["render_warnings_json"]) == [3, 7]
+    assert r["batch"] == "2026-07-22"
+    # 保留历史：再写一条，按 run_at 升序返回 2 条
+    tmp_db.save_e2e_expansion(
+        book_code="test_book", pdf="/x/foo.pdf", book_title="foo",
+        pages_processed=80, total_divergences=50, high_divergences=10,
+    )
+    assert len(tmp_db.get_e2e_expansions("test_book")) == 2
