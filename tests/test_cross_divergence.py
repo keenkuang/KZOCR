@@ -265,20 +265,25 @@ def test_cross_check_no_tier2(tmp_path):
     assert rows == [], "无 Tier2 时应无分歧"
 
 
-def test_cross_check_disabled_by_default(tmp_path):
-    """enable_cross_check=False（默认）→ 即使有 Tier2 可见也不触发 cross-check。"""
+def test_engine_overrides_default_cross_check_true():
+    """EngineOverrides.enable_cross_check 默认 True（与运行时 SchedulerConfig.cross_check 对齐）。"""
+    assert EngineOverrides().enable_cross_check is True
+
+
+def test_cross_check_can_be_disabled(tmp_path):
+    """enable_cross_check=False（显式关闭）→ 即使有 Tier2 可见也不触发 cross-check。"""
     reg = _reg(
         tier1_pages=_text_pages("黄芪补气"),  # PASS
     )
-    # 显式注册 requires_network=False 的 Tier2（即使 allow_cloud_vision=False 也可选）
     reg.register_adapter(
         AdapterMeta(name="t2", label="T2", tier=2, requires_network=False),
         EngineConfig(), adapter=FakePageAdapter([_page_result("黄芪补")]),
     )
     cfg = StubConfig(db_dir=str(tmp_path))
-    orchestrate_book("/fp", "bkc7", cfg, reg)  # 默认 overrides=None，enable_cross_check 为 False
+    overrides = EngineOverrides(enable_cross_check=False)
+    orchestrate_book("/fp", "bkc7", cfg, reg, overrides=overrides)
     rows = _read_db("bkc7", str(tmp_path))
-    assert rows == [], "默认不启用 cross-check，即使 Tier2 可见也应无分歧"
+    assert rows == [], "显式关闭 cross-check 时，即使 Tier2 可见也应无分歧"
 
 
 def _read_anomalies(book_code, db_dir):
