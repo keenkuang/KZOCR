@@ -1,7 +1,22 @@
 # KZOCR 变更日志
 
 > 文档版本：v2026-07-22 版本一致性
-> 最后更新：2026-07-22 CST
+> 最后更新：2026-07-23 CST
+
+---
+
+## v2026-07-23 校对台离线打包（Tailwind/lucide 本地化，桌面分发离线可用）
+
+> fix：校对台 UI 原依赖 cdn.tailwindcss.com 与 unpkg.com/lucide 两个外部 CDN，桌面分发在离线环境缺样式/图标。改为本地 vendored 资源，由 FastAPI StaticFiles 挂载 /static 提供；不引入 node 工具链；版本锁定（Tailwind 3.4.17 / lucide 1.25.0）。
+
+| 模块 | 说明 |
+|------|------|
+| kzocr/proofread/static/vendor/tailwind.js | 新增：vendored Tailwind Play CDN runtime（锁定 3.4.17），提交进 git。 |
+| kzocr/proofread/static/vendor/lucide.min.js | 新增：vendored lucide UMD（锁定 1.25.0），提交进 git。 |
+| kzocr/proofread/app.py | app_factory 用 StaticFiles 挂载 /static 指向 _PROOFREAD_DIR/static（目录存在时）。 |
+| kzocr/proofread/templates/base.html | 两处外链改为 /static/vendor/tailwind.js 与 /static/vendor/lucide.min.js；保留 tailwind.config 自定义 tcm.* 色。 |
+| scripts/build_proofread_app.sh | OPTS 新增 --add-data "kzocr/proofread/static:kzocr/proofread/static"。 |
+| tests/test_proofread.py | 新增 2 例回归：test_static_vendor_assets_served（本地 serve 两资源） + test_index_no_cdn_references（渲染 HTML 不含外链）。 |
 
 ---
 

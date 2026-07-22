@@ -35,6 +35,7 @@ OPTS=(
     --name "KZOCR-校对台"
     --add-data "kzocr/proofread/templates:kzocr/proofread/templates"
     --add-data "kzocr/proofread:templates"
+    --add-data "kzocr/proofread/static:kzocr/proofread/static"
     --hidden-import "uvicorn"
     --hidden-import "uvicorn.logging"
     --hidden-import "uvicorn.loops.auto"

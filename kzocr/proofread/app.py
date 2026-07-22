@@ -16,6 +16,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Form, Query, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -146,6 +147,11 @@ def app_factory(db_path: str | Path) -> FastAPI:
     async def import_audit(book_code: str) -> JSONResponse:
         rows = _get_db().get_import_audit(book_code)
         return JSONResponse({"ok": True, "rows": rows})
+
+    # Local static assets (offline packaging: vendored Tailwind/lucide instead of CDN)
+    _STATIC_DIR = _PROOFREAD_DIR / "static"
+    if _STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     return app
 

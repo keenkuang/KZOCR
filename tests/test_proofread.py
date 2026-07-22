@@ -400,3 +400,33 @@ def test_get_import_audit_best_effort(tmp_path):
             os.environ.pop("KZOCR_DB_DIR", None)
         else:
             os.environ["KZOCR_DB_DIR"] = old
+
+
+@pytest.mark.asyncio
+async def test_static_vendor_assets_served(tmp_path):
+    """Offline packaging: vendored Tailwind/lucide must be served locally (no CDN)."""
+    pkg = Path(tmp_path) / "web_static.db"
+    _make_custom_db(pkg)
+    from kzocr.proofread.app import app_factory
+    app = app_factory(pkg)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r_tw = await c.get("/static/vendor/tailwind.js")
+        assert r_tw.status_code == 200
+        assert "tailwind" in r_tw.text.lower()
+        r_lu = await c.get("/static/vendor/lucide.min.js")
+        assert r_lu.status_code == 200
+        assert "lucide" in r_lu.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_index_no_cdn_references(tmp_path):
+    """Regression guard: rendered pages must not reference external CDNs."""
+    pkg = Path(tmp_path) / "web_nocdn.db"
+    _make_custom_db(pkg)
+    from kzocr.proofread.app import app_factory
+    app = app_factory(pkg)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/")
+        assert resp.status_code == 200
+        assert "cdn.tailwindcss.com" not in resp.text
+        assert "unpkg.com" not in resp.text
