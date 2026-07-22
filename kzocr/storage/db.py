@@ -1060,6 +1060,35 @@ class BookDB:
             "total_errors": sum(r["errors"] for r in engine_rows),
         }
 
+    def get_confusion_candidates(
+        self,
+        min_count: int = 5,
+        single_char_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """从 ``error_record`` 抽取形近字混淆候选（stage 3 反哺闭环的数据源）。
+
+        仅取 ``error_type='replace'`` 且 ``wrong_char`` / ``correct_char`` 均非空的记录
+        （delete/insert 无混淆对，排除）。``single_char_only=True`` 时进一步限定两侧均为
+        单字符，过滤掉词级/数字串噪声。按 ``(wrong_char, correct_char)`` 聚合计数，
+        ``HAVING COUNT(*) >= min_count``，频次降序。
+
+        返回 ``[{"wrong": str, "correct": str, "count": int}, ...]``（每书库独立查询，
+        跨书聚合由驱动层完成）。
+        """
+        sql = (
+            "SELECT wrong_char, correct_char, COUNT(*) AS cnt FROM error_record "
+            "WHERE error_type='replace' AND wrong_char IS NOT NULL "
+            "AND correct_char IS NOT NULL"
+        )
+        if single_char_only:
+            sql += " AND length(wrong_char)=1 AND length(correct_char)=1"
+        sql += " GROUP BY wrong_char, correct_char HAVING COUNT(*) >= ? ORDER BY cnt DESC"
+        rows = self._conn.execute(sql, (min_count,)).fetchall()
+        return [
+            {"wrong": r["wrong_char"], "correct": r["correct_char"], "count": r["cnt"]}
+            for r in rows
+        ]
+
     def export_error_pairs(self, out_path: str) -> int:
         """导出错误识别记录为 JSONL 训练样本（stage 3 反哺接口）。
 
