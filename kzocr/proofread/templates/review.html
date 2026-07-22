@@ -38,7 +38,7 @@
   <div class="bg-white rounded-lg shadow-md p-4 mb-4">
     <div class="flex items-center justify-between mb-2">
       <div>
-        <span class="font-bold">进度</span>
+        <span class="font-bold flex items-center gap-1"><i data-lucide="list-checks" class="w-4 h-4"></i>进度</span>
         <span class="ml-2 text-sm text-gray-500">{{ proofread_lines }}/{{ total_lines }} 行</span>
       </div>
       <div class="flex gap-2">
@@ -56,11 +56,11 @@
         </a>
       </div>
       <button onclick="exportBook()"
-              class="px-4 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
-        回导 BookDB
+              class="flex items-center gap-1 px-4 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+        <i data-lucide="database" class="w-4 h-4"></i>回导 BookDB
       </button>      <button onclick="loadImportAudit()"
-              class="px-4 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700">
-        回导历史
+              class="flex items-center gap-1 px-4 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700">
+        <i data-lucide="history" class="w-4 h-4"></i>回导历史
       </button>
       <div id="import-audit-box" class="hidden mt-2 p-2 bg-gray-50 rounded text-xs"></div>
     </div>
@@ -94,8 +94,8 @@
       <div class="flex items-start justify-between">
         <div class="text-xs text-gray-400 font-mono mb-1">
           P{{ line.page_num }} · ¶{{ line.para_seq }} · L{{ line.seq_in_para }}
-          {% if line.heading_level > 0 %}<span class="ml-2 font-bold text-gray-600">标题 Lv{{ line.heading_level }}</span>{% endif %}
-          {% if line.disputed_sub %}<span class="ml-2 text-red-500">争议</span>{% endif %}
+          {% if line.heading_level > 0 %}<span class="ml-2 font-bold text-gray-600 flex items-center gap-1"><i data-lucide="heading" class="w-3 h-3"></i>标题 Lv{{ line.heading_level }}</span>{% endif %}
+          {% if line.disputed_sub %}<span class="ml-2 text-red-500 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3"></i>争议</span>{% endif %}
         </div>
         <div class="text-xs text-gray-400">
           conf: {{ "%.2f"|format(line.confidence) }}
@@ -131,8 +131,8 @@
         </div>
         <div class="mt-1 flex items-center gap-2">
           <button onclick="jumpToOrig('{{ line.id }}')"
-                  class="px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300">
-            跳转原图
+                  class="flex items-center gap-1 px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300">
+            <i data-lucide="image" class="w-3 h-3"></i>跳转原图
           </button>
           <span class="text-xs text-gray-400">点击字符框：高亮 · 复制坐标 · 插入该字</span>
         </div>
@@ -144,7 +144,7 @@
       <!-- 引擎原文（差异背景） -->
       {% if line.engine_texts %}
       <details class="mt-1">
-        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">各引擎原文</summary>
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600 flex items-center gap-1"><i data-lucide="layers" class="w-3.5 h-3.5"></i>各引擎原文</summary>
         <pre class="mt-1 p-2 bg-gray-50 rounded text-xs text-gray-500 overflow-x-auto">{{ line.engine_texts }}</pre>
       </details>
       {% endif %}
@@ -152,8 +152,8 @@
       <!-- 差异视图（字符级 diff 高亮，默认收起） -->
       {% if line.engine_texts or line.consensus %}
       <details class="mt-2 diff-panel" data-line-id="{{ line.id }}">
-        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
-          差异视图（引擎 / 共识 / 人工 字符级对比）
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600 flex items-center gap-1">
+          <i data-lucide="git-compare" class="w-3.5 h-3.5"></i>差异视图（引擎 / 共识 / 人工 字符级对比）
         </summary>
         <div class="mt-1 p-2 bg-gray-50 rounded text-xs leading-relaxed overflow-x-auto"
              id="diff-{{ line.id }}"></div>
@@ -162,7 +162,7 @@
 
       <!-- 修改审计（本包编辑轨迹，展开加载） -->
       <details class="mt-2 audit-panel" data-line-id="{{ line.id }}">
-        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">修改审计（本包编辑轨迹）</summary>
+        <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600 flex items-center gap-1"><i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i>修改审计（本包编辑轨迹）</summary>
         <div class="mt-1 p-2 bg-gray-50 rounded text-xs overflow-x-auto" id="audit-{{ line.id }}"></div>
       </details>
 
@@ -176,13 +176,13 @@
       <!-- 操作按钮 -->
       <div class="mt-2 flex gap-2 justify-end">
         <button onclick="resetLine('{{ line.id }}')"
-                class="px-3 py-1 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300">
-          重置
+                class="flex items-center gap-1 px-3 py-1 text-xs bg-gray-200 text-gray-600 rounded hover:bg-gray-300">
+          <i data-lucide="rotate-ccw" class="w-3 h-3"></i>重置
         </button>
         <button onclick="saveLine('{{ book_code }}', '{{ line.id }}')"
-                class="px-4 py-1 text-xs bg-tcm-primary text-white rounded hover:opacity-90
+                class="flex items-center gap-1 px-4 py-1 text-xs bg-tcm-primary text-white rounded hover:opacity-90
                        save-btn" id="btn-{{ line.id }}">
-          保存
+          <i data-lucide="save" class="w-3 h-3"></i>保存
         </button>
         <span id="status-{{ line.id }}" class="text-xs self-center"></span>
       </div>

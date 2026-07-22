@@ -24,6 +24,8 @@
       }
     }
   </script>
+  <!-- lucide 原生图标库（与 zai lucide-react 同源；UMD 适配非 React 环境） -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <style>
     /* 设计令牌：与 zai 君臣佐使配色体系对齐（docs 04-前端UI设计文档 §2） */
     :root {
@@ -107,11 +109,13 @@
 <body class="bg-tcm-bg text-gray-800 font-sans tcm-texture">
   <nav class="bg-tcm-sidebar text-white px-4 py-3 flex items-center justify-between">
     <div class="flex items-center gap-4">
-      <a href="/" class="text-lg font-bold hover:opacity-80">KZOCR 校对</a>
+      <a href="/" class="flex items-center gap-2 text-lg font-bold hover:opacity-80">
+        <i data-lucide="book-open" class="w-5 h-5"></i>KZOCR 校对
+      </a>
       {% block nav_extra %}{% endblock %}
       <button id="theme-toggle" onclick="window.__toggleTheme()"
-              class="ml-2 px-2 py-1 text-xs rounded bg-tcm-sidebar-hover hover:bg-tcm-primary-light text-white"
-              title="切换明暗主题">暗</button>
+              class="ml-2 flex items-center gap-1 px-2 py-1 text-xs rounded bg-tcm-sidebar-hover hover:bg-tcm-primary-light text-white"
+              title="切换明暗主题"><i data-lucide="moon" class="w-3.5 h-3.5"></i><span id="theme-label">暗</span></button>
     </div>
   </nav>
   <main class="p-4">
@@ -122,9 +126,10 @@
       var KEY = 'kzocr-proofread-theme';
       var root = document.documentElement;
       var btn = document.getElementById('theme-toggle');
+      var lbl = document.getElementById('theme-label');
       function sync() {
-        if (!btn) return;
-        btn.textContent = root.classList.contains('dark') ? '亮' : '暗';
+        if (!lbl) return;
+        lbl.textContent = root.classList.contains('dark') ? '亮' : '暗';
       }
       try { if (localStorage.getItem(KEY) === 'dark') root.classList.add('dark'); } catch (e) {}
       sync();
@@ -133,6 +138,7 @@
         try { localStorage.setItem(KEY, d ? 'dark' : 'light'); } catch (e) {}
         sync();
       };
+      if (window.lucide) lucide.createIcons();
     })();
   </script>
 </body>

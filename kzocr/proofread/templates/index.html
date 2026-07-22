@@ -3,17 +3,20 @@
 {% block content %}
 <div class="max-w-4xl mx-auto animate-fade-in-up">
   <div class="bg-white rounded-lg shadow-md p-4 mb-4">
-    <h2 class="section-title-deco text-lg font-bold">概览</h2>
+    <h2 class="section-title-deco text-lg font-bold flex items-center gap-1"><i data-lucide="layout-dashboard" class="w-4 h-4"></i>概览</h2>
     <div class="grid grid-cols-3 gap-4 mt-2 text-center">
       <div class="bg-tcm-bg rounded p-2">
+        <i data-lucide="library" class="w-5 h-5 text-tcm-primary mb-1"></i>
         <div class="text-2xl font-bold text-tcm-primary">{{ total_books }}</div>
         <div class="text-xs text-gray-500">书籍</div>
       </div>
       <div class="bg-tcm-bg rounded p-2">
+        <i data-lucide="align-left" class="w-5 h-5 text-tcm-primary-light mb-1"></i>
         <div class="text-2xl font-bold text-gray-700">{{ total_lines }}</div>
         <div class="text-xs text-gray-500">总行数</div>
       </div>
       <div class="bg-tcm-bg rounded p-2">
+        <i data-lucide="pen-line" class="w-5 h-5 text-tcm-primary mb-1"></i>
         <div class="text-2xl font-bold text-green-600">{{ proofread_lines }}</div>
         <div class="text-xs text-gray-500">已校对</div>
       </div>
@@ -22,14 +25,15 @@
 
   <div class="bg-white rounded-lg shadow-md">
     <div class="p-4 border-b">
-      <h2 class="section-title-deco text-lg font-bold">书籍列表</h2>
+      <h2 class="section-title-deco text-lg font-bold flex items-center gap-1"><i data-lucide="books" class="w-4 h-4"></i>书籍列表</h2>
     </div>
     {% if books %}
     <div class="divide-y">
       {% for b in books %}
       <a href="/book/{{ b.book_code }}" class="block px-4 py-3 hover:bg-gray-50 transition">
         <div class="flex items-center justify-between">
-          <div>
+          <div class="flex items-center gap-2">
+            <i data-lucide="file-text" class="w-4 h-4 text-tcm-primary-light shrink-0"></i>
             <div class="font-medium text-tcm-primary">{{ b.title }}</div>
             <div class="text-xs text-gray-500 mt-1">{{ b.book_code }}</div>
           </div>
