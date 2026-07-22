@@ -163,15 +163,12 @@ def main() -> int:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # 路径可能含空格（如「名老中医之路 (全三册).pdf 20」），
-        # 约定：行末若为整数则视为页数，其前的全部内容视为路径。
-        parts = line.split()
-        if len(parts) >= 2 and parts[-1].isdigit():
-            pgs = int(parts[-1])
-            path = " ".join(parts[:-1])
-        else:
-            pgs = args.pages
-            path = line
+        # 路径可能含任意数量连续空格（如「名老中医之路 (全三册).pdf 20」、
+        # 胡天宝标本逆从法治疗Ⅱ型糖尿病  _笔记.pdf）。parse_target_line 用
+        # rsplit(None, 1) 只在「路径与页数之间」那一个分隔处切一刀，保留
+        # 路径内部任意连续空格/tab，避免此前 split()+join() 将多空格吞并为
+        # 单空格导致 os.path.isfile 误判「文件不存在」。
+        path, pgs = parse_target_line(line, args.pages)
         targets.append((path, pgs))
     if not targets:
         print("[ERR] 未提供任何 PDF（用 --pdf 或 --list）", flush=True)
@@ -225,6 +222,20 @@ def main() -> int:
               f"{r['high_divergences']:>6} {rpp:>8.1f}", flush=True)
     print(f"\n汇总已写入 {args.out}", flush=True)
     return 0
+
+
+def parse_target_line(line: str, default_pages: int) -> tuple[str, int]:
+    """解析 list 中的单行：约定行末若为整数则视为页数，其前全部内容视为路径。
+
+    关键：用 rsplit(None, 1) 只在「路径与页数之间」那一个分隔处切一刀，
+    保留路径内部的任意连续空格/tab，不吞并。文件名含 2/3/4/5… 个连续空格
+    时也能完整还原，避免此前 split()+join() 把多空格压缩成单空格导致
+    os.path.isfile 误判「文件不存在」（见 e2e nightly 胡天宝书事件）。
+    """
+    parts = line.rsplit(None, 1)
+    if len(parts) == 2 and parts[-1].isdigit():
+        return parts[0], int(parts[-1])
+    return line, default_pages
 
 
 if __name__ == "__main__":

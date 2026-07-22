@@ -104,3 +104,21 @@ def test_render_page_real_pdf_healthy():
         assert healthy is True
     finally:
         os.unlink(path)
+
+
+def test_parse_target_line_preserves_internal_spaces():
+    """文件名含 2/3/4/5… 个连续空格时，路径必须完整保留，不吞并为单空格。
+
+    回归：e2e nightly 中「胡天宝标本逆从法治疗Ⅱ型糖尿病  _笔记.pdf」因文件名
+    含 2 个连续空格，被 split()+join() 吞成 1 个，导致 os.path.isfile 误判
+    「文件不存在」并引发失败书无限重试。
+    """
+    for n in (2, 3, 4, 5, 10):
+        name = "胡天宝标本逆从法治疗Ⅱ型糖尿病" + " " * n + "_笔记.pdf"
+        path, pgs = m.parse_target_line(f"{name} 40", 20)
+        assert pgs == 40
+        assert path == name, f"含 {n} 个连续空格时应完整保留，实际={path!r}"
+    # 单文件模式（无页码）→ 整行作为路径，用默认页数
+    assert m.parse_target_line("普通书名.pdf", 20) == ("普通书名.pdf", 20)
+    # 行末非整数（文件名内部有空格，如 foo 123.pdf）→ 整体当路径，不误拆
+    assert m.parse_target_line("foo 123.pdf", 20) == ("foo 123.pdf", 20)
