@@ -24,7 +24,7 @@ from kzocr.scheduler.scheduler import EngineOverrides
 # OvisOCR2 Q4_KM GGUF (replaces RapidOCR as the Tier-2 cross engine)
 _OVIS_ZFS400 = os.environ.get("KZOCR_ZFS400", "/media/keen/ZFS400")
 OVIS_Q4KM_MODEL = os.environ.get(
-    "KZOCR_OVIS_Q4KM_MODEL", os.path.join(_OVIS_ZFS400, "OvisOCR2-Q4_KM.gguf"))
+    "KZOCR_OVIS_Q4KM_MODEL", os.path.join(_OVIS_ZFS400, "OvisOCR2-Q4_K_M.gguf"))
 OVIS_MMPROJ = os.environ.get(
     "KZOCR_OVISOCR2_MMPROJ", os.path.join(_OVIS_ZFS400, "mmproj-F16.gguf"))
 
