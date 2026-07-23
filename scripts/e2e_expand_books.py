@@ -116,8 +116,26 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, ovis, confusion_set,
             continue
         if not healthy:
             render_warnings.append(pno)
-        a = paddle.run_page(PageInput(page_num=pno, img=img)).text or ""
-        b = ovis.run_page(PageInput(page_num=pno, img=img)).text or ""
+        # Per-page fault isolation: a single page whose engine request times
+        # out (OvisOCR2 on CPU can exceed the adapter timeout) must NOT crash
+        # the whole child process and abort the entire batch. Catch the failure
+        # per page so the nightly driver can continue and checkpoint progress.
+        try:
+            a = paddle.run_page(PageInput(page_num=pno, img=img)).text or ""
+        except Exception as exc:
+            print(f"  [{name}] p{pno} PaddleOCR failed: {exc}", flush=True)
+            a = ""
+        try:
+            b = ovis.run_page(PageInput(page_num=pno, img=img)).text or ""
+        except Exception as exc:
+            print(f"  [{name}] p{pno} OvisOCR2 failed: {exc}", flush=True)
+            b = ""
+        # Cross-engine divergence needs both engines; a single-page timeout
+        # (OvisOCR2 on CPU) yields no usable comparison, so skip the page
+        # rather than emit spurious divergences from an empty engine output.
+        if not a or not b:
+            print(f"  [{name}] p{pno} engine output missing, skip", flush=True)
+            continue
         divs = run_cross_align(
             pno, a, b, confusion_set=confusion_set,
             engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM",

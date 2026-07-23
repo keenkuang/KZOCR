@@ -286,3 +286,49 @@ def test_persist_e2e_keeps_divergences_for_pages_without_detail(tmp_path):
     seg_pairs = {(r["a_seg"], r["b_seg"]) for r in rows}
     assert ("丙", "己") in seg_pairs
     assert ("戊", "辛") in seg_pairs
+
+
+class _FlakyAdapter:
+    """Adapter whose run_page raises on demand (simulates OvisOCR2 timeout)."""
+
+    def __init__(self, text: str = "", fail_pages: set[int] | None = None) -> None:
+        self._text = text
+        self._fail_pages = fail_pages or set()
+
+    def run_page(self, page_input):  # noqa: ANN001
+        if page_input.page_num in self._fail_pages:
+            raise RuntimeError("OvisOCR2 request failed: timed out")
+        return types.SimpleNamespace(text=self._text)
+
+
+def test_count_book_isolates_single_page_timeout():
+    """A single-page engine timeout must skip that page, not crash the batch.
+
+    Regression: OvisOCR2 on CPU can exceed the adapter timeout; an unhandled
+    TimeoutError previously aborted e2e_expand_books.py and caused the nightly
+    driver to mark the entire 2876-book batch as permanently failed.
+    """
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    paddle = _FakeAdapter("aaaaa")
+    ovis = _FlakyAdapter(text="aaaaa", fail_pages={2})
+    with mock.patch.object(m, "render_page", _fake_render_factory(img, True)):
+        rec = m.count_book(
+            "x.pdf", pages=5, dpi=150, paddle=paddle, ovis=ovis,
+            confusion_set={}, body_start=0,
+        )
+    assert rec["pages_processed"] == 4
+    assert [d["page"] for d in rec["per_page"]] == [0, 1, 3, 4]
+
+
+def test_count_book_skips_all_pages_when_engine_always_fails():
+    """If one engine never responds, every page is skipped but no exception escapes."""
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    paddle = _FakeAdapter("aaaaa")
+    ovis = _FlakyAdapter(fail_pages=set(range(10)))
+    with mock.patch.object(m, "render_page", _fake_render_factory(img, True)):
+        rec = m.count_book(
+            "x.pdf", pages=6, dpi=150, paddle=paddle, ovis=ovis,
+            confusion_set={}, body_start=0,
+        )
+    assert rec["pages_processed"] == 0
+    assert rec["per_page"] == []
