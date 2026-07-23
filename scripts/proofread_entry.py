@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""KZOCR 交付式校对台 · 桌面应用入口。
+"""KZOCR delivered proofread station - desktop entry point.
 
-PyInstaller 打包入口：启动 FastAPI 校对工作台，默认打开浏览器。
+PyInstaller packaging entry: starts the FastAPI proofread station, opens browser.
 
-用法：
-    ./proofread_app                  # 默认在当前目录查找 custom.db
-    ./proofread_app --db path/to/custom.db
+Usage:
+    ./proofread_app                  # scan current dir for *.db packages
+    ./proofread_app --db a.db b.db
+    ./proofread_app --books-dir /path/to/packages
 """
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import threading
 import time
@@ -18,11 +18,11 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-APP_TITLE = "KZOCR 校对台"
+APP_TITLE = "KZOCR proofread station"
 
 
 def _wait_for_server(url: str, timeout: float = 20.0) -> bool:
-    """轮询端口直到服务就绪，返回是否成功。"""
+    """Poll the port until the server is ready; return whether it succeeded."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -34,7 +34,7 @@ def _wait_for_server(url: str, timeout: float = 20.0) -> bool:
 
 
 def _show_splash(message: str):
-    """极简启动提示窗口（tkinter，标准库）。无显示环境时返回 None。"""
+    """Minimal startup splash window (tkinter, stdlib). None if no display."""
     try:
         import tkinter as tk
     except Exception:
@@ -52,47 +52,67 @@ def _show_splash(message: str):
     return root
 
 
+def _scan_dir(db_dir: Path) -> list[str]:
+    """Scan a directory for *.db packages; validate each, skip invalid ones."""
+    found = []
+    for f in sorted(db_dir.glob("*.db")):
+        if not f.is_file():
+            continue
+        try:
+            from kzocr.doc import validate_proofread_package
+            validate_proofread_package(f.resolve())
+            found.append(str(f.resolve()))
+        except Exception as exc:
+            print(f"Warning: skip invalid package {f}: {exc}", file=sys.stderr)
+    return found
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="KZOCR 校对台")
-    ap.add_argument("--db", default="",
-                    help="校对包路径（custom.db）。缺省时在当前目录查找 custom.db")
+    ap = argparse.ArgumentParser(prog="KZOCR proofread station")
+    ap.add_argument("--db", nargs="*", default=[],
+                    help="One or more proofread packages (custom.db)")
+    ap.add_argument("--books-dir", default="",
+                    help="Directory to scan for *.db packages")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=9090)
     args = ap.parse_args()
 
-    # 定位 custom.db
-    db_path = args.db or _find_custom_db()
-    if not db_path:
-        print("错误：未找到 custom.db。请指定 --db <路径>", file=sys.stderr)
+    db_list = [str(Path(d).resolve()) for d in args.db]
+    if args.books_dir:
+        db_list += _scan_dir(Path(args.books_dir))
+    # Fallback: scan the current working directory for *.db packages.
+    if not db_list:
+        db_list = _scan_dir(Path.cwd())
+
+    if not db_list:
+        print("Error: no valid proofread package found. Use --db or --books-dir.",
+              file=sys.stderr)
         return 1
-    db_arg = os.path.abspath(db_path)
 
     url = f"http://{args.host}:{args.port}"
-    print(f"数据源：{db_arg}")
-    print(f"启动中... {url}")
+    print(f"Data sources ({len(db_list)}):")
+    for d in db_list:
+        print(f"  - {d}")
+    print(f"Starting... {url}")
 
-    # 启动提示（降级：无 GUI 时仅控制台提示）
-    splash = _show_splash(f"正在启动校对台…\n{url}")
+    splash = _show_splash(f"Starting proofread station...\n{url}")
     if splash is None:
-        print("正在启动校对台，请稍候…")
+        print("Starting proofread station, please wait...")
 
     def run_server() -> None:
         import uvicorn
         from kzocr.proofread.app import app_factory
-        from kzocr.doc import validate_proofread_package
 
         try:
-            validate_proofread_package(Path(db_arg))
+            app = app_factory(*db_list)
         except Exception as exc:
-            print(f"校对包校验失败：{exc}", file=sys.stderr)
+            print(f"Failed to build app: {exc}", file=sys.stderr)
             return
-        app = app_factory(db_arg)
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    # 等服务就绪后再开浏览器并销毁启动窗口，避免「点了没反应」
     if _wait_for_server(url):
         if splash is not None:
             splash.destroy()
@@ -100,18 +120,11 @@ def main() -> int:
     else:
         if splash is not None:
             splash.destroy()
-        print(f"警告：服务未及时就绪，请手动访问 {url}", file=sys.stderr)
+        print(f"Warning: server not ready in time, open {url} manually",
+              file=sys.stderr)
 
     server_thread.join()
     return 0
-
-
-def _find_custom_db() -> str:
-    """在当前目录查找 custom.db。"""
-    for f in Path.cwd().iterdir():
-        if f.name == "custom.db" and f.is_file():
-            return str(f)
-    return ""
 
 
 if __name__ == "__main__":
