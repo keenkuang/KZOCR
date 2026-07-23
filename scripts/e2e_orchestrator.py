@@ -15,11 +15,18 @@ import os
 import sys
 from dataclasses import dataclass
 
-from kzocr.engine.adapters import PaddleOCRAdapter, RapidOCRAdapter
+from kzocr.engine.adapters import PaddleOCRAdapter, OvisOCR2Adapter
 from kzocr.engine.types import AdapterMeta, EngineConfig
 from kzocr.scheduler.orchestrator import orchestrate_book
 from kzocr.scheduler.registry import EngineRegistry
 from kzocr.scheduler.scheduler import EngineOverrides
+
+# OvisOCR2 Q4_KM GGUF (replaces RapidOCR as the Tier-2 cross engine)
+_OVIS_ZFS400 = os.environ.get("KZOCR_ZFS400", "/media/keen/ZFS400")
+OVIS_Q4KM_MODEL = os.environ.get(
+    "KZOCR_OVIS_Q4KM_MODEL", os.path.join(_OVIS_ZFS400, "OvisOCR2-Q4_KM.gguf"))
+OVIS_MMPROJ = os.environ.get(
+    "KZOCR_OVISOCR2_MMPROJ", os.path.join(_OVIS_ZFS400, "mmproj-F16.gguf"))
 
 
 @dataclass
@@ -54,8 +61,8 @@ def main() -> int:
     # ── 注册引擎 ──
     print("[info] 加载 PaddleOCRAdapter（Tier1）...")
     paddle = PaddleOCRAdapter()
-    print("[info] 加载 RapidOCRAdapter（Tier2）...")
-    rapid = RapidOCRAdapter()
+    print("[info] 加载 OvisOCR2Adapter（Tier2）...")
+    ovis = OvisOCR2Adapter(auto_spawn=True, model_path=OVIS_Q4KM_MODEL, mmproj_path=OVIS_MMPROJ)
 
     reg = EngineRegistry(benchmark_dir=os.path.join(args.db_dir, "benchmark"))
     reg.register_adapter(
@@ -63,8 +70,8 @@ def main() -> int:
         EngineConfig(), adapter=paddle,
     )
     reg.register_adapter(
-        AdapterMeta(name="rapidocr", label="RapidOCR", tier=2, requires_network=False),
-        EngineConfig(), adapter=rapid,
+        AdapterMeta(name="ovisocr2", label="OvisOCR2-Q4_KM", tier=2, requires_network=False),
+        EngineConfig(), adapter=ovis,
     )
 
     cfg = E2EConfig(

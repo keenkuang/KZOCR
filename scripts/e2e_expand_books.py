@@ -23,11 +23,18 @@ import time
 import fitz
 import numpy as np
 
-from kzocr.engine.adapters import PaddleOCRAdapter, RapidOCRAdapter
+from kzocr.engine.adapters import PaddleOCRAdapter, OvisOCR2Adapter
 from kzocr.engine.run import _crop_to_body, _pdf_page_to_numpy
 from kzocr.engine.types import PageInput
 from kzocr.scheduler.cross_align import load_confusion_set, run_cross_align
 from kzocr.storage.db import BookDB
+
+# OvisOCR2 Q4_KM GGUF (replaces RapidOCR as the Tier-2 cross engine)
+_OVIS_ZFS400 = os.environ.get("KZOCR_ZFS400", "/media/keen/ZFS400")
+OVIS_Q4KM_MODEL = os.environ.get(
+    "KZOCR_OVIS_Q4KM_MODEL", os.path.join(_OVIS_ZFS400, "OvisOCR2-Q4_KM.gguf"))
+OVIS_MMPROJ = os.environ.get(
+    "KZOCR_OVISOCR2_MMPROJ", os.path.join(_OVIS_ZFS400, "mmproj-F16.gguf"))
 
 
 def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048) -> tuple[np.ndarray, bool]:
@@ -74,7 +81,7 @@ def render_page(pdf: str, page_num: int, dpi: int = 150, max_pixels: int = 2048)
     return img, healthy
 
 
-def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
+def count_book(pdf: str, pages: int, dpi: int, paddle, ovis, confusion_set,
                existing: dict | None = None, body_start: int = 0) -> dict:
     """处理单书前 `pages` 页的跨引擎分歧。
 
@@ -110,10 +117,10 @@ def count_book(pdf: str, pages: int, dpi: int, paddle, rapid, confusion_set,
         if not healthy:
             render_warnings.append(pno)
         a = paddle.run_page(PageInput(page_num=pno, img=img)).text or ""
-        b = rapid.run_page(PageInput(page_num=pno, img=img)).text or ""
+        b = ovis.run_page(PageInput(page_num=pno, img=img)).text or ""
         divs = run_cross_align(
             pno, a, b, confusion_set=confusion_set,
-            engine_a="PaddleOCR", engine_b="RapidOCR",
+            engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM",
         )
         # 优先级语义：core 用 P0/P1/normal（见 cross_align._is_priority），
         # orchestrator 将 P0/P1/high 一并归入「高优先」分歧队列。此处与之对齐，
@@ -208,8 +215,8 @@ def main() -> int:
 
     print("[info] 加载 PaddleOCRAdapter ...", flush=True)
     paddle = PaddleOCRAdapter()
-    print("[info] 加载 RapidOCRAdapter ...", flush=True)
-    rapid = RapidOCRAdapter()
+    print("[info] 加载 OvisOCR2Adapter ...", flush=True)
+    ovis = OvisOCR2Adapter(auto_spawn=True, model_path=OVIS_Q4KM_MODEL, mmproj_path=OVIS_MMPROJ)
     confusion_set = load_confusion_set()
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
@@ -220,7 +227,7 @@ def main() -> int:
             print(f"[ERR] 跳过不存在的 PDF: {pdf}", flush=True)
             continue
         print(f"\n=== {pdf}（目标 {pages} 页，body_start={args.body_start}）===", flush=True)
-        rec = count_book(pdf, pages, args.dpi, paddle, rapid, confusion_set,
+        rec = count_book(pdf, pages, args.dpi, paddle, ovis, confusion_set,
                          existing=existing_map.get(pdf), body_start=args.body_start)
         results_by_pdf[pdf] = rec
         # 每本书结束后立即落盘作为检查点：长作业防崩溃丢进度，
@@ -330,7 +337,7 @@ def _persist_e2e_divergences(db: "BookDB", rec: dict) -> int:
         except (TypeError, ValueError):
             continue
         total += db.write_cross_divergences(
-            page_no, divs, engine_a="PaddleOCR", engine_b="RapidOCR",
+            page_no, divs, engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM",
         )
         # stage 2/3: build canonical chars + error records (best-effort)
         try:
@@ -340,7 +347,7 @@ def _persist_e2e_divergences(db: "BookDB", rec: dict) -> int:
                 (0, i + 1, ln, []) for i, ln in enumerate(a_text.split("\n"))
             ]
             canon, errs = build_page_canonical_and_errors(
-                page_lines, a_text, b_text, "PaddleOCR", "RapidOCR",
+                page_lines, a_text, b_text, "PaddleOCR", "OvisOCR2-Q4_KM",
                 page_no, divs=divs,
             )
             if canon:

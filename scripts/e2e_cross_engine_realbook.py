@@ -6,7 +6,7 @@
 Web/REST 暴露与形近字黑名单自学习。
 
   - 引擎A：PaddleOCR（PP-OCRv6，CPU，无需密钥）
-  - 引擎B：RapidOCR（onnxruntime，CPU，无需密钥）
+  - 引擎B：OvisOCR2-Q4_KM（onnxruntime，CPU，无需密钥）
 
 **全流程含版心裁切**：每页先经生产级 `_crop_to_body`（与 orchestrator.py:62 一致：
 PP-DocLayoutV3 优先 + cv2 三级降级）裁掉页眉/页脚/侧眉/页码等版心外噪声，再交给
@@ -41,10 +41,18 @@ from kzocr.scheduler.cross_align import (
     reload_confusion_set,
 )
 from kzocr.storage.db import BookDB
-from kzocr.engine.types import GlyphVerdict
+from kzocr.engine.types import GlyphVerdict, PageInput
+from kzocr.engine.adapters import OvisOCR2Adapter
 # 生产级版心裁切（与 orchestrator.py:62 一致）
 from kzocr.engine.run import _crop_to_body
 from kzocr.engine.layout_crop import reset_cv2_calib
+
+# OvisOCR2 Q4_KM GGUF (replaces RapidOCR as the Tier-2 cross engine)
+_OVIS_ZFS400 = os.environ.get("KZOCR_ZFS400", "/media/keen/ZFS400")
+OVIS_Q4KM_MODEL = os.environ.get(
+    "KZOCR_OVIS_Q4KM_MODEL", os.path.join(_OVIS_ZFS400, "OvisOCR2-Q4_KM.gguf"))
+OVIS_MMPROJ = os.environ.get(
+    "KZOCR_OVISOCR2_MMPROJ", os.path.join(_OVIS_ZFS400, "mmproj-F16.gguf"))
 
 
 def render_page(pdf_path: str, i: int, dpi: int = 150) -> np.ndarray:
@@ -73,12 +81,9 @@ def po_text(oc, img: np.ndarray) -> str:
     return "".join(txts)
 
 
-def ro_text(ro, img: np.ndarray) -> str:
-    """RapidOCR 全页识别 → 拼接文本。"""
-    out, _ = ro(img)
-    if out is None:
-        return ""
-    return "".join(b[1] for b in out)
+def ovis_text(ovis, img: np.ndarray, page_num: int = 0) -> str:
+    """OvisOCR2-Q4_KM 全页识别 → 拼接文本。"""
+    return ovis.run_page(PageInput(page_num=page_num, img=img)).text or ""
 
 
 def main() -> int:
@@ -109,13 +114,11 @@ def main() -> int:
 
     oc = PaddleOCR()
     try:
-        from rapidocr_onnxruntime import RapidOCR
-
-        ro = RapidOCR()
-        print("[info] 加载 RapidOCR 成功（引擎B 可用）")
+        ovis = OvisOCR2Adapter(auto_spawn=True, model_path=OVIS_Q4KM_MODEL, mmproj_path=OVIS_MMPROJ)
+        print("[info] 加载 OvisOCR2-Q4_KM 成功（引擎B 可用）")
     except Exception as e:  # pragma: no cover
-        ro = None
-        print(f"[warn] RapidOCR 不可用，跳过双引擎比对: {e}", file=sys.stderr)
+        ovis = None
+        print(f"[warn] OvisOCR2-Q4_KM 不可用，跳过双引擎比对: {e}", file=sys.stderr)
         return 3
 
     doc = fitz.open(args.pdf)
@@ -150,17 +153,17 @@ def main() -> int:
             img = _crop_to_body(img, page_num=i)  # 生产级版心裁切
         h1, w1 = img.shape[:2]
         txt_a = po_text(oc, img)
-        txt_b = ro_text(ro, img)
+        txt_b = ovis_text(ovis, img, i)
         dt = time.time() - t0
 
         divs = run_cross_align(
             i, txt_a, txt_b,
             confusion_set=confusion_set,
-            engine_a="PaddleOCR", engine_b="RapidOCR",
+            engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM",
         )
         high = [d for d in divs if d.priority in ("P0", "P1", "high")]
         if divs:
-            db.write_cross_divergences(i, divs, engine_a="PaddleOCR", engine_b="RapidOCR")
+            db.write_cross_divergences(i, divs, engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM")
         if high:
             db.record_anomaly(
                 i,
@@ -228,7 +231,7 @@ def main() -> int:
 
     print("\n=== 端到端验证汇总 ===")
     print(f"  书籍: {args.book_code}（全书 {n_pages} 页；本次 {sel_pages} 页 书页{args.start_page}~{end_idx + 1}）")
-    print("  引擎: PaddleOCR(PP-OCRv6) vs RapidOCR — 均为真实本地 CPU 引擎")
+    print("  引擎: PaddleOCR(PP-OCRv6) vs OvisOCR2-Q4_KM — 均为真实本地 CPU 引擎")
     print(f"  版心裁切: {'开启（生产级 _crop_to_body）' if not args.no_crop else '关闭（整页对照）'}")
     print(f"  分歧总数: {total_div}  | high 优先级: {total_high}")
     print(f"  Web/REST 暴露: {'通过' if r.status_code == 200 and r2.status_code == 200 else '失败'}")
