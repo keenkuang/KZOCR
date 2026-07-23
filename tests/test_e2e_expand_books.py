@@ -52,7 +52,7 @@ def test_count_book_body_start_skips_front_matter():
         m, "render_page", _fake_render_factory(img, True)
     ):
         rec = m.count_book(
-            "x.pdf", pages=10, dpi=150, paddle=adapters[0], rapid=adapters[1],
+            "x.pdf", pages=10, dpi=150, paddle=adapters[0], ovis=adapters[1],
             confusion_set={}, body_start=3,
         )
     assert rec["pages_processed"] == 7
@@ -66,7 +66,7 @@ def test_count_book_records_render_warnings():
     fake = _fake_render_factory(img, {4: False, 7: False})
     with mock.patch.object(m, "render_page", fake):
         rec = m.count_book(
-            "x.pdf", pages=10, dpi=150, paddle=adapters[0], rapid=adapters[1],
+            "x.pdf", pages=10, dpi=150, paddle=adapters[0], ovis=adapters[1],
             confusion_set={}, body_start=0,
         )
     assert rec["render_warnings"] == [4, 7]
@@ -80,7 +80,7 @@ def test_count_book_counts_divergences():
         m, "render_page", _fake_render_factory(img, True)
     ):
         rec = m.count_book(
-            "x.pdf", pages=5, dpi=150, paddle=a, rapid=b,
+            "x.pdf", pages=5, dpi=150, paddle=a, ovis=b,
             confusion_set={}, body_start=0,
         )
     assert rec["pages_processed"] == 5
@@ -175,7 +175,7 @@ def test_count_book_attaches_divergences():
     b = _FakeAdapter("甲乙己庚辛")  # 与 a 不同 → 产生分歧
     with mock.patch.object(m, "render_page", _fake_render_factory(img, True)):
         rec = m.count_book(
-            "x.pdf", pages=3, dpi=150, paddle=a, rapid=b,
+            "x.pdf", pages=3, dpi=150, paddle=a, ovis=b,
             confusion_set={}, body_start=0,
         )
     for p in rec["per_page"]:
@@ -188,7 +188,7 @@ def test_count_book_attaches_divergences():
             }
             # run_cross_align 已注明引擎来源（Module H 落库需正确 provenance）
             assert d["engine_a"] == "PaddleOCR"
-            assert d["engine_b"] == "RapidOCR"
+            assert d["engine_b"] == "OvisOCR2-Q4_KM"
 
 
 def test_persist_e2e_writes_divergences(tmp_path):
@@ -199,10 +199,10 @@ def test_persist_e2e_writes_divergences(tmp_path):
 
     d1 = Divergence(page_no=0, div_type="replace", a_seg="丙", b_seg="己",
                     a_context="甲乙【丙】丁", priority="P1",
-                    engine_a="PaddleOCR", engine_b="RapidOCR")
+                    engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM")
     d2 = Divergence(page_no=1, div_type="replace", a_seg="戊", b_seg="辛",
                     a_context="庚辛【戊】壬", priority="normal",
-                    engine_a="PaddleOCR", engine_b="RapidOCR")
+                    engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM")
     rec = {
         "book": "测试书.pdf",
         "pdf": "/x/测试书.pdf",
@@ -250,7 +250,7 @@ def test_persist_e2e_keeps_divergences_for_pages_without_detail(tmp_path):
     # 先用一条「全部带明细」的 rec 落库 baseline
     base = Divergence(page_no=0, div_type="replace", a_seg="丙", b_seg="己",
                       a_context="甲乙【丙】丁", priority="P1",
-                      engine_a="PaddleOCR", engine_b="RapidOCR")
+                      engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM")
     rec_all = {
         "book": "测试书.pdf", "pdf": "/x/测试书.pdf",
         "pages_processed": 1, "pages_requested": 1,
@@ -263,7 +263,7 @@ def test_persist_e2e_keeps_divergences_for_pages_without_detail(tmp_path):
     # 增量合并 rec：旧页 p0 无明细（来自旧 summary），新页 p1 带明细
     new_div = Divergence(page_no=1, div_type="replace", a_seg="戊", b_seg="辛",
                          a_context="庚辛【戊】壬", priority="normal",
-                         engine_a="PaddleOCR", engine_b="RapidOCR")
+                         engine_a="PaddleOCR", engine_b="OvisOCR2-Q4_KM")
     rec_merge = {
         "book": "测试书.pdf", "pdf": "/x/测试书.pdf",
         "pages_processed": 2, "pages_requested": 2,
