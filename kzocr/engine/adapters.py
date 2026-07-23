@@ -16,6 +16,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from kzocr.engine.types import AdapterPageResult, BookResult, PageInput, PageResult
@@ -35,26 +37,33 @@ class PaddleOCRAdapter:
     - 跳过行朝向分类（use_textline_orientation=False，古籍扫描页无旋转）
     """
 
-    _engine_global = None  # 进程级单例
+    # 进程级引擎缓存：按 (rec_model_dir, det_model_dir) 配置键复用，避免重复加载（~4min/次）
+    _ENGINE_CACHE: dict = {}
 
     @classmethod
-    def _get_engine(cls) -> object | None:
-        """获取进程级单例 PaddleOCR 引擎。"""
-        if cls._engine_global is None:
+    def _get_engine(cls, rec_model_dir: str | None = None,
+                    det_model_dir: str | None = None) -> object | None:
+        """获取（按配置缓存的）PaddleOCR 引擎；rec/det 模型目录可指定本地推理模型。"""
+        key = (rec_model_dir, det_model_dir)
+        if key not in cls._ENGINE_CACHE:
             from paddleocr import PaddleOCR
             import logging as _log
             _log.getLogger("ppocr").setLevel(_log.WARNING)
-            cls._engine_global = PaddleOCR(
-                use_textline_orientation=False,
-                text_recognition_batch_size=6,
-            )
-        return cls._engine_global
+            kwargs = dict(use_textline_orientation=False, text_recognition_batch_size=6)
+            if rec_model_dir:
+                kwargs["text_recognition_model_dir"] = rec_model_dir
+            if det_model_dir:
+                kwargs["text_detection_model_dir"] = det_model_dir
+            cls._ENGINE_CACHE[key] = PaddleOCR(**kwargs)
+        return cls._ENGINE_CACHE[key]
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, rec_model_dir: str | None = None,
+                 det_model_dir: str | None = None) -> None:
+        self.rec_model_dir = rec_model_dir
+        self.det_model_dir = det_model_dir
 
     def run_page(self, page: PageInput) -> AdapterPageResult:
-        engine = self._get_engine()
+        engine = self._get_engine(self.rec_model_dir, self.det_model_dir)
         img = page.img
         # return_word_box=True → 额外返回逐字 text_word / text_word_boxes（字符级 bbox）
         # 注：PaddleOCR ≥3.7 弃用 .ocr()，改用 .predict()（输出格式一致）
@@ -256,3 +265,130 @@ def _parse_rapidocr_result(out: object) -> AdapterPageResult:
         boxes=boxes if boxes else None,
         char_confidences=confs if confs else None,
     )
+
+
+# Default OCR prompt: faithful line-by-line transcription, no rewriting.
+_DEFAULT_OVIS_PROMPT = (
+    "Transcribe all text in this image exactly as printed, line by line, "
+    "preserving the original line breaks and physical layout. "
+    "Output only the transcribed text; do not add commentary, summaries, "
+    "or reformatting."
+)
+
+
+class OvisOCR2Adapter:
+    """Wrap a locally served OvisOCR2 (multimodal GGUF) as an EngineRunner.
+
+    OvisOCR2 runs behind a llama.cpp ``llama-server`` exposing an
+    OpenAI-compatible ``/v1/chat/completions`` API. This adapter posts the
+    page image (base64 PNG) together with a transcription prompt and returns
+    the model text as an ``AdapterPageResult``.
+
+    The server is identified by ``base_url`` (env ``KZOCR_OVISOCR2_URL``,
+    default ``http://127.0.0.1:18088/v1``). If ``auto_spawn`` is set, the
+    adapter launches its own ``OvisServer`` subprocess (model/mmproj from
+    ``KZOCR_OVISOCR2_MODEL`` / ``KZOCR_OVISOCR2_MMPROJ``) and stops it on
+    ``close()``.
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str = "default",
+        prompt: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        timeout: int = 900,
+        auto_spawn: bool = False,
+        model_path: str | None = None,
+        mmproj_path: str | None = None,
+        server_port: int | None = None,
+        llama_server_bin: str | None = None,
+        n_threads: int = 12,
+        n_ctx: int = 8192,
+    ) -> None:
+        self.base_url = (
+            base_url or os.environ.get("KZOCR_OVISOCR2_URL", "http://127.0.0.1:18088/v1")
+        ).rstrip("/")
+        self.model = model
+        self.prompt = prompt or os.environ.get("KZOCR_OVISOCR2_PROMPT") or _DEFAULT_OVIS_PROMPT
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.timeout = timeout
+        self._server = None
+        if auto_spawn:
+            from kzocr.engine.ovis_server import OvisServer
+
+            self._server = OvisServer(
+                model_path=model_path or os.environ["KZOCR_OVISOCR2_MODEL"],
+                mmproj_path=mmproj_path or os.environ["KZOCR_OVISOCR2_MMPROJ"],
+                port=server_port or int(os.environ.get("KZOCR_OVISOCR2_PORT", "18088")),
+                llama_server_bin=llama_server_bin,
+                n_threads=n_threads,
+                n_ctx=n_ctx,
+            )
+            self._server.start()
+            self.base_url = self._server.base_url
+
+    def run_page(self, page: PageInput) -> AdapterPageResult:
+        import base64
+        import json
+        import urllib.error
+        import urllib.request
+        from io import BytesIO
+
+        from PIL import Image
+
+        img = page.img
+        if img.ndim == 2:
+            img = img[..., None].repeat(3, axis=2)
+        elif img.shape[2] == 4:
+            img = img[..., :3]
+        buf = BytesIO()
+        Image.fromarray(img).save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                        {"type": "text", "text": self.prompt},
+                    ],
+                }
+            ],
+            "temperature": self.temperature,
+            "top_p": 1.0,
+            "max_tokens": self.max_tokens,
+            "stream": False,
+        }
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            resp = urllib.request.urlopen(req, timeout=self.timeout)
+            raw = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")[:500]
+            raise RuntimeError(f"OvisOCR2 HTTP {exc.code}: {body}") from exc
+        except Exception as exc:  # network / timeout
+            raise RuntimeError(f"OvisOCR2 request failed: {exc}") from exc
+
+        text = raw["choices"][0]["message"]["content"]
+        return AdapterPageResult(
+            text=text or "",
+            confidence=0.0,
+            boxes=None,
+            char_boxes=None,
+            char_confidences=None,
+        )
+
+    def close(self) -> None:
+        if self._server is not None:
+            self._server.stop()
+            self._server = None
