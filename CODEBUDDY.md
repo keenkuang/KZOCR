@@ -61,7 +61,7 @@ CLI(kzocr/cli.py: main)
 ```
 run_engine()
   → kzocr/scheduler/orchestrator.py: orchestrate_book()
-      ├─ EngineRegistry   注册可用引擎（PaddleOCR/RapidOCR/BookPipeline，try/import 静默跳过）
+      ├─ EngineRegistry   注册可用引擎（PaddleOCR/OvisOCR2/BookPipeline，try/import 静默跳过（RapidOCR 适配保留））
       ├─ EngineScheduler  选引擎 + 限流（engines/ratelimit 自适应）
       ├─ GlyphVerifier    跨引擎分歧检测（cross_align）+ 共识错误分流
       ├─ Orchestrator     合并 Tier1 字符框 + conf≤0.90 门控 + 高分歧页送 §5.5 Box-Guided VL 仲裁

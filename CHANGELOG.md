@@ -4,6 +4,121 @@
 > 最后更新：2026-07-23 CST
 
 ---
+## v2026-07-23 OvisOCR2 引擎接入与 e2e 跨引擎扩面（取代 RapidOCR）+ 单页容错
+
+> 提交：`9d460a6`/`49dbe4b`/`995c35f`/`4a70c96`/`313a0ac`。
+> OvisOCR2（GGUF 经 llama-server 作 e2e 跨引擎对照）取代 RapidOCR；修模型默认路径与扫描根；单页引擎超时容错，避免整批永久跳过。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/engine/adapters.py` | 新增 `OvisOCR2Adapter`（auto_spawn 拉起 llama-server + mmproj，`timeout=900`）；`EngineRegistry` 注册 `ovisocr2`。 |
+| `scripts/bench_ovisocr2.py` | 新增量化 benchmark 脚本（结论：Q4_K_M≈Q8_0 质量、比 PaddleOCR 慢 10–15×、与 PaddleOCR 分歧 ~18%/字属架构噪声）。 |
+| `scripts/e2e_expand_books.py` 等 | 跨引擎对照引擎 `RapidOCR`→`OvisOCR2-Q4_K_M`，registry `rapidocr`→`ovisocr2`；模型默认路径 `Q4_KM`→`Q4_K_M`；扫描根加入 `/media/keen/ZFS400`。 |
+| `scripts/e2e_expand_books.py` `count_book` | 单页 `try/except` 容错（OvisOCR2 在 CPU 上偶发超 adapter timeout 不再令子进程崩溃），双引擎缺失页 `skip`；附 2 回归测试。 |
+
+---
+## v2026-07-23 校对台支持多书包切换（请求级 pkg + 目录扫描）
+
+> 提交：`02802ca`/`3d757ce`。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/proofread/app.py` | 注册表 + cookie `kzocr_pkg` 路由当前包；启动扫描 + 运行时打开多本 `custom.db`；`current_db` 对失效 cookie 回退 `_DEFAULT_PKG`，`/packages/open` 异常转 303 而非 500（请求级隔离，并发安全）。 |
+| `tests/test_proofread_multi_package.py` | 新增 11 例（列表/切换/运行时打开/失效 cookie 回退/损坏库 book_count=0/并发请求级隔离/碰撞 hash 后缀）。 |
+
+---
+## v2026-07-23 校对台前端对齐 zai 设计系统 + lucide 图标
+
+> 提交：`84ea92b`/`6ce8182`（离线打包 `8c57cd1` 已另记）。框架仍为 FastAPI+Jinja2+Tailwind，未移植 React/shadcn；交互仍为逐行编辑。
+
+| 模块 | 说明 |
+|------|------|
+| `base.html` | `:root` 设计令牌 OKLCH 与 zai `globals.css` 逐字节一致（primary/sidebar/bg/card/fg/muted/border 等）；状态色统一令牌（done=墨绿、pending=琥珀、del=朱砂、ins=墨绿、replace=琥珀）。 |
+| 装饰 | 宣纸纹理 `tcm-texture`、章节标题装饰线 `section-title-deco`、印章 `seal-stamp`、fadeInUp 渐入；可选暗色主题（`.dark` + localStorage）。 |
+| lucide | 引入 lucide UMD（`<i data-lucide>` + `lucide.createIcons()` 注入 SVG，图标色继承 `currentColor`）；CDN 离线静默降级。 |
+
+---
+## v2026-07-23 补齐校对台审计视图与保存审计行
+
+> 提交：`dbf4860`。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/proofread/api.py` | `save_human_final` 重写为先查行、原文=新值 no-op、否则 `UPDATE Line` + `INSERT Proofread(changeType="human_edit")`；新增 `get_line_proofreads` + `get_import_audit`（`isfile` 守卫，`try/except` 不建空库）。 |
+| `kzocr/proofread/app.py` | `GET /book/{code}/line/{id}/audit` + `GET /book/{code}/import-audit`。 |
+| `review.html` | 每行人工终校框前加审计面板（字符级审计：时间·changeType·原文→改后）+ 回导历史按钮；`escapeHtml` 防 XSS。 |
+
+---
+## 两点修订 stage 2/3：字级 canonical 数据模型 + 落库 + stage 3 反哺
+
+> 提交：`fec02a1`/`f2bc639`/`b6bcc75`/`688eb9e`/`455cf06`。全量 **1137 passed + 2 skipped + 2 deselected**。
+> 坐标系铁律：bbox 一律版心图（dpi=150、不缩放、原点版心图左上），与 `line.char_boxes` 一致，绝不用 VL 缩放坐标。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/canonical.py` | 字级规范实体 `CanonicalChar` / `EngineCharRecord` / `ErrorRecord` + 纯函数 `build_canonical_chars`（difflib 对齐到共识）/ `map_divergence_to_canonical` / `derive_error_records` / `build_page_canonical_and_errors`（含 `crop_char_to_png`）。 |
+| `kzocr/storage/db.py` | 新表 `canonical_char`/`engine_char_record`/`error_record`；`save_canonical_chars`(UPSERT)/`get_error_stats`(每引擎错误率+混淆 Top-N)/`export_error_pairs`(JSONL 训练样本)/`add_learned_confusion_batch`。 |
+| `kzocr/scheduler/orchestrator.py` | `_persist_canonical_and_errors` 在同步 + 延迟两条路径落库（best-effort，异常仅告警）。 |
+| `scripts/feedback_canonical_errors.py` | stage 3 反哺驱动：`error_record` → `learned_confusion`，`BookDB.get_confusion_candidates` 产出候选。 |
+
+---
+## 两点修订 stage 1：所有 high 分歧进人工队列 + 字符级黄/红标注
+
+> 提交：`a47264c`/`1190c5f`。全量 **1119 passed + 2 skipped + 2 deselected**。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/orchestrator.py` | `_arbitrate_high_divergences` 移除「VL 明确裁决即自动接受」分支，`_apply_vl_fix` 删除；所有 high 分歧一律进 unresolved（一字不差）。 |
+| `kzocr/scheduler/cross_align.py` | `compute_vl_marks(page_lines, divs)` 把 `cross_divergence.status` 映射为字符区间（accepted→vl 黄；pending/both_wrong→human 红）。 |
+| `kzocr/doc/zai.py` + `review.html` | `Line.vl_marks` 烘焙进 custom.db；`.d-vl`(黄)/`.d-human`(红) + `applyVlMarks()`。 |
+
+---
+## 跨引擎校验默认开启 + 文档/覆盖率修正
+
+> 提交：`59c5a5a`/`f6ecc0a`/`37e6728`。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/scheduler.py` | `EngineOverrides.enable_cross_check` 默认翻 `True`（与 `run.py:117` 运行时覆盖一致，消除被覆盖的死默认值）。 |
+| `docs/plans/enable_cross_check_default.md` | 修正过期描述（跨引擎校验自 v0.7 已默认开，复查易误判）。 |
+| `CODEBUDDY.md` | 修正覆盖率门禁 `fail_under=80` 与 `main` 直推描述。 |
+
+---
+## v2026-07-22 校对台桌面打包打磨
+
+> 提交：`f6a6777`。
+
+| 模块 | 说明 |
+|------|------|
+| `scripts/build_proofread_app.sh` + `proofread_entry.py` | 启动 splash + 窗口标题 + 无图占位（`review.html` 灰块虚线「无原图」）；`proofread_entry.py` 改 uvicorn 后台线程 + 轮询就绪后开浏览器并销毁 splash，无 GUI 降级控制台提示。 |
+
+---
+## v0.26.0 版本号发布
+
+> 提交：`7b97650`（与 B7 `22b5e9e` 关联，B7 已另记）。
+
+| 模块 | 说明 |
+|------|------|
+| `pyproject.toml` / `kzocr/__init__.py` / `tcm_ocr/__init__.py` / README 徽章 | 版本号 `0.25.0` → `0.26.0`。 |
+
+---
+## 方向4：版面检测串行化 + 页级并发容错
+
+> 提交：`b81db9b`/`d505a3d`。
+
+| 模块 | 说明 |
+|------|------|
+| `kzocr/scheduler/orchestrator.py` | 版面检测模型 PP-DocLayoutV3 推理加锁串行化（避免并发资源争用）；页级并发编排增加单页容错（工作流 A 前置）。 |
+
+---
+## e2e 分歧形近字候选挖掘脚本
+
+> 提交：`57d4a8c`（方向1 1-A）。
+
+| 模块 | 说明 |
+|------|------|
+| `scripts/` | 新增 e2e 分歧形近字候选挖掘脚本，从跨引擎分歧中挖掘混淆对候选，衔接 `confusion_set` 学习。 |
+---
 
 ## v2026-07-23 校对台 Tailwind 预编译升级（移除浏览器端 JIT 运行时）
 

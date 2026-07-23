@@ -7,7 +7,7 @@
 
 ## 1. 背景与目的
 
-KZOCR v0.7 的跨引擎分歧检测（`cross_align.run_cross_align`，PaddleOCR vs RapidOCR token 级对齐）产出每页的 `Divergence`，按优先级分为**高**（high，含数字 / 中文数字 / 形近字分歧）与**普通**两类。这些分歧是后续人工校对（review 队列）与「高分歧页视觉仲裁」（§5.5 Box-Guided VL）的输入。
+KZOCR v0.7 的跨引擎分歧检测（`cross_align.run_cross_align`，PaddleOCR vs OvisOCR2-Q4_K_M token 级对齐）产出每页的 `Divergence`，按优先级分为**高**（high，含数字 / 中文数字 / 形近字分歧）与**普通**两类。这些分歧是后续人工校对（review 队列）与「高分歧页视觉仲裁」（§5.5 Box-Guided VL）的输入。
 
 早前在 5 本古籍（各 20 页）上的采样曾给出一个**误导性的结论**——「分歧/页稳定在 7.8–15.6，是一个固定带」。本报告将样本扩大到 **16 本 / 840 页**，修正该结论；随后 **v4 第四轮（2026-07-20）再追加 9 本 / 337 页**，合并 **25 本 / 1177 页** 全量复盘（见 §7）。
 
