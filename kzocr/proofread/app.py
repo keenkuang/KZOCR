@@ -71,6 +71,11 @@ def current_db(request: Request) -> _Db:
     pkg_id = request.cookies.get(COOKIE_NAME) or _DEFAULT_PKG
     if pkg_id is None:
         raise RuntimeError("No package registered yet")
+    if pkg_id not in _REGISTRY:
+        # Stale cookie (e.g. server restarted) -> fall back to default pkg.
+        pkg_id = _DEFAULT_PKG
+    if pkg_id is None:
+        raise RuntimeError("No package registered yet")
     return get_pkg_db(pkg_id)
 
 
@@ -203,7 +208,11 @@ def app_factory(*db_paths: str | Path) -> FastAPI:
 
     @app.post("/packages/open")
     async def open_package(path: str = Form(...)) -> RedirectResponse:
-        pkg_id = register_package(path)
+        try:
+            pkg_id = register_package(path)
+        except Exception as exc:
+            logger.warning("Rejecting invalid package open %s: %s", path, exc)
+            return RedirectResponse("/", status_code=303)
         resp = RedirectResponse("/", status_code=303)
         resp.set_cookie(COOKIE_NAME, pkg_id)
         return resp
